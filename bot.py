@@ -238,6 +238,20 @@ async def sauvegarder(interaction: discord.Interaction):
 
 
 # ─────────────────────── GESTION XP PAR MESSAGE ─────────────
+def save_xp(data):
+    with open(XP_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+def get_level(xp: int) -> int:
+    """Calcule le niveau en fonction de l'XP"""
+    level = 0
+    while xp >= (level + 1) ** 2 * 100:
+        level += 1
+    return level
+
+def save_xp(data):
+    with open(XP_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
 @bot.event
 async def on_message(message: discord.Message):
