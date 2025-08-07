@@ -161,30 +161,40 @@ class VCButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    async def create_vc(self, interaction: discord.Interaction, profile: str):
-        guild = interaction.guild
-        category = guild.get_channel(TEMP_VC_CATEGORY)
-        if category is None:
-            await interaction.response.send_message("⚠️ Catégorie vocaux introuvable !", ephemeral=True)
-            return
+        # Ajout des boutons dynamiquement
+        for profile in VC_PROFILES.keys():
+            emoji = VC_PROFILES[profile]["emoji"]
+            self.add_item(
+                Button(
+                    label=f"{emoji} {profile}",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"create_vc_{profile.lower()}"
+                )
+            )
 
-        name = next_vc_name(guild, profile)
-        emoji = VC_PROFILES[profile]["emoji"]
-        channel = await guild.create_voice_channel(
-            name=f"{emoji} {name}",
-            category=category,
-            user_limit=5,
-            reason=f"Salon temporaire créé par {interaction.user}"
-        )
-        TEMP_VC_IDS.add(channel.id)
+    @discord.ui.button(label="placeholder", style=discord.ButtonStyle.secondary, disabled=True)
+    async def dummy(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass  # Nécessaire uniquement pour éviter un bug de vue vide dans certaines versions
 
-        if interaction.user.voice:
-            await interaction.user.move_to(channel)
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Filtrage ou vérifications supplémentaires si besoin
+        return True
 
-        await interaction.response.send_message(
-            f"✅ Salon **{name}** créé. Il disparaîtra quand il sera vide !",
-            ephemeral=True
-        )
+    async def on_timeout(self):
+        # Optionnel : actions si la vue expire (pas utilisé ici)
+        pass
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+        logging.error(f"Erreur lors d'une interaction bouton : {error}")
+        await interaction.response.send_message("❌ Une erreur est survenue.", ephemeral=True)
+
+    async def interaction_received(self, interaction: discord.Interaction):
+        # Gérer le bouton cliqué dynamiquement
+        if interaction.data and "custom_id" in interaction.data:
+            custom_id = interaction.data["custom_id"]
+            if custom_id.startswith("create_vc_"):
+                profile = custom_id.replace("create_vc_", "").capitalize()
+                await self.create_vc(interaction, profile)
 
 # ─────────────────────── COMMANDES SLASH ──────────────────
 @bot.tree.command(name="type_joueur", description="Choisir PC ou Console")
@@ -266,6 +276,11 @@ async def sauvegarder(interaction: discord.Interaction):
     except Exception as e:
         logging.error(f"❌ Erreur lors de la sauvegarde manuelle : {e}")
         await interaction.response.send_message("❌ Une erreur est survenue lors de la sauvegarde.", ephemeral=True)
+
+@bot.tree.command(name="vocaux", description="Publier les boutons pour créer des salons vocaux")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def vocaux(interaction: discord.Interaction):
+    await interaction.response.send_message("Voici les salons vocaux :", view=VCButtonView(), ephemeral=True)
 
 
 # ─────────────────────── GESTION XP PAR MESSAGE ─────────────
