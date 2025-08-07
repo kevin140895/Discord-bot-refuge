@@ -1,60 +1,94 @@
 import os
 import re
+import json
+import random
 import logging
 import asyncio
+from pathlib import Path
 
 import discord
+from discord import app_commands, Embed
 from discord.ext import commands
-from discord import app_commands, File, Embed
+from discord.ui import Button, View
+
 from dotenv import load_dotenv
+from view import PlayerTypeView
 
-from view import PlayerTypeView, ROLE_PC, ROLE_CONSOLE  # votre view.py
+from datetime import datetime
 
-# ── Chargement du token et constantes ────────────────────────────────────
+voice_times = {}  # user_id: datetime d'entrée
+
+# ─────────────────────── SAUVEGARDE AUTOMATIQUE XP ───────────
+async def auto_backup_xp(interval_seconds=3600):
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            source = Path("data/data.json")
+            backup = Path("data/backup.json")
+            if source.exists():
+                backup.write_text(source.read_text())
+                logging.info("💾 Sauvegarde automatique effectuée.")
+        except Exception as e:
+            logging.error(f"❌ Erreur lors de la sauvegarde automatique : {e}")
+        await asyncio.sleep(interval_seconds)
+
+
+# ─────────────────────── CONFIGURATION ──────────────────────────
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-CHANNEL_ROLES        = 1400560866478395512  # #choix-de-rôles
-CHANNEL_WELCOME      = 1400550333796716574  # #bienvenue
-REMINDER_INTERVAL_H  = 24                   # heures entre chaque rappel
+XP_FILE = "data/data.json"
 
-WELCOME_TEXT = (
-    "🎉 Bienvenue {member}! Tu viens d’entrer au Refuge : "
-    "prends un rô-lé 🕹️ dans #choix-de-rôles et installe-toi."
-)
-
-# ── Salons vocaux temporaires ────────────────────────────────────────────
-LOBBY_TEXT_CHANNEL = 1402258805533970472  # salon où poster les boutons VC
-TEMP_VC_CATEGORY   = 1400559884117999687  # catégorie "Salons Vocaux"
+LEVEL_UP_CHANNEL = 1402419913716531352
+CHANNEL_ROLES = 1400560866478395512
+CHANNEL_WELCOME = 1400550333796716574
+LOBBY_TEXT_CHANNEL = 1402258805533970472
+TEMP_VC_CATEGORY = 1400559884117999687
 
 VC_PROFILES = {
-    "PC":        {"emoji": "💻"},
+    "PC": {"emoji": "💻"},
     "Crossplay": {"emoji": "🔀"},
-    "Consoles":  {"emoji": "🎮"},
+    "Consoles": {"emoji": "🎮"},
 }
+
 VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles)(?: (\d+))?$", re.I)
 TEMP_VC_IDS: set[int] = set()
 
-# ── Configuration du logging ─────────────────────────────────────────────
+# ─────────────────────── LOGGER ──────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
-# ── Intents ───────────────────────────────────────────────────────────────
+# ─────────────────────── INTENTS ─────────────────────────
 intents = discord.Intents.default()
 intents.members = True
-intents.voice_states = True  # pour détecter les sorties de VC
+intents.voice_states = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ─────────────────────── XP SYSTEM ───────────────────────
+def load_xp():
+    try:
+        if not Path(XP_FILE).exists():
+            return {}
+        with open(XP_FILE, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        logging.error("Fichier XP corrompu.")
+        return {}
 
-# ── Fonctions utilitaires pour salons vocaux ─────────────────────────────
+def save_xp(data):
+    Path(XP_FILE).parent.mkdir(parents=True, exist_ok=True)
+    with open(XP_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+def get_level(xp: int) -> int:
+    return int(xp ** 0.5 // 10)
+
+# ─────────────────────── SALONS VOCAUX TEMPORAIRES ────────
 def next_vc_name(guild: discord.Guild, base: str) -> str:
-    """
-    Génère un nom unique pour un salon vocal temporaire
-    (e.g. "PC", "PC 2", "PC 3", ...).
-    """
     existing = [
         int(m.group(2))
         for ch in guild.voice_channels
@@ -63,10 +97,22 @@ def next_vc_name(guild: discord.Guild, base: str) -> str:
     n = max(existing) + 1 if existing else 1
     return base if n == 1 else f"{base} {n}"
 
+class LiveTikTokView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-class VCButtonView(discord.ui.View):
-    """Vue persistante avec 3 boutons pour créer des salons vocaux."""
+    @discord.ui.button(label="🔴 Annoncer le live TikTok", style=discord.ButtonStyle.danger, custom_id="announce_live")
+    async def announce_live(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = bot.get_channel(1400552164979507263)
+        if channel:
+            await channel.send(
+                "🚨 Kevin est en LIVE sur TikTok !\n🔴 Rejoins maintenant : https://www.tiktok.com/@kevinlerefuge"
+            )
+            await interaction.response.send_message("✅ Le live a été annoncé !", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Salon cible introuvable.", ephemeral=True)
 
+class VCButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -74,9 +120,7 @@ class VCButtonView(discord.ui.View):
         guild = interaction.guild
         category = guild.get_channel(TEMP_VC_CATEGORY)
         if category is None:
-            await interaction.response.send_message(
-                "⚠️ Catégorie vocaux introuvable !", ephemeral=True
-            )
+            await interaction.response.send_message("⚠️ Catégorie vocaux introuvable !", ephemeral=True)
             return
 
         name = next_vc_name(guild, profile)
@@ -97,20 +141,7 @@ class VCButtonView(discord.ui.View):
             ephemeral=True
         )
 
-    @discord.ui.button(label="PC",        emoji="💻", style=discord.ButtonStyle.blurple, custom_id="vc_pc")
-    async def pc(self, interaction: discord.Interaction, _):
-        await self.create_vc(interaction, "PC")
-
-    @discord.ui.button(label="Crossplay", emoji="🔀", style=discord.ButtonStyle.blurple, custom_id="vc_cross")
-    async def cross(self, interaction: discord.Interaction, _):
-        await self.create_vc(interaction, "Crossplay")
-
-    @discord.ui.button(label="Consoles",  emoji="🎮", style=discord.ButtonStyle.blurple, custom_id="vc_console")
-    async def consoles(self, interaction: discord.Interaction, _):
-        await self.create_vc(interaction, "Consoles")
-
-
-# ── Commandes slash ───────────────────────────────────────────────────────
+# ─────────────────────── COMMANDES SLASH ──────────────────
 @bot.tree.command(name="type_joueur", description="Choisir PC ou Console")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def type_joueur(interaction: discord.Interaction):
@@ -121,119 +152,241 @@ async def type_joueur(interaction: discord.Interaction):
     channel = interaction.guild.get_channel(CHANNEL_ROLES)
     if channel:
         await channel.send("Quel type de joueur es-tu ?", view=PlayerTypeView())
-    else:
-        logging.warning("CHANNEL_ROLES introuvable")
-
 
 @bot.tree.command(name="sondage", description="Créer un sondage Oui/Non")
 @app_commands.describe(question="La question à poser")
 async def sondage(interaction: discord.Interaction, question: str):
     msg = await interaction.channel.send(
-        f"📊 **{question}**\n"
-        f"> ✅ = Oui   ❌ = Non\n"
-        f"_Posé par {interaction.user.mention}_"
+        f"📊 **{question}**\n> ✅ = Oui   ❌ = Non\n_Posé par {interaction.user.mention}_"
     )
     await msg.add_reaction("✅")
     await msg.add_reaction("❌")
     await interaction.response.send_message("Sondage créé ✔️", ephemeral=True)
 
-
-# ── Accueil et rappels ────────────────────────────────────────────────────
-async def _send_welcome(member: discord.Member):
-    channel = member.guild.get_channel(CHANNEL_WELCOME)
-    if channel is None:
-        logging.warning("Salon bienvenue introuvable")
-        return
-
-    embed = Embed(
-        title="Bienvenue au Refuge !",
-        description="Installe-toi, choisis ton rôle et have fun 🎮",
-        colour=0x3498db
-    ).set_thumbnail(url="attachment://logo.png")
-    file = File("logo.png", filename="logo.png")
-
-    await channel.send(
-        content=WELCOME_TEXT.format(member=member.mention),
-        embed=embed,
-        file=file
+@bot.tree.command(name="liendiscord", description="Affiche le lien pour rejoindre le serveur Discord")
+async def liendiscord(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "🔗 Voici le lien pour rejoindre notre serveur :\nhttps://discord.gg/vaJeReXM",
+        ephemeral=False
     )
 
+@bot.tree.command(name="rang", description="Affiche ton niveau actuel")
+async def rang(interaction: discord.Interaction):
+    xp_data = load_xp()
+    user_id = str(interaction.user.id)
+    if user_id not in xp_data:
+        await interaction.response.send_message("Tu n'as pas encore de niveau... Commence à discuter !", ephemeral=True)
+        return
+
+    data = xp_data[user_id]
+    await interaction.response.send_message(
+        f"📊 {interaction.user.mention}, tu es niveau {data['level']} avec {data['xp']} XP.",
+        ephemeral=True
+    )
+
+@bot.tree.command(name="rang_visuel", description="Affiche ton niveau avec une carte graphique")
+async def rang_visuel(interaction: discord.Interaction):
+    xp_data = load_xp()
+    user_id = str(interaction.user.id)
+
+    if user_id not in xp_data:
+        await interaction.response.send_message("Tu n'as pas encore de niveau... Commence à discuter !", ephemeral=True)
+        return
+
+    data = xp_data[user_id]
+    level = data["level"]
+    xp = data["xp"]
+    xp_next = (level + 1) ** 2 * 100  # formule XP suivante (modifiable)
+
+    image = await generate_rank_card(interaction.user, level, xp, xp_next)
+    file = discord.File(fp=image, filename="rank.png")
+
+    await interaction.response.send_message(file=file)
+
+@bot.tree.command(name="sauvegarder", description="Forcer la sauvegarde manuelle des niveaux (admin uniquement)")
+async def sauvegarder(interaction: discord.Interaction):
+    if interaction.user.id != 541417878314942495:
+        await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
+        return
+
+    try:
+        source = Path("data/data.json")
+        backup = Path("data/backup.json")
+        if source.exists():
+            backup.write_text(source.read_text())
+            await interaction.response.send_message("💾 Sauvegarde XP manuelle effectuée avec succès !", ephemeral=True)
+            logging.info("💾 Sauvegarde manuelle déclenchée par le propriétaire.")
+        else:
+            await interaction.response.send_message("⚠️ Aucun fichier de données XP trouvé.", ephemeral=True)
+    except Exception as e:
+        logging.error(f"❌ Erreur lors de la sauvegarde manuelle : {e}")
+        await interaction.response.send_message("❌ Une erreur est survenue lors de la sauvegarde.", ephemeral=True)
+
+
+# ─────────────────────── GESTION XP PAR MESSAGE ─────────────
 
 @bot.event
+async def on_message(message: discord.Message):
+    # Ignorer les messages des bots
+    if message.author.bot:
+        return
+
+    # Ignorer les messages en DM
+    if not message.guild:
+        return
+
+    # Charger les données d'XP
+    xp_data = load_xp()
+    user_id = str(message.author.id)
+
+    # Initialiser l'utilisateur s'il n'existe pas encore
+    if user_id not in xp_data:
+        xp_data[user_id] = {"xp": 0, "level": 0}
+
+    # Gagner de l'XP aléatoire entre 5 et 10
+    gained_xp = random.randint(5, 10)
+    xp_data[user_id]["xp"] += gained_xp
+
+    # Calcul du nouveau niveau
+    old_level = xp_data[user_id]["level"]
+    new_level = get_level(xp_data[user_id]["xp"])
+
+    # Si l'utilisateur monte de niveau
+    if new_level > old_level:
+        xp_data[user_id]["level"] = new_level
+        try:
+            channel = message.guild.get_channel(LEVEL_UP_CHANNEL)
+            if channel:
+                xp = xp_data[user_id]["xp"]
+                xp_needed = (new_level + 1) ** 2 * 100  # Formule pour niveau suivant
+
+                # Générer la carte de niveau visuelle
+                image = await generate_rank_card(message.author, new_level, xp, xp_needed)
+                file = discord.File(fp=image, filename="level_up.png")
+
+                await channel.send(
+                    content=f"🎉 {message.author.mention} est passé **niveau {new_level}** !",
+                    file=file
+                )
+        except Exception as e:
+            logging.error(f"Erreur lors de l'envoi de la carte de niveau : {e}")
+
+    # Sauvegarder les données mises à jour
+    save_xp(xp_data)
+
+    # Nécessaire pour exécuter les commandes
+    await bot.process_commands(message)
+
+# ─────────────────────── MESSAGE DE BIENVENUE ───────────────
+@bot.event
 async def on_member_join(member: discord.Member):
-    if member.bot:
+    channel = bot.get_channel(CHANNEL_WELCOME)
+    if not channel:
+        logging.warning("❌ Salon de bienvenue introuvable.")
         return
-    if any(role.id in (ROLE_PC, ROLE_CONSOLE) for role in member.roles):
+
+    embed = discord.Embed(
+        title="🎉 Bienvenue au Refuge !",
+        description=(
+            f"{member.mention}, installe-toi bien !\n"
+            f"🕹️ Choisis ton rôle dans <#{CHANNEL_ROLES}> pour accéder à toutes les sections.\n"
+            f"Ravi de t’avoir parmi nous 🎮"
+        ),
+        color=0x00ffcc
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text=f"Membre #{len(member.guild.members)}")
+
+    try:
+        await channel.send(embed=embed)
+    except Exception as e:
+        logging.error(f"Erreur lors de l'envoi du message de bienvenue : {e}")
+
+# ─────────────────────── RÉPÉTITION 24H : VÉRIF RÔLES ──────
+async def _reminder_loop():
+    await bot.wait_until_ready()
+    guild = discord.utils.get(bot.guilds)
+    channel = bot.get_channel(CHANNEL_ROLES)
+
+    if guild is None or channel is None:
+        logging.warning("❌ Serveur ou salon de rôles introuvable.")
         return
-    await _send_welcome(member)
 
-
-async def _send_role_reminders():
-    for guild in bot.guilds:
-        channel = guild.get_channel(CHANNEL_ROLES)
-        if channel is None:
-            continue
+    while not bot.is_closed():
+        logging.info("🔁 Vérification des membres sans rôle...")
         for member in guild.members:
             if member.bot:
                 continue
-            if any(role.id in (ROLE_PC, ROLE_CONSOLE) for role in member.roles):
-                continue
-            await channel.send(
-                f"Hey {member.mention} — choisis ton rôle 👇",
-                view=PlayerTypeView()
-            )
-            await asyncio.sleep(1)  # pour éviter le flood
+            if len(member.roles) <= 1:
+                try:
+                    await channel.send(
+                        f"{member.mention} tu n’as pas encore choisi ton rôle ici. "
+                        "Clique sur un bouton pour sélectionner ta plateforme 🎮💻"
+                    )
+                except Exception as e:
+                    logging.error(f"Erreur en envoyant un rappel à {member.display_name}: {e}")
+        await asyncio.sleep(86400)
 
-
-async def _reminder_loop():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            await _send_role_reminders()
-        except Exception:
-            logging.exception("Erreur lors du rappel automatique :")
-        await asyncio.sleep(REMINDER_INTERVAL_H * 3600)
-
-
-# ── Gestion des salons vocaux temporaires ────────────────────────────────
+# ─────────────────────── EVENTS ─────────────────────────────
 @bot.event
 async def on_voice_state_update(member: discord.Member, before, after):
+    user_id = str(member.id)
+
+    # ─────────── Connexion au vocal ───────────
+    if after.channel and not before.channel:
+        voice_times[user_id] = datetime.utcnow()
+
+    # ─────────── Déconnexion du vocal ─────────
+    elif before.channel and not after.channel:
+        joined_at = voice_times.pop(user_id, None)
+        if joined_at:
+            seconds_spent = (datetime.utcnow() - joined_at).total_seconds()
+            minutes_spent = int(seconds_spent // 60)
+
+            if minutes_spent >= 1:
+                gained_xp = minutes_spent * 5  # Exemple : 5 XP par minute
+                xp_data = load_xp()
+
+                if user_id not in xp_data:
+                    xp_data[user_id] = {"xp": 0, "level": 0}
+
+                xp_data[user_id]["xp"] += gained_xp
+
+                old_level = xp_data[user_id]["level"]
+                new_level = get_level(xp_data[user_id]["xp"])
+
+                if new_level > old_level:
+                    xp_data[user_id]["level"] = new_level
+                    try:
+                        channel = member.guild.get_channel(LEVEL_UP_CHANNEL)
+                        if channel:
+                            xp = xp_data[user_id]["xp"]
+                            xp_needed = (new_level + 1) ** 2 * 100
+
+                            image = await generate_rank_card(member, new_level, xp, xp_needed)
+                            file = discord.File(fp=image, filename="level_up.png")
+
+                            await channel.send(
+                                content=f"🎉 {member.mention} est passé **niveau {new_level}** !",
+                                file=file
+                            )
+                    except Exception as e:
+                        logging.error(f"Erreur XP vocal : {e}")
+
+                save_xp(xp_data)
+
+    # ─────────── Suppression vocaux temporaires ───────────
     if before.channel and before.channel.id in TEMP_VC_IDS and not before.channel.members:
-        try:
-            await before.channel.delete(reason="Salon temporaire vide")
-        finally:
-            TEMP_VC_IDS.discard(before.channel.id)
+        await before.channel.delete(reason="Salon temporaire vide")
+        TEMP_VC_IDS.discard(before.channel.id)
 
-
-# ── Démarrage, sync & enregistrement des vues ───────────────────────────
+# ─────────────────────── DÉMARRAGE DU BOT ────────────────────
 async def _setup_hook():
     await bot.tree.sync()
     asyncio.create_task(_reminder_loop())
+    asyncio.create_task(auto_backup_xp())  # ⬅️ Ajout de la sauvegarde auto
 
 bot.setup_hook = _setup_hook
 
-
-@bot.event
-async def on_ready():
-    logging.info(f"Connecté : {bot.user} (id={bot.user.id})")
-    bot.add_view(VCButtonView())
-
-    lobby = bot.get_channel(LOBBY_TEXT_CHANNEL)
-    if lobby is None:
-        logging.warning("Salon lobby introuvable")
-        return
-
-    # Vérifier si un message existe déjà avec les composants
-    async for msg in lobby.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            break
-    else:
-        await lobby.send(
-            "__**Crée ton salon vocal temporaire :**__",
-            view=VCButtonView()
-        )
-
-
-# ── Lancement du bot ─────────────────────────────────────────────────────
 if __name__ == "__main__":
     bot.run(TOKEN)
