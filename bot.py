@@ -487,6 +487,7 @@ async def send_vc_buttons_message():
         
 async def _setup_hook():
     await bot.tree.sync()
+    bot.add_view(VCButtonView())
     asyncio.create_task(_reminder_loop())
     asyncio.create_task(auto_backup_xp())
     await send_vc_buttons_message()  # Appelé une seule fois
