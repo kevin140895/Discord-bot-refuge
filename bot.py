@@ -17,6 +17,37 @@ from view import PlayerTypeView
 from datetime import datetime
 
 voice_times = {}  # user_id: datetime d'entrée
+def save_xp(data: dict):
+    path = Path(XP_FILE)
+    path.write_text(json.dumps(data, indent=4))
+
+
+def get_level(xp: int) -> int:
+    level = 0
+    while xp >= (level + 1) ** 2 * 100:
+        level += 1
+    return level
+
+
+async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed: int):
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+
+    img = Image.new("RGB", (400, 100), color=(73, 109, 137))
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 10), f"{user.name} - Niveau {level}", fill=(255, 255, 255))
+    draw.text((10, 50), f"XP: {xp}/{xp_needed}", fill=(255, 255, 255))
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+def get_safe_channel(channel_id: int):
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        logging.warning(f"⚠️ Salon ID {channel_id} introuvable.")
+    return channel
 
 # ─────────────────────── SAUVEGARDE AUTOMATIQUE XP ───────────
 async def auto_backup_xp(interval_seconds=3600):
@@ -219,7 +250,7 @@ async def rang_visuel(interaction: discord.Interaction):
 
 @bot.tree.command(name="sauvegarder", description="Forcer la sauvegarde manuelle des niveaux (admin uniquement)")
 async def sauvegarder(interaction: discord.Interaction):
-    if interaction.user.id != 541417878314942495:
+    if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
         return
 
