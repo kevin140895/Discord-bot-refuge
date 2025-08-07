@@ -266,34 +266,72 @@ async def liendiscord(interaction: discord.Interaction):
 # /rang → image (et /rang_visuel supprimé)
 @bot.tree.command(name="rang", description="Affiche ton niveau avec une carte graphique")
 async def rang(interaction: discord.Interaction):
+    # 1) Chargement XP
     xp_data = load_xp()
     user_id = str(interaction.user.id)
     if user_id not in xp_data:
-        await safe_respond(interaction, "Tu n'as pas encore de niveau... Commence à discuter !", ephemeral=True)
+        await interaction.response.send_message(
+            "Tu n'as pas encore de niveau... Commence à discuter !",
+            ephemeral=True
+        )
         return
-    await interaction.response.defer(ephemeral=True)
-    data = xp_data[user_id]
-    level = data["level"]; xp = data["xp"]; xp_next = (level + 1) ** 2 * 100
-    image = await generate_rank_card(interaction.user, level, xp, xp_next)
-    file = discord.File(fp=image, filename="rank.png")
-    await interaction.followup.send(file=file, ephemeral=True)
 
-@bot.tree.command(name="sauvegarder", description="Forcer la sauvegarde manuelle des niveaux (admin uniquement)")
-async def sauvegarder(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await safe_respond(interaction, "❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
-        return
+    # 2) Défer pour éviter le timeout (et montrer le spinner)
     try:
-        source = Path(XP_FILE); backup = Path(BACKUP_FILE)
-        if source.exists():
-            backup.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-            await safe_respond(interaction, "💾 Sauvegarde XP manuelle effectuée avec succès !", ephemeral=True)
-            logging.info("💾 Sauvegarde manuelle déclenchée par un admin.")
-        else:
-            await safe_respond(interaction, "⚠️ Aucun fichier de données XP trouvé.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+    except Exception:
+        pass  # si déjà répondu quelque part, on ignore
+
+    try:
+        data = xp_data[user_id]
+        level = data.get("level", 0)
+        xp = data.get("xp", 0)
+        xp_next = (level + 1) ** 2 * 100
+
+        # 3) Génération de l'image
+        image = await generate_rank_card(interaction.user, level, xp, xp_next)
+        file = discord.File(fp=image, filename="rank.png")
+
+        # 4) Tentative 1 : envoi EPHEMERAL avec fichier
+        try:
+            await interaction.followup.send(file=file, ephemeral=True)
+            return
+        except discord.Forbidden:
+            # Pas la permission d'envoyer des fichiers en ephemeral ? (rare)
+            pass
+        except discord.HTTPException as e:
+            logging.warning(f"/rang: envoi ephemeral échoué, fallback public. Raison: {e}")
+
+        # 5) Fallback : on envoie dans le salon (public), si possible
+        try:
+            await interaction.channel.send(
+                content=f"{interaction.user.mention} voici ta carte de niveau :",
+                file=file
+            )
+            await interaction.followup.send(
+                "Je n'ai pas pu l'envoyer en privé, je l'ai postée dans le salon.",
+                ephemeral=True
+            )
+        except Exception as e:
+            logging.exception(f"/rang: échec envoi public: {e}")
+            await interaction.followup.send(
+                "❌ Impossible d'envoyer l'image (vérifie la permission **Joindre des fichiers** pour le bot).",
+                ephemeral=True
+            )
+
+    except ImportError as e:
+        # Cas typique: Pillow pas installée
+        logging.exception(f"/rang: ImportError (Pillow manquante ?) {e}")
+        await interaction.followup.send(
+            "❌ Erreur interne: dépendance manquante (Pillow).",
+            ephemeral=True
+        )
     except Exception as e:
-        logging.error(f"❌ Erreur lors de la sauvegarde manuelle : {e}")
-        await safe_respond(interaction, "❌ Une erreur est survenue lors de la sauvegarde.", ephemeral=True)
+        logging.exception(f"/rang: exception inattendue: {e}")
+        await interaction.followup.send(
+            "❌ Une erreur est survenue pendant la génération de la carte.",
+            ephemeral=True
+        )
 
 @bot.tree.command(name="vocaux", description="Publier (ou ré-attacher) les boutons pour créer des salons vocaux")
 @app_commands.checks.has_permissions(manage_guild=True)
