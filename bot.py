@@ -379,6 +379,8 @@ async def vocaux(interaction: discord.Interaction):
     await ensure_vc_buttons_message()
     await interaction.followup.send("📌 Boutons OK dans le salon prévu.", ephemeral=True)
 
+OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
+
 @bot.tree.command(name="purge", description="Supprime N messages récents de ce salon (réservé à Kevin)")
 @app_commands.describe(nb="Nombre de messages à supprimer (1-100)")
 async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1, 100]):
