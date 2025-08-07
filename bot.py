@@ -70,22 +70,36 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ─────────────────────── XP SYSTEM ───────────────────────
 def load_xp():
+    path = Path(XP_FILE)
+    backup_path = Path("data/backup.json")
+
     try:
-        if not Path(XP_FILE).exists():
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}")
+            logging.info("📁 Fichier XP manquant, créé automatiquement.")
             return {}
-        with open(XP_FILE, "r") as f:
+
+        with path.open("r") as f:
             return json.load(f)
+
     except json.JSONDecodeError:
-        logging.error("Fichier XP corrompu.")
-        return {}
+        logging.warning("⚠️ Fichier XP corrompu ! Tentative de restauration depuis backup.json...")
 
-def save_xp(data):
-    Path(XP_FILE).parent.mkdir(parents=True, exist_ok=True)
-    with open(XP_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-def get_level(xp: int) -> int:
-    return int(xp ** 0.5 // 10)
+        if backup_path.exists():
+            try:
+                with backup_path.open("r") as b:
+                    data = json.load(b)
+                    # Sauvegarde le backup comme fichier principal
+                    path.write_text(json.dumps(data, indent=4))
+                    logging.info("✅ Restauration réussie depuis backup.json.")
+                    return data
+            except Exception as e:
+                logging.error(f"❌ Impossible de lire le backup : {e}")
+                return {}
+        else:
+            logging.error("❌ Aucun backup disponible pour restaurer.")
+            return {}
 
 # ─────────────────────── SALONS VOCAUX TEMPORAIRES ────────
 def next_vc_name(guild: discord.Guild, base: str) -> str:
