@@ -230,11 +230,21 @@ class LiveTikTokView(View):
     @discord.ui.button(label="🔴 Annoncer le live TikTok", style=discord.ButtonStyle.danger, custom_id="announce_live")
     async def announce_live(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = bot.get_channel(TIKTOK_ANNOUNCE_CH)
-        if channel:
-            await channel.send("🚨 Kevin est en LIVE sur TikTok !\n🔴 Rejoins maintenant : https://www.tiktok.com/@kevinlerefuge")
-            await safe_respond(interaction, "✅ Le live a été annoncé !", ephemeral=True)
-        else:
+        if not channel:
             await safe_respond(interaction, "❌ Salon cible introuvable.", ephemeral=True)
+            return
+
+        # (optionnel) vérifier la permission mention_everyone
+        me = interaction.guild.me
+        if not channel.permissions_for(me).mention_everyone:
+            await safe_respond(interaction, "❌ Je n'ai pas la permission de mentionner @everyone dans ce salon.", ephemeral=True)
+            return
+
+        await channel.send(
+            "@everyone 🚨 Kevin est en LIVE sur TikTok !\n🔴 Rejoins maintenant : https://www.tiktok.com/@kevinlerefuge",
+            allowed_mentions=discord.AllowedMentions(everyone=True)
+        )
+        await safe_respond(interaction, "✅ Annonce envoyée !", ephemeral=True)
 
 class VCButtonView(View):
     def __init__(self):
