@@ -130,10 +130,6 @@ class VCButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        self.add_item(Button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="vc_pc"))
-        self.add_item(Button(label="🔀 Crossplay", style=discord.ButtonStyle.primary, custom_id="vc_crossplay"))
-        self.add_item(Button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="vc_consoles"))
-
     async def create_vc(self, interaction: discord.Interaction, profile: str):
         guild = interaction.guild
         category = guild.get_channel(TEMP_VC_CATEGORY)
@@ -143,50 +139,23 @@ class VCButtonView(View):
 
         name = next_vc_name(guild, profile)
         emoji = VC_PROFILES[profile]["emoji"]
-        try:
-            channel = await guild.create_voice_channel(
-                name=f"{emoji} {name}",
-                category=category,
-                user_limit=5,
-                reason=f"Salon temporaire créé par {interaction.user}"
-            )
-            TEMP_VC_IDS.add(channel.id)
+        channel = await guild.create_voice_channel(
+            name=f"{emoji} {name}",
+            category=category,
+            user_limit=5,
+            reason=f"Salon temporaire créé par {interaction.user}"
+        )
+        TEMP_VC_IDS.add(channel.id)
 
-            if interaction.user.voice:
-                await interaction.user.move_to(channel)
+        if interaction.user.voice:
+            await interaction.user.move_to(channel)
 
-            await interaction.response.send_message(
-                f"✅ Salon **{name}** créé. Il disparaîtra quand il sera vide !",
-                ephemeral=True
-            )
-        except Exception as e:
-            logging.error(f"❌ Erreur création salon vocal temporaire : {e}")
-            await interaction.response.send_message("❌ Une erreur est survenue.", ephemeral=True)
+        await interaction.response.send_message(
+            f"✅ Salon **{name}** créé. Il disparaîtra quand il sera vide !",
+            ephemeral=True
+        )
 
-@bot.event
-async def on_interaction(interaction: discord.Interaction):
-    if interaction.type == discord.InteractionType.component:
-        if interaction.data["custom_id"] in ("vc_pc", "vc_crossplay", "vc_consoles"):
-            profile_map = {
-                "vc_pc": "PC",
-                "vc_crossplay": "Crossplay",
-                "vc_consoles": "Consoles"
-            }
-            profile = profile_map[interaction.data["custom_id"]]
-            view = VCButtonView()
-            await view.create_vc(interaction, profile)
 # ─────────────────────── COMMANDES SLASH ──────────────────
-@bot.tree.command(name="clear", description="Supprimer plusieurs messages dans un salon")
-@app_commands.describe(amount="Nombre de messages à supprimer (max 100)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def clear(interaction: discord.Interaction, amount: int):
-    if amount > 100:
-        await interaction.response.send_message("❌ Maximum 100 messages à la fois.", ephemeral=True)
-        return
-
-    deleted = await interaction.channel.purge(limit=amount)
-    await interaction.response.send_message(f"🧹 {len(deleted)} messages supprimés.", ephemeral=True)
-    
 @bot.tree.command(name="type_joueur", description="Choisir PC ou Console")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def type_joueur(interaction: discord.Interaction):
@@ -267,47 +236,8 @@ async def sauvegarder(interaction: discord.Interaction):
         logging.error(f"❌ Erreur lors de la sauvegarde manuelle : {e}")
         await interaction.response.send_message("❌ Une erreur est survenue lors de la sauvegarde.", ephemeral=True)
 
-@bot.tree.command(name="vocaux", description="Créer un salon vocal temporaire")
-@app_commands.checks.has_permissions(manage_channels=True)
-async def vocaux(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        "🎙️ **Crée ton salon vocal temporaire :**",
-        view=VCButtonView(),
-        ephemeral=False
-    )
-
-@bot.event
-async def on_message_delete(message: discord.Message):
-    # Si le message supprimé vient du bot et est dans le bon salon
-    if (
-        message.author == bot.user
-        and message.channel.id == LOBBY_TEXT_CHANNEL
-        and "Crée ton salon vocal temporaire" in message.content
-    ):
-        logging.warning("⚠️ Le message des boutons vocaux a été supprimé. Réenvoi en cours...")
-        await asyncio.sleep(2)  # Petit délai pour éviter les conflits
-        await message.channel.send(
-            "🎙️ **Crée ton salon vocal temporaire :**",
-            view=VCButtonView()
-        )
-        logging.info("✅ Message recréé automatiquement après suppression.")
-
 
 # ─────────────────────── GESTION XP PAR MESSAGE ─────────────
-def save_xp(data):
-    with open(XP_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-def get_level(xp: int) -> int:
-    """Calcule le niveau en fonction de l'XP"""
-    level = 0
-    while xp >= (level + 1) ** 2 * 100:
-        level += 1
-    return level
-
-def save_xp(data):
-    with open(XP_FILE, "w") as f:
-        json.dump(data, f, indent=4)
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -465,36 +395,10 @@ async def on_voice_state_update(member: discord.Member, before, after):
         TEMP_VC_IDS.discard(before.channel.id)
 
 # ─────────────────────── DÉMARRAGE DU BOT ────────────────────
-async def send_vc_buttons_message():
-    await bot.wait_until_ready()
-    channel = bot.get_channel(LOBBY_TEXT_CHANNEL)
-
-    if not channel:
-        logging.error("❌ Salon LOBBY introuvable (LOBBY_TEXT_CHANNEL).")
-        return
-
-    try:
-        # Vérifie si un message avec les boutons existe déjà (par son contenu)
-        async for message in channel.history(limit=50):
-            if message.author == bot.user and "Crée ton salon vocal temporaire" in message.content:
-                logging.info("✅ Le message de création de salons existe déjà.")
-                return
-
-        await channel.send(
-            "🎙️ **Crée ton salon vocal temporaire :**",
-            view=VCButtonView()
-        )
-        logging.info("✅ Message de salons vocaux envoyé dans le lobby.")
-
-    except Exception as e:
-        logging.error(f"❌ Impossible d'envoyer le message de salons vocaux : {e}")
-        
 async def _setup_hook():
     await bot.tree.sync()
-    bot.add_view(VCButtonView())
     asyncio.create_task(_reminder_loop())
-    asyncio.create_task(auto_backup_xp())
-    await send_vc_buttons_message()  # Appelé une seule fois
+    asyncio.create_task(auto_backup_xp())  # ⬅️ Ajout de la sauvegarde auto
 
 bot.setup_hook = _setup_hook
 
