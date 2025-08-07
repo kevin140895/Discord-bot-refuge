@@ -13,6 +13,20 @@ from discord import app_commands, Embed
 from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
+load_dotenv(override=True)
+
+# accepte plusieurs clés possibles et logge si rien
+TOKEN = (
+    os.getenv("DISCORD_TOKEN")
+    or os.getenv("TOKEN")
+    or os.getenv("BOT_TOKEN")
+)
+
+if not TOKEN:
+    # aide au debug : liste les clés liées au token visibles à runtime
+    seen = [k for k in os.environ.keys() if "TOKEN" in k or "DISCORD" in k]
+    logging.error("Aucun token trouvé. Clés visibles: %s", ", ".join(sorted(seen)) or "aucune")
+    raise RuntimeError("DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables")
 
 # ─────────────────────── IMPORTS LOCAUX ─────────────────────
 from view import PlayerTypeView
