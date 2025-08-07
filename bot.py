@@ -156,6 +156,17 @@ class VCButtonView(View):
         )
 
 # ─────────────────────── COMMANDES SLASH ──────────────────
+@bot.tree.command(name="clear", description="Supprimer plusieurs messages dans un salon")
+@app_commands.describe(amount="Nombre de messages à supprimer (max 100)")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def clear(interaction: discord.Interaction, amount: int):
+    if amount > 100:
+        await interaction.response.send_message("❌ Maximum 100 messages à la fois.", ephemeral=True)
+        return
+
+    deleted = await interaction.channel.purge(limit=amount)
+    await interaction.response.send_message(f"🧹 {len(deleted)} messages supprimés.", ephemeral=True)
+    
 @bot.tree.command(name="type_joueur", description="Choisir PC ou Console")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def type_joueur(interaction: discord.Interaction):
