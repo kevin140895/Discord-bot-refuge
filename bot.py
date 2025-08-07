@@ -130,6 +130,18 @@ class VCButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
+    @discord.ui.button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="vc_pc")
+    async def pc_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.create_vc(interaction, "PC")
+
+    @discord.ui.button(label="🔀 Crossplay", style=discord.ButtonStyle.primary, custom_id="vc_crossplay")
+    async def crossplay_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.create_vc(interaction, "Crossplay")
+
+    @discord.ui.button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="vc_consoles")
+    async def consoles_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.create_vc(interaction, "Consoles")
+
     async def create_vc(self, interaction: discord.Interaction, profile: str):
         guild = interaction.guild
         category = guild.get_channel(TEMP_VC_CATEGORY)
@@ -139,21 +151,25 @@ class VCButtonView(View):
 
         name = next_vc_name(guild, profile)
         emoji = VC_PROFILES[profile]["emoji"]
-        channel = await guild.create_voice_channel(
-            name=f"{emoji} {name}",
-            category=category,
-            user_limit=5,
-            reason=f"Salon temporaire créé par {interaction.user}"
-        )
-        TEMP_VC_IDS.add(channel.id)
+        try:
+            channel = await guild.create_voice_channel(
+                name=f"{emoji} {name}",
+                category=category,
+                user_limit=5,
+                reason=f"Salon temporaire créé par {interaction.user}"
+            )
+            TEMP_VC_IDS.add(channel.id)
 
-        if interaction.user.voice:
-            await interaction.user.move_to(channel)
+            if interaction.user.voice:
+                await interaction.user.move_to(channel)
 
-        await interaction.response.send_message(
-            f"✅ Salon **{name}** créé. Il disparaîtra quand il sera vide !",
-            ephemeral=True
-        )
+            await interaction.response.send_message(
+                f"✅ Salon **{name}** créé. Il disparaîtra quand il sera vide !",
+                ephemeral=True
+            )
+        except Exception as e:
+            logging.error(f"❌ Erreur création salon vocal temporaire : {e}")
+            await interaction.response.send_message("❌ Une erreur est survenue.", ephemeral=True)
 
 # ─────────────────────── COMMANDES SLASH ──────────────────
 @bot.tree.command(name="clear", description="Supprimer plusieurs messages dans un salon")
@@ -246,6 +262,15 @@ async def sauvegarder(interaction: discord.Interaction):
     except Exception as e:
         logging.error(f"❌ Erreur lors de la sauvegarde manuelle : {e}")
         await interaction.response.send_message("❌ Une erreur est survenue lors de la sauvegarde.", ephemeral=True)
+
+@bot.tree.command(name="vocaux", description="Créer un salon vocal temporaire")
+@app_commands.checks.has_permissions(manage_channels=True)
+async def vocaux(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "🎙️ **Crée ton salon vocal temporaire :**",
+        view=VCButtonView(),
+        ephemeral=False
+    )
 
 
 # ─────────────────────── GESTION XP PAR MESSAGE ─────────────
