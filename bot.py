@@ -382,49 +382,64 @@ async def vocaux(interaction: discord.Interaction):
 @bot.tree.command(name="purge", description="Supprime N messages récents de ce salon (réservé à Kevin)")
 @app_commands.describe(nb="Nombre de messages à supprimer (1-100)")
 async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1, 100]):
+    # Défer immédiat pour éviter "application ne répond plus"
+    try:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+    except Exception:
+        # si déjà répondu par un autre middleware improbable
+        pass
+
     # Réservé au propriétaire
     if interaction.user.id != OWNER_ID:
-        await safe_respond(interaction, "❌ Commande réservée au propriétaire.", ephemeral=True)
+        await interaction.followup.send("❌ Commande réservée au propriétaire.", ephemeral=True)
         return
 
-    # Doit être un salon texte
-    if not isinstance(interaction.channel, discord.TextChannel):
-        await safe_respond(interaction, "❌ Utilisable uniquement dans un salon texte.", ephemeral=True)
+    # Serveur uniquement
+    if interaction.guild is None:
+        await interaction.followup.send("❌ Utilisable uniquement sur un serveur.", ephemeral=True)
+        return
+
+    ch = interaction.channel
+    if ch is None:
+        await interaction.followup.send("❌ Salon introuvable.", ephemeral=True)
         return
 
     # Permissions du bot
     me = interaction.guild.me
-    if not interaction.channel.permissions_for(me).manage_messages:
-        await safe_respond(interaction, "❌ Je n'ai pas la permission **Gérer les messages** dans ce salon.", ephemeral=True)
+    perms = ch.permissions_for(me)
+    if not perms.manage_messages or not perms.read_message_history:
+        await interaction.followup.send(
+            "❌ Il me manque les permissions **Gérer les messages** et/ou **Lire l’historique**.",
+            ephemeral=True
+        )
         return
 
-    await interaction.response.defer(ephemeral=True)
-
+    # Si c'est un TextChannel: on tente le bulk purge
     try:
-        # Tentative rapide (bulk) — ne marche pas si messages > 14 jours
-        deleted = await interaction.channel.purge(limit=nb, check=lambda m: not m.pinned, bulk=True)
-        await interaction.followup.send(f"🧹 {len(deleted)} messages supprimés.", ephemeral=True)
-
+        if isinstance(ch, discord.TextChannel):
+            deleted = await ch.purge(limit=nb, check=lambda m: not m.pinned, bulk=True)
+            await interaction.followup.send(f"🧹 {len(deleted)} messages supprimés.", ephemeral=True)
+            return
     except Exception as e:
         logging.warning(f"Purge bulk échouée, fallback lent. Raison: {e}")
 
-        # Fallback lent (supprime 1 par 1) — fonctionne même si > 14 jours, mais plus long
-        count = 0
-        try:
-            async for msg in interaction.channel.history(limit=nb):
-                if msg.pinned:
-                    continue
-                try:
-                    await msg.delete()
-                    count += 1
-                except Exception as ee:
-                    logging.error(f"Suppression d'un message échouée: {ee}")
-                    continue
+    # Fallback lent (threads, forums, messages > 14j, ou échec bulk)
+    count = 0
+    try:
+        async for msg in ch.history(limit=nb):
+            if msg.pinned:
+                continue
+            try:
+                await msg.delete()
+                count += 1
+            except Exception as ee:
+                logging.error(f"Suppression d'un message échouée: {ee}")
+                continue
 
-            await interaction.followup.send(f"🧹 {count} messages supprimés (mode lent).", ephemeral=True)
-        except Exception as ee:
-            logging.error(f"Erreur lors de la purge lente: {ee}")
-            await interaction.followup.send("❌ Impossible de supprimer les messages.", ephemeral=True)
+        await interaction.followup.send(f"🧹 {count} messages supprimés (mode lent).", ephemeral=True)
+    except Exception as ee:
+        logging.error(f"Erreur lors de la purge lente: {ee}")
+        await interaction.followup.send("❌ Impossible de supprimer les messages.", ephemeral=True)
 
 
 # ─────────────────────── EVENTS ─────────────────────────────
