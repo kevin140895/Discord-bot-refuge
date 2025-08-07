@@ -272,6 +272,22 @@ async def vocaux(interaction: discord.Interaction):
         ephemeral=False
     )
 
+@bot.event
+async def on_message_delete(message: discord.Message):
+    # Si le message supprimé vient du bot et est dans le bon salon
+    if (
+        message.author == bot.user
+        and message.channel.id == LOBBY_TEXT_CHANNEL
+        and "Crée ton salon vocal temporaire" in message.content
+    ):
+        logging.warning("⚠️ Le message des boutons vocaux a été supprimé. Réenvoi en cours...")
+        await asyncio.sleep(2)  # Petit délai pour éviter les conflits
+        await message.channel.send(
+            "🎙️ **Crée ton salon vocal temporaire :**",
+            view=VCButtonView()
+        )
+        logging.info("✅ Message recréé automatiquement après suppression.")
+
 
 # ─────────────────────── GESTION XP PAR MESSAGE ─────────────
 def save_xp(data):
@@ -445,10 +461,35 @@ async def on_voice_state_update(member: discord.Member, before, after):
         TEMP_VC_IDS.discard(before.channel.id)
 
 # ─────────────────────── DÉMARRAGE DU BOT ────────────────────
+async def send_vc_buttons_message():
+    await bot.wait_until_ready()
+    channel = bot.get_channel(LOBBY_TEXT_CHANNEL)
+
+    if not channel:
+        logging.error("❌ Salon LOBBY introuvable (LOBBY_TEXT_CHANNEL).")
+        return
+
+    try:
+        # Vérifie si un message avec les boutons existe déjà (par son contenu)
+        async for message in channel.history(limit=50):
+            if message.author == bot.user and "Crée ton salon vocal temporaire" in message.content:
+                logging.info("✅ Le message de création de salons existe déjà.")
+                return
+
+        await channel.send(
+            "🎙️ **Crée ton salon vocal temporaire :**",
+            view=VCButtonView()
+        )
+        logging.info("✅ Message de salons vocaux envoyé dans le lobby.")
+
+    except Exception as e:
+        logging.error(f"❌ Impossible d'envoyer le message de salons vocaux : {e}")
+        
 async def _setup_hook():
     await bot.tree.sync()
     asyncio.create_task(_reminder_loop())
-    asyncio.create_task(auto_backup_xp())  # ⬅️ Ajout de la sauvegarde auto
+    asyncio.create_task(auto_backup_xp())
+    await send_vc_buttons_message()  # Appelé une seule fois
 
 bot.setup_hook = _setup_hook
 
