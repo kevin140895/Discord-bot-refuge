@@ -130,17 +130,9 @@ class VCButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="vc_pc")
-    async def pc_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_vc(interaction, "PC")
-
-    @discord.ui.button(label="🔀 Crossplay", style=discord.ButtonStyle.primary, custom_id="vc_crossplay")
-    async def crossplay_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_vc(interaction, "Crossplay")
-
-    @discord.ui.button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="vc_consoles")
-    async def consoles_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_vc(interaction, "Consoles")
+        self.add_item(Button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="vc_pc"))
+        self.add_item(Button(label="🔀 Crossplay", style=discord.ButtonStyle.primary, custom_id="vc_crossplay"))
+        self.add_item(Button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="vc_consoles"))
 
     async def create_vc(self, interaction: discord.Interaction, profile: str):
         guild = interaction.guild
@@ -171,6 +163,18 @@ class VCButtonView(View):
             logging.error(f"❌ Erreur création salon vocal temporaire : {e}")
             await interaction.response.send_message("❌ Une erreur est survenue.", ephemeral=True)
 
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type == discord.InteractionType.component:
+        if interaction.data["custom_id"] in ("vc_pc", "vc_crossplay", "vc_consoles"):
+            profile_map = {
+                "vc_pc": "PC",
+                "vc_crossplay": "Crossplay",
+                "vc_consoles": "Consoles"
+            }
+            profile = profile_map[interaction.data["custom_id"]]
+            view = VCButtonView()
+            await view.create_vc(interaction, profile)
 # ─────────────────────── COMMANDES SLASH ──────────────────
 @bot.tree.command(name="clear", description="Supprimer plusieurs messages dans un salon")
 @app_commands.describe(amount="Nombre de messages à supprimer (max 100)")
