@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import random
 import logging
 import asyncio
 from pathlib import Path
@@ -9,7 +8,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import discord
-from discord import app_commands, Embed
+from discord import app_commands
 from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
@@ -17,12 +16,12 @@ from dotenv import load_dotenv
 # ── XP CONFIG ───────────────────────────────────────────────
 MSG_XP = 8               # XP par message texte
 VOICE_XP_PER_MIN = 3     # XP par minute en vocal
+# Formule de niveau: seuil (niveau n -> n+1) = (n+1)^2 * 100 XP
 
 # ─────────────────────── ENV & LOGGING ─────────────────────
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# accepte plusieurs clés possibles et logge si rien
 TOKEN = (
     os.getenv("DISCORD_TOKEN")
     or os.getenv("TOKEN")
@@ -30,30 +29,26 @@ TOKEN = (
 )
 
 if not TOKEN:
-    # aide au debug : liste les clés liées au token visibles à runtime
     seen = [k for k in os.environ.keys() if "TOKEN" in k or "DISCORD" in k]
     logging.error("Aucun token trouvé. Clés visibles: %s", ", ".join(sorted(seen)) or "aucune")
     raise RuntimeError("DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables")
 
 # ─────────────────────── IMPORTS LOCAUX ─────────────────────
-from view import PlayerTypeView
+from view import PlayerTypeView  # inchangé
 
 # ─────────────────────── CONFIG ─────────────────────────────
-# Fichiers de données
 XP_FILE = "data/data.json"
 BACKUP_FILE = "data/backup.json"
 DAILY_STATS_FILE = "data/daily_stats.json"  # stats quotidiennes (msg + minutes vocal)
 
-# IDs salons / catégories (à adapter)
 LEVEL_UP_CHANNEL    = 1402419913716531352
 CHANNEL_ROLES       = 1400560866478395512
 CHANNEL_WELCOME     = 1400550333796716574
 LOBBY_TEXT_CHANNEL  = 1402258805533970472
 TEMP_VC_CATEGORY    = 1400559884117999687
-TIKTOK_ANNOUNCE_CH  = 1400552164979507263  # bouton live
-ACTIVITY_SUMMARY_CH = 1400552164979507263  # résumé quotidien (même salon que TikTok)
+TIKTOK_ANNOUNCE_CH  = 1400552164979507263
+ACTIVITY_SUMMARY_CH = 1400552164979507263
 
-# Catégories pour /lfg (vocal créé dans cette catégorie)
 LFG_CATEGORIES = {
     "fps":        1400553078373089301,
     "mmo-rpg":    1400553114918064178,
@@ -65,7 +60,6 @@ LFG_CATEGORIES = {
 PARIS_TZ = ZoneInfo("Europe/Paris")
 OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
 
-# Boutons vocaux (noms et emojis)
 VC_PROFILES = {
     "PC": {"emoji": "💻"},
     "Crossplay": {"emoji": "🔀"},
@@ -73,27 +67,35 @@ VC_PROFILES = {
     "Chat": {"emoji": "💬"},
 }
 
-# Pattern pour les noms "PC", "PC 2", etc.
 VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?: (\d+))?$", re.I)
-
-# Marque du message permanent (pour le retrouver au redémarrage)
 PERMA_MESSAGE_MARK = "[VC_BUTTONS_PERMANENT]"
+
+# ── RÔLES PAR NIVEAU ───────────────────────────────────────
+# ⚠️ Remplace les IDs par ceux de TON serveur
+LEVEL_ROLE_REWARDS: dict[int, int] = {
+    5:  123456789012345678,   # ex: Bronze
+    10: 223456789012345678,   # ex: Silver
+    20: 323456789012345678,   # ex: Gold
+}
+REMOVE_LOWER_TIER_ROLES = True
 
 # ─────────────────────── INTENTS / BOT ──────────────────────
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ─────────────────────── ETATS RUNTIME ──────────────────────
-voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (UTC)
+voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
 LFG_SESSIONS: dict[int, dict] = {}     # message_id -> session LFG
 
-# ─────────────────────── HELPERS ────────────────────────────
+# Anti-spam: derniers rappels rôles par (guild_id, user_id) -> date 'YYYY-MM-DD'
+REMINDER_LAST: dict[tuple[int, int], str] = {}
+REMINDER_DAILY_CAP_PER_GUILD = 20  # maximum de rappels/jour/serveur
 
+# ─────────────────────── FICHIERS & XP CACHE ────────────────
 def ensure_data_dir():
     Path(XP_FILE).parent.mkdir(parents=True, exist_ok=True)
 
@@ -110,11 +112,17 @@ def load_json(path: str) -> dict:
     except json.JSONDecodeError:
         return {}
 
-def save_xp(data: dict):
-    ensure_data_dir()
-    save_json(XP_FILE, data)
+def load_daily_stats() -> dict:
+    return load_json(DAILY_STATS_FILE)
 
-def load_xp() -> dict:
+def save_daily_stats(d: dict):
+    save_json(DAILY_STATS_FILE, d)
+
+# --- XP cache en mémoire (moins d'I/O, thread-safe via lock) ---
+XP_CACHE: dict[str, dict] = {}
+XP_LOCK = asyncio.Lock()
+
+def _disk_load_xp() -> dict:
     ensure_data_dir()
     path = Path(XP_FILE)
     backup_path = Path(BACKUP_FILE)
@@ -139,12 +147,21 @@ def load_xp() -> dict:
             logging.error("❌ Aucun backup disponible pour restaurer.")
             return {}
 
-def load_daily_stats() -> dict:
-    return load_json(DAILY_STATS_FILE)
+def _disk_save_xp(data: dict):
+    ensure_data_dir()
+    save_json(XP_FILE, data)
 
-def save_daily_stats(d: dict):
-    save_json(DAILY_STATS_FILE, d)
+async def xp_bootstrap_cache():
+    global XP_CACHE
+    XP_CACHE = _disk_load_xp()
+    logging.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
+async def xp_flush_cache_to_disk():
+    async with XP_LOCK:
+        _disk_save_xp(XP_CACHE)
+        logging.info("💾 XP flush vers disque (%d utilisateurs).", len(XP_CACHE))
+
+# ─────────────────────── HELPERS ────────────────────────────
 def get_level(xp: int) -> int:
     level = 0
     while xp >= (level + 1) ** 2 * 100:
@@ -176,35 +193,83 @@ async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed:
     buffer.seek(0)
     return buffer
 
+# ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
+async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
+    """Donne le rôle correspondant au plus HAUT palier atteint. Retourne l'ID du rôle donné (ou None)."""
+    if not LEVEL_ROLE_REWARDS:
+        return None
+
+    eligible = [lvl for lvl in LEVEL_ROLE_REWARDS.keys() if new_level >= lvl]
+    if not eligible:
+        return None
+
+    best_lvl = max(eligible)
+    role_id = LEVEL_ROLE_REWARDS[best_lvl]
+    role = member.guild.get_role(role_id)
+    if not role:
+        logging.warning(f"Role reward introuvable: {role_id}")
+        return None
+
+    # Ajoute le rôle si nécessaire
+    try:
+        if role not in member.roles:
+            await member.add_roles(role, reason=f"Palier atteint: niveau {new_level}")
+    except Exception as e:
+        logging.error(f"Impossible d'ajouter le rôle {role_id} à {member}: {e}")
+        return None
+
+    # Optionnel: retirer les anciens paliers
+    if REMOVE_LOWER_TIER_ROLES:
+        try:
+            lower_roles = [member.guild.get_role(LEVEL_ROLE_REWARDS[l])
+                           for l in LEVEL_ROLE_REWARDS.keys() if l < best_lvl]
+            lower_roles = [r for r in lower_roles if r and r in member.roles]
+            if lower_roles:
+                await member.remove_roles(*lower_roles, reason="Nouveau palier atteint")
+        except Exception as e:
+            logging.error(f"Impossible de retirer les anciens rôles à {member}: {e}")
+
+    return role_id
+
+# ── ANNONCE LEVEL-UP (NOUVEAU STYLE, SANS IMAGE) ───────────
 async def announce_level_up(guild: discord.Guild, member: discord.Member, old_level: int, new_level: int, xp: int):
-    """Annonce un level-up dans le salon niveaux avec avatar + carte."""
+    """Annonce un level-up dans le salon niveaux: propre, sans image de carte, avec rôle auto."""
     channel = guild.get_channel(LEVEL_UP_CHANNEL)
     if not isinstance(channel, discord.TextChannel):
         logging.warning("Salon niveaux introuvable ou invalide.")
         return
 
+    # Progression vers le prochain niveau
+    xp_needed = (new_level + 1) ** 2 * 100
+    remaining = max(0, xp_needed - xp)
+    ratio = 0 if xp_needed == 0 else min(1, max(0, xp / xp_needed))
+
+    # Barre de progression en texte (20 blocs)
+    total_blocks = 20
+    filled = int(ratio * total_blocks)
+    bar = "▰" * filled + "▱" * (total_blocks - filled)
+
+    # Rôle de récompense éventuel
+    new_role_id = await grant_level_roles(member, new_level)
+    role_line = f"\n🎖️ Nouveau rôle : <@&{new_role_id}>" if new_role_id else ""
+
+    embed = discord.Embed(
+        title="🚀 Niveau up !",
+        description=(
+            f"**{member.mention}** passe de **{old_level} ➜ {new_level}**.{role_line}\n\n"
+            f"**Progression :** `{bar}`\n"
+            f"**XP :** {xp} / {xp_needed}  •  **Reste :** {remaining} XP"
+        ),
+        color=0x33D17A,
+        timestamp=datetime.now(PARIS_TZ)
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text="GG 🎉")
+
     try:
-        xp_needed = (new_level + 1) ** 2 * 100
-        image = await generate_rank_card(member, new_level, xp, xp_needed)
-        file = discord.File(fp=image, filename="level_up.png")
-
-        embed = discord.Embed(
-            title=f"🚀 Niveau {new_level} débloqué !",
-            description=(
-                f"{member.mention} **passe de {old_level} ➜ {new_level}**\n"
-                f"XP : **{xp} / {xp_needed}**"
-            ),
-            color=0xF4B400,
-            timestamp=datetime.now(PARIS_TZ)
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_image(url="attachment://level_up.png")
-        embed.set_footer(text="GG !")
-
-        await channel.send(content=f"🎉 {member.mention}", embed=embed, file=file)
+        await channel.send(content=f"🎉 {member.mention}", embed=embed)
     except Exception as e:
         logging.error(f"Annonce level-up échouée: {e}")
-
 
 def next_vc_name(guild: discord.Guild, base: str) -> str:
     existing_numbers = [
@@ -233,7 +298,6 @@ def parse_when(when_str: str) -> datetime:
         raise ValueError("Format d'heure invalide. Utilise 'HH:MM' ou 'YYYY-MM-DD HH:MM'.")
 
 def incr_daily_stat(guild_id: int, user_id: int, *, msg_inc: int = 0, voice_min_inc: int = 0):
-    """Incrémente les stats du jour (Europe/Paris)."""
     stats = load_daily_stats()
     g = str(guild_id)
     date_key = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
@@ -295,46 +359,62 @@ async def liendiscord(interaction: discord.Interaction):
         ephemeral=False
     )
 
-# /rang → image (et /rang_visuel supprimé)
+# 🧪 MESSAGE D'ESSAI DANS LE SALON NIVEAUX
+@bot.tree.command(name="test_niveau", description="Poste un exemple d'annonce de level-up dans le salon niveaux")
+@app_commands.describe(
+    membre="Membre à tester (par défaut: toi)",
+    ancien_niveau="Ancien niveau (par défaut 4)",
+    nouveau_niveau="Nouveau niveau (par défaut 5)",
+    xp="XP actuel (optionnel)"
+)
+async def test_niveau(
+    interaction: discord.Interaction,
+    membre: discord.Member | None = None,
+    ancien_niveau: app_commands.Range[int, 0, 999] = 4,
+    nouveau_niveau: app_commands.Range[int, 1, 1000] = 5,
+    xp: app_commands.Range[int, 0, 10_000_000] | None = None
+):
+    await interaction.response.defer(ephemeral=True)
+    member = membre or interaction.user
+    if nouveau_niveau <= ancien_niveau:
+        await interaction.followup.send("❌ Le nouveau niveau doit être supérieur à l'ancien.", ephemeral=True)
+        return
+    if xp is None:
+        xp = (nouveau_niveau ** 2 * 100)  # met l'XP au seuil mini du nouveau niveau pour l'aperçu
+    try:
+        await announce_level_up(interaction.guild, member, ancien_niveau, nouveau_niveau, xp)
+        await interaction.followup.send("✅ Message d'essai envoyé dans le salon niveaux.", ephemeral=True)
+    except Exception as e:
+        logging.error(f"/test_niveau échec: {e}")
+        await interaction.followup.send("❌ Impossible d'envoyer le message d'essai.", ephemeral=True)
+
 @bot.tree.command(name="rang", description="Affiche ton niveau avec une carte graphique")
 async def rang(interaction: discord.Interaction):
-    # 1) Chargement XP
-    xp_data = load_xp()
-    user_id = str(interaction.user.id)
-    if user_id not in xp_data:
-        await interaction.response.send_message(
-            "Tu n'as pas encore de niveau... Commence à discuter !",
-            ephemeral=True
-        )
-        return
-
-    # 2) Défer pour éviter le timeout (et montrer le spinner)
+    # Defer pour le spinner (et éviter timeout)
     try:
         await interaction.response.defer(ephemeral=True, thinking=True)
     except Exception:
-        pass  # si déjà répondu quelque part, on ignore
+        pass
 
-    try:
-        data = xp_data[user_id]
-        level = data.get("level", 0)
-        xp = data.get("xp", 0)
+    user_id = str(interaction.user.id)
+    async with XP_LOCK:
+        data = XP_CACHE.get(user_id)
+        if not data:
+            await interaction.followup.send("Tu n'as pas encore de niveau... Commence à discuter !", ephemeral=True)
+            return
+        level = int(data.get("level", 0))
+        xp = int(data.get("xp", 0))
         xp_next = (level + 1) ** 2 * 100
 
-        # 3) Génération de l'image
+    try:
         image = await generate_rank_card(interaction.user, level, xp, xp_next)
         file = discord.File(fp=image, filename="rank.png")
-
-        # 4) Tentative 1 : envoi EPHEMERAL avec fichier
         try:
             await interaction.followup.send(file=file, ephemeral=True)
-            return
         except discord.Forbidden:
             pass
         except discord.HTTPException as e:
             logging.warning(f"/rang: envoi ephemeral échoué, fallback public. Raison: {e}")
-
-        # 5) Fallback : envoi public
-        try:
             await interaction.channel.send(
                 content=f"{interaction.user.mention} voici ta carte de niveau :",
                 file=file
@@ -343,25 +423,12 @@ async def rang(interaction: discord.Interaction):
                 "Je n'ai pas pu l'envoyer en privé, je l'ai postée dans le salon.",
                 ephemeral=True
             )
-        except Exception as e:
-            logging.exception(f"/rang: échec envoi public: {e}")
-            await interaction.followup.send(
-                "❌ Impossible d'envoyer l'image (vérifie la permission **Joindre des fichiers** pour le bot).",
-                ephemeral=True
-            )
-
     except ImportError as e:
         logging.exception(f"/rang: ImportError (Pillow manquante ?) {e}")
-        await interaction.followup.send(
-            "❌ Erreur interne: dépendance manquante (Pillow).",
-            ephemeral=True
-        )
+        await interaction.followup.send("❌ Erreur interne: dépendance manquante (Pillow).", ephemeral=True)
     except Exception as e:
         logging.exception(f"/rang: exception inattendue: {e}")
-        await interaction.followup.send(
-            "❌ Une erreur est survenue pendant la génération de la carte.",
-            ephemeral=True
-        )
+        await interaction.followup.send("❌ Une erreur est survenue pendant la génération de la carte.", ephemeral=True)
 
 @bot.tree.command(name="vocaux", description="Publier (ou ré-attacher) les boutons pour créer des salons vocaux")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -377,6 +444,7 @@ async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1,
         await interaction.response.defer(thinking=True, ephemeral=True)
     except Exception:
         pass
+
     if interaction.user.id != OWNER_ID:
         await interaction.followup.send("❌ Commande réservée au propriétaire.", ephemeral=True); return
     if interaction.guild is None:
@@ -384,8 +452,12 @@ async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1,
     ch = interaction.channel
     if ch is None:
         await interaction.followup.send("❌ Salon introuvable.", ephemeral=True); return
-    me = interaction.guild.me
+
+    me = (interaction.guild.me or interaction.guild.get_member(bot.user.id))
+    if not me:
+        await interaction.followup.send("❌ Impossible de vérifier mes permissions.", ephemeral=True); return
     perms = ch.permissions_for(me)
+
     if not perms.manage_messages or not perms.read_message_history:
         await interaction.followup.send("❌ Il me manque les permissions **Gérer les messages** et/ou **Lire l’historique**.", ephemeral=True); return
     try:
@@ -394,6 +466,7 @@ async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1,
             await interaction.followup.send(f"🧹 {len(deleted)} messages supprimés.", ephemeral=True); return
     except Exception as e:
         logging.warning(f"Purge bulk échouée, fallback lent. Raison: {e}")
+
     count = 0
     try:
         async for msg in ch.history(limit=nb):
@@ -435,15 +508,18 @@ async def lfg(interaction: discord.Interaction, jeu: str, plateforme: app_comman
         start_dt = parse_when(heure)
     except ValueError as e:
         await interaction.followup.send(f"❌ {e}", ephemeral=True); return
+
     guild = interaction.guild
     if guild is None:
         await interaction.followup.send("❌ Utilisable uniquement sur un serveur.", ephemeral=True); return
+
     cat_id = LFG_CATEGORIES.get(categorie.value)
     category = guild.get_channel(cat_id)
     if not isinstance(category, discord.CategoryChannel):
         category = guild.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
             await interaction.followup.send("❌ Catégorie cible introuvable.", ephemeral=True); return
+
     vc_name = f"{plateforme.value} {jeu}"
     try:
         voice = await guild.create_voice_channel(name=vc_name, category=category, reason=f"LFG par {interaction.user} | {jeu}")
@@ -451,6 +527,7 @@ async def lfg(interaction: discord.Interaction, jeu: str, plateforme: app_comman
     except Exception as e:
         logging.error(f"Création VC LFG échouée: {e}")
         await interaction.followup.send("❌ Impossible de créer le salon vocal.", ephemeral=True); return
+
     dt_str = start_dt.strftime("%Y-%m-%d %H:%M")
     emb = discord.Embed(
         title="🎮 Session LFG",
@@ -464,6 +541,7 @@ async def lfg(interaction: discord.Interaction, jeu: str, plateforme: app_comman
     except Exception as e:
         logging.error(f"Création message/thread LFG échouée: {e}")
         await interaction.followup.send("❌ Impossible de créer le thread.", ephemeral=True); return
+
     session_key = msg.id
     LFG_SESSIONS[session_key] = {
         "creator": interaction.user.id,
@@ -529,6 +607,8 @@ async def auto_backup_xp(interval_seconds: int = 3600):
     await bot.wait_until_ready()
     while not bot.is_closed():
         try:
+            # Flush cache → disque puis copie en backup
+            await xp_flush_cache_to_disk()
             source = Path(XP_FILE)
             backup = Path(BACKUP_FILE)
             if source.exists():
@@ -540,7 +620,7 @@ async def auto_backup_xp(interval_seconds: int = 3600):
 
 async def ensure_vc_buttons_message():
     """
-    Mini‑patch: si le réattachement échoue, on republie un NOUVEAU message avec la vue fraîche.
+    Ré-attache ou republie le message permanent avec la vue de création de salons vocaux.
     """
     await bot.wait_until_ready()
     channel = bot.get_channel(LOBBY_TEXT_CHANNEL)
@@ -551,7 +631,6 @@ async def ensure_vc_buttons_message():
     view = VCButtonView()
     found = None
 
-    # On cherche un ancien message "permanent"
     try:
         async for msg in channel.history(limit=100):
             if msg.author == bot.user and PERMA_MESSAGE_MARK in (msg.content or ""):
@@ -581,35 +660,56 @@ async def ensure_vc_buttons_message():
         logging.error(f"Erreur envoi message permanent: {e}")
 
 async def reminder_loop_24h():
+    """
+    Chaque 24h, ping les membres sans rôle. Anti-spam: max N rappels/jour/serveur.
+    """
     await bot.wait_until_ready()
-    guild = discord.utils.get(bot.guilds)
-    channel = bot.get_channel(CHANNEL_ROLES)
-    if guild is None or channel is None:
-        logging.warning("❌ Serveur ou salon de rôles introuvable.")
-        return
     while not bot.is_closed():
-        logging.info("🔁 Vérification des membres sans rôle...")
-        for member in guild.members:
-            if member.bot: continue
-            if len(member.roles) <= 1:
-                try:
-                    await channel.send(f"{member.mention} tu n’as pas encore choisi ton rôle ici. Clique sur un bouton pour sélectionner ta plateforme 🎮💻")
-                except Exception as e:
-                    logging.error(f"Erreur rappel rôles {member.display_name}: {e}")
+        today = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
+        for guild in bot.guilds:
+            channel = guild.get_channel(CHANNEL_ROLES)
+            if not isinstance(channel, discord.TextChannel):
+                continue
+
+            me = guild.me or guild.get_member(bot.user.id)
+            if not me or not channel.permissions_for(me).send_messages:
+                continue
+
+            sent = 0
+            for member in guild.members:
+                if member.bot:
+                    continue
+                if len(member.roles) <= 1:
+                    key = (guild.id, member.id)
+                    last = REMINDER_LAST.get(key)
+                    if last == today:
+                        continue
+                    try:
+                        await channel.send(
+                            f"{member.mention} tu n’as pas encore choisi ton rôle ici. "
+                            "Clique sur un bouton pour sélectionner ta plateforme 🎮💻"
+                        )
+                        REMINDER_LAST[key] = today
+                        sent += 1
+                        if sent >= REMINDER_DAILY_CAP_PER_GUILD:
+                            break
+                    except Exception as e:
+                        logging.error(f"Erreur rappel rôles {member} ({guild.id}): {e}")
         await asyncio.sleep(86400)
 
 async def daily_summary_loop():
-    """Chaque minuit (Europe/Paris), poste le résumé d’activité du **jour qui vient de se terminer**."""
+    """
+    Chaque minuit (Europe/Paris), poste le résumé d’activité du jour écoulé pour CHAQUE serveur.
+    """
     await bot.wait_until_ready()
     while not bot.is_closed():
         now = datetime.now(PARIS_TZ)
-        # prochain minuit
         tomorrow = now + timedelta(days=1)
         next_midnight = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
         delay = (next_midnight - now).total_seconds()
         await asyncio.sleep(max(1, delay))
 
-        # Jour écoulé (celui qu'on résume)
+        # Résume le jour écoulé
         day_key = now.strftime("%Y-%m-%d")
         stats = load_daily_stats()
 
@@ -617,9 +717,8 @@ async def daily_summary_loop():
             gkey = str(guild.id)
             gstats = stats.get(gkey, {}).get(day_key, {})
             if not gstats:
-                continue  # rien à résumer pour ce serveur
+                continue
 
-            # Construit classements
             def u_name(uid: str) -> str:
                 member = guild.get_member(int(uid))
                 return member.display_name if member else f"User {uid}"
@@ -631,7 +730,6 @@ async def daily_summary_loop():
                 score = msgs + vmin
                 items.append((uid, msgs, vmin, score))
 
-            # Tri
             top_msg  = sorted(items, key=lambda x: x[1], reverse=True)[:5]
             top_vc   = sorted(items, key=lambda x: x[2], reverse=True)[:5]
             top_mvp  = sorted(items, key=lambda x: x[3], reverse=True)[:5]
@@ -639,7 +737,6 @@ async def daily_summary_loop():
             total_msgs = sum(x[1] for x in items)
             total_vmin = sum(x[2] for x in items)
 
-            # Compose l'embed
             embed = discord.Embed(
                 title=f"📈 Résumé du jour — {day_key}",
                 description=f"**Total** : {total_msgs} messages • {total_vmin} min en vocal",
@@ -649,29 +746,28 @@ async def daily_summary_loop():
                 embed.add_field(
                     name="💬 Top Messages",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {msgs} msgs"
-                                         for i, (uid, msgs, _, _) in enumerate(top_msg)]),
+                                     for i, (uid, msgs, _, _) in enumerate(top_msg)]),
                     inline=False
                 )
             if top_vc:
                 embed.add_field(
                     name="🎙️ Top Vocal (min)",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {vmin} min"
-                                         for i, (uid, _, vmin, _) in enumerate(top_vc)]),
+                                     for i, (uid, _, vmin, _) in enumerate(top_vc)]),
                     inline=False
                 )
             if top_mvp:
                 embed.add_field(
                     name="🏆 MVP (messages + minutes)",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {score} pts"
-                                         for i, (uid, msgs, vmin, score) in enumerate(top_mvp)]),
+                                     for i, (uid, msgs, vmin, score) in enumerate(top_mvp)]),
                     inline=False
                 )
 
-            # Envoi @everyone
             ch = guild.get_channel(ACTIVITY_SUMMARY_CH)
             if isinstance(ch, discord.TextChannel):
                 try:
-                    me = guild.me
+                    me = guild.me or guild.get_member(bot.user.id)
                     if not ch.permissions_for(me).mention_everyone:
                         await ch.send("⚠️ Je n'ai pas la permission de mentionner @everyone ici.")
                     content = "@everyone — Voici les joueurs les plus actifs d'hier !"
@@ -679,7 +775,7 @@ async def daily_summary_loop():
                 except Exception as e:
                     logging.error(f"Envoi résumé quotidien échoué (guild {guild.id}): {e}")
 
-        # (Optionnel) purge stats anciennes (> 14 jours)
+        # Purge stats anciennes (> 14 jours)
         try:
             cutoff = (now - timedelta(days=14)).strftime("%Y-%m-%d")
             for gkey in list(stats.keys()):
@@ -692,6 +788,95 @@ async def daily_summary_loop():
         except Exception as e:
             logging.error(f"Purge stats anciennes échouée: {e}")
 
+async def weekly_summary_loop():
+    """Chaque lundi 00:05 (Europe/Paris), poste le résumé hebdo (semaine précédente lun→dim)."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        now = datetime.now(PARIS_TZ)
+        # prochain lundi
+        days_ahead = (7 - now.weekday()) % 7  # 0 = lundi
+        if days_ahead == 0 and (now.hour, now.minute) >= (0, 5):
+            days_ahead = 7
+        next_run = (now + timedelta(days=days_ahead)).replace(hour=0, minute=5, second=0, microsecond=0)
+        await asyncio.sleep(max(1, (next_run - now).total_seconds()))
+
+        # Semaine précédente (lundi -> dimanche)
+        end = next_run - timedelta(seconds=1)
+        last_sunday = (end - timedelta(days=end.weekday()+1-7)).date()
+        last_monday = last_sunday - timedelta(days=6)
+
+        stats = load_daily_stats()
+
+        for guild in bot.guilds:
+            gkey = str(guild.id)
+
+            # agrège la semaine
+            items = {}  # uid -> {"msg":int,"voice_min":int}
+            day = last_monday
+            while day <= last_sunday:
+                day_key = day.strftime("%Y-%m-%d")
+                gstats = stats.get(gkey, {}).get(day_key, {})
+                for uid, data in gstats.items():
+                    entry = items.setdefault(uid, {"msg": 0, "voice_min": 0})
+                    entry["msg"] += int(data.get("msg", 0))
+                    entry["voice_min"] += int(data.get("voice_min", 0))
+                day += timedelta(days=1)
+
+            if not items:
+                continue
+
+            def u_name(uid: str) -> str:
+                m = guild.get_member(int(uid))
+                return m.display_name if m else f"User {uid}"
+
+            table = [(uid, v["msg"], v["voice_min"], v["msg"] + v["voice_min"]) for uid, v in items.items()]
+            top_msg = sorted(table, key=lambda x: x[1], reverse=True)[:5]
+            top_vc  = sorted(table, key=lambda x: x[2], reverse=True)[:5]
+            top_mvp = sorted(table, key=lambda x: x[3], reverse=True)[:5]
+
+            total_msgs = sum(x[1] for x in table)
+            total_vmin = sum(x[2] for x in table)
+
+            period_text = f"{last_monday.strftime('%Y-%m-%d')} → {last_sunday.strftime('%Y-%m-%d')}"
+            embed = discord.Embed(
+                title=f"🏁 Résumé hebdo — {period_text}",
+                description=f"**Totaux** : {total_msgs} messages • {total_vmin} min en vocal",
+                color=0x5865F2
+            )
+
+            def medal(i): return "🥇" if i==0 else ("🥈" if i==1 else ("🥉" if i==2 else f"{i+1}."))
+
+            if top_msg:
+                embed.add_field(
+                    name="💬 Top Messages",
+                    value="\n".join([f"**{medal(i)}** {u_name(uid)} — {msgs} msgs"
+                                     for i, (uid, msgs, _, _) in enumerate(top_msg)]),
+                    inline=False
+                )
+            if top_vc:
+                embed.add_field(
+                    name="🎙️ Top Vocal",
+                    value="\n".join([f"**{medal(i)}** {u_name(uid)} — {vmin} min"
+                                     for i, (uid, _, vmin, _) in enumerate(top_vc)]),
+                    inline=False
+                )
+            if top_mvp:
+                embed.add_field(
+                    name="🏆 MVP (msgs + min)",
+                    value="\n".join([f"**{medal(i)}** {u_name(uid)} — {score} pts"
+                                     for i, (uid, _, __, score) in enumerate(top_mvp)]),
+                    inline=False
+                )
+
+            ch = guild.get_channel(ACTIVITY_SUMMARY_CH)
+            if isinstance(ch, discord.TextChannel):
+                try:
+                    await ch.send(content="@everyone — Podium de la semaine !",
+                                  embed=embed,
+                                  allowed_mentions=discord.AllowedMentions(everyone=True))
+                except Exception as e:
+                    logging.error(f"Envoi résumé hebdo échoué (guild {guild.id}): {e}")
+
 # ─────────────────────── VIEWS ─────────────────────────────
 class LiveTikTokView(View):
     def __init__(self):
@@ -703,7 +888,8 @@ class LiveTikTokView(View):
         if not channel:
             await safe_respond(interaction, "❌ Salon cible introuvable.", ephemeral=True)
             return
-        me = interaction.guild.me
+        guild = interaction.guild
+        me = guild.me or guild.get_member(bot.user.id)
         if not channel.permissions_for(me).mention_everyone:
             await safe_respond(interaction, "❌ Je n'ai pas la permission de mentionner @everyone dans ce salon.", ephemeral=True)
             return
@@ -766,37 +952,37 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
+    # Filtrage bot/DM
     if message.author.bot or not message.guild:
         return
 
-    # Ignorer les commandes (! ou /)
-    if message.content.startswith(("!", "/")):
-        return await bot.process_commands(message)
+    # Slash commands ne passent pas par on_message.
+    # Si commande prefix "!", on laisse discord.py gérer et on ne crédite pas d'XP.
+    if message.content.startswith("!"):
+        await bot.process_commands(message)
+        return
 
-    # XP messages (8 XP fixes via MSG_XP)
-    xp_data = load_xp()
+    # Crédit XP messages (via cache)
     user_id = str(message.author.id)
-    if user_id not in xp_data:
-        xp_data[user_id] = {"xp": 0, "level": 0}
+    async with XP_LOCK:
+        user = XP_CACHE.setdefault(user_id, {"xp": 0, "level": 0})
+        user["xp"] += MSG_XP
+        old_level = int(user.get("level", 0))
+        new_level = get_level(int(user["xp"]))
+        if new_level > old_level:
+            user["level"] = new_level
 
-    gained_xp = MSG_XP  # défini plus haut: MSG_XP = 8
-    xp_data[user_id]["xp"] += gained_xp
-
-    old_level = xp_data[user_id]["level"]
-    new_level = get_level(xp_data[user_id]["xp"])
+    # Annonce level-up (hors lock)
     if new_level > old_level:
-        xp_data[user_id]["level"] = new_level
         try:
-            xp = xp_data[user_id]["xp"]
-            await announce_level_up(message.guild, message.author, old_level, new_level, xp)
+            await announce_level_up(message.guild, message.author, old_level, new_level, int(user["xp"]))
         except Exception as e:
-            logging.error(f"Erreur envoi carte niveau : {e}")
-
-    save_xp(xp_data)
+            logging.error(f"Erreur envoi annonce niveau : {e}")
 
     # Stats quotidiennes (messages)
     incr_daily_stat(message.guild.id, message.author.id, msg_inc=1)
 
+    # Laisse la possibilité d'autres commandes prefix
     await bot.process_commands(message)
 
 @bot.event
@@ -832,25 +1018,19 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             seconds_spent = (datetime.utcnow() - joined_at).total_seconds()
             minutes_spent = int(seconds_spent // 60)
             if minutes_spent >= 1:
-                # XP vocal : 3 XP/min
                 gained_xp = minutes_spent * VOICE_XP_PER_MIN
-                xp_data = load_xp()
-                if user_id not in xp_data:
-                    xp_data[user_id] = {"xp": 0, "level": 0}
-                xp_data[user_id]["xp"] += gained_xp
-
-                old_level = xp_data[user_id]["level"]
-                new_level = get_level(xp_data[user_id]["xp"])
+                async with XP_LOCK:
+                    user = XP_CACHE.setdefault(user_id, {"xp": 0, "level": 0})
+                    user["xp"] += gained_xp
+                    old_level = int(user.get("level", 0))
+                    new_level = get_level(int(user["xp"]))
+                    if new_level > old_level:
+                        user["level"] = new_level
                 if new_level > old_level:
-                    xp_data[user_id]["level"] = new_level
                     try:
-                        xp = xp_data[user_id]["xp"]
-                        await announce_level_up(member.guild, member, old_level, new_level, xp)
+                        await announce_level_up(member.guild, member, old_level, new_level, int(user["xp"]))
                     except Exception as e:
                         logging.error(f"Erreur annonce niveau vocal : {e}")
-
-                save_xp(xp_data)
-                # Stats quotidiennes (vocal minutes)
                 incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
 
     # Changement de salon
@@ -860,27 +1040,22 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             seconds_spent = (datetime.utcnow() - joined_at).total_seconds()
             minutes_spent = int(seconds_spent // 60)
             if minutes_spent >= 1:
-                # XP vocal : 3 XP/min (temps dans l'ancien salon)
                 gained_xp = minutes_spent * VOICE_XP_PER_MIN
-                xp_data = load_xp()
-                if user_id not in xp_data:
-                    xp_data[user_id] = {"xp": 0, "level": 0}
-                xp_data[user_id]["xp"] += gained_xp
-
-                old_level = xp_data[user_id]["level"]
-                new_level = get_level(xp_data[user_id]["xp"])
+                async with XP_LOCK:
+                    user = XP_CACHE.setdefault(user_id, {"xp": 0, "level": 0})
+                    user["xp"] += gained_xp
+                    old_level = int(user.get("level", 0))
+                    new_level = get_level(int(user["xp"]))
+                    if new_level > old_level:
+                        user["level"] = new_level
                 if new_level > old_level:
-                    xp_data[user_id]["level"] = new_level
                     try:
-                        xp = xp_data[user_id]["xp"]
-                        await announce_level_up(member.guild, member, old_level, new_level, xp)
+                        await announce_level_up(member.guild, member, old_level, new_level, int(user["xp"]))
                     except Exception as e:
                         logging.error(f"Erreur annonce niveau vocal (move): {e}")
-
-                save_xp(xp_data)
                 incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
 
-        # redémarre le chrono de présence dans le nouveau salon
+        # redémarre le chrono pour le nouveau salon
         voice_times[user_id] = datetime.utcnow()
 
     # Suppression des salons temporaires vides
@@ -891,16 +1066,17 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
-
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
+    await xp_bootstrap_cache()
     bot.add_view(VCButtonView())
     bot.add_view(LiveTikTokView())
     await bot.tree.sync()
     asyncio.create_task(reminder_loop_24h())
     asyncio.create_task(auto_backup_xp())
     asyncio.create_task(ensure_vc_buttons_message())
-    asyncio.create_task(daily_summary_loop())  # ⬅️ Résumé quotidien
+    asyncio.create_task(daily_summary_loop())   # Résumé quotidien
+    asyncio.create_task(weekly_summary_loop())  # Résumé hebdo
 
 bot.setup_hook = _setup_hook
 
