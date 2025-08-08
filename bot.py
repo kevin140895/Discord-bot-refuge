@@ -18,6 +18,33 @@ MSG_XP = 8               # XP par message texte
 VOICE_XP_PER_MIN = 3     # XP par minute en vocal
 # Formule de niveau: seuil (niveau n -> n+1) = (n+1)^2 * 100 XP
 
+# ── RÔLES PAR NIVEAU ───────────────────────────────────────
+LEVEL_ROLE_REWARDS = {
+    5:  1403510226354700430,  # Bronze
+    10: 1403510368340410550,  # Argent
+    20: 1403510466818605118,  # Or
+}
+
+# True = le joueur ne garde que le plus haut palier
+# False = il cumule tous les rôles gagnés
+REMOVE_LOWER_TIER_ROLES = True
+
+TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
+
+# ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
+# Limite par catégorie (par défaut: pas de limite si non présent dans ce dict)
+TEMP_VC_LIMITS: dict[int, int] = {
+    TEMP_VC_CATEGORY: 5,  # ex: max 5 salons temporaires dans la catégorie "temp"
+    # 1400553078373089301: 3,  # (optionnel) limite pour la catégorie LFG "fps"
+}
+
+# Auto-rename du salon selon le jeu détecté (Discord Rich Presence)
+AUTO_RENAME_ENABLED = True
+# Format du nom : {base} = PC/Crossplay/Consoles/Chat | {game} = nom du jeu détecté
+AUTO_RENAME_FORMAT = "{base} • {game}"
+# Fréquence min entre deux renames pour un même salon (anti-spam)
+AUTO_RENAME_COOLDOWN_SEC = 45
+
 # ─────────────────────── ENV & LOGGING ─────────────────────
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -45,7 +72,6 @@ LEVEL_UP_CHANNEL    = 1402419913716531352
 CHANNEL_ROLES       = 1400560866478395512
 CHANNEL_WELCOME     = 1400550333796716574
 LOBBY_TEXT_CHANNEL  = 1402258805533970472
-TEMP_VC_CATEGORY    = 1400559884117999687
 TIKTOK_ANNOUNCE_CH  = 1400552164979507263
 ACTIVITY_SUMMARY_CH = 1400552164979507263
 
@@ -70,20 +96,12 @@ VC_PROFILES = {
 VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?: (\d+))?$", re.I)
 PERMA_MESSAGE_MARK = "[VC_BUTTONS_PERMANENT]"
 
-# ── RÔLES PAR NIVEAU ───────────────────────────────────────
-# ⚠️ Remplace les IDs par ceux de TON serveur
-LEVEL_ROLE_REWARDS: dict[int, int] = {
-    5:  123456789012345678,   # ex: Bronze
-    10: 223456789012345678,   # ex: Silver
-    20: 323456789012345678,   # ex: Gold
-}
-REMOVE_LOWER_TIER_ROLES = True
-
 # ─────────────────────── INTENTS / BOT ──────────────────────
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True
 intents.message_content = True
+intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ─────────────────────── ETATS RUNTIME ──────────────────────
@@ -192,6 +210,74 @@ async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed:
     img.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
+
+def _base_name_from_channel(ch: discord.VoiceChannel) -> str:
+    """Extrait le 'base' depuis le nom (PC/Crossplay/Consoles/Chat [n])."""
+    m = VOC_PATTERN.match(ch.name)
+    if not m:
+        # fallback : premier mot jusqu'au premier '•'
+        return ch.name.split("•", 1)[0].strip()
+    return m.group(1)
+
+def _target_name(base: str, game: str | None) -> str:
+    if AUTO_RENAME_ENABLED and game:
+        name = AUTO_RENAME_FORMAT.format(base=base, game=game.strip())
+        return name[:100]  # hard cap Discord
+    return base
+
+def _count_temp_vc_in_category(cat: discord.CategoryChannel) -> int:
+    return sum(1 for ch in cat.voice_channels if ch.id in TEMP_VC_IDS)
+
+# Anti-spam renommage
+_last_rename_at: dict[int, float] = {}  # channel_id -> timestamp
+def _can_rename(ch_id: int) -> bool:
+    ts = _last_rename_at.get(ch_id, 0)
+    now = asyncio.get_event_loop().time()
+    if now - ts < AUTO_RENAME_COOLDOWN_SEC:
+        return False
+    _last_rename_at[ch_id] = now
+    return True
+
+async def maybe_rename_channel_by_game(ch: discord.VoiceChannel):
+    """Renomme le salon selon le jeu majoritaire, si pertinent."""
+    if not AUTO_RENAME_ENABLED:
+        return
+    if not isinstance(ch, discord.VoiceChannel):
+        return
+    if not ch.members:
+        # salon vide : revenir au base name si différent
+        base = _base_name_from_channel(ch)
+        if ch.name != base and _can_rename(ch.id):
+            try:
+                await ch.edit(name=base, reason="Auto-rename: salon vide, reset base")
+            except Exception as e:
+                logging.debug(f"Rename reset failed: {e}")
+        return
+
+    # Collecte des jeux joués
+    counts: dict[str, int] = {}
+    for m in ch.members:
+        # On cherche une activité "Playing"
+        if not m.activities:
+            continue
+        for act in m.activities:
+            if isinstance(act, discord.Game) and act.name:
+                counts[act.name] = counts.get(act.name, 0) + 1
+                break  # on prend la 1ère activité jeu
+
+    # Si pas de jeu détecté -> rien à faire (garde le base)
+    game = None
+    if counts:
+        # jeu majoritaire
+        game = max(counts.items(), key=lambda kv: kv[1])[0]
+
+    base = _base_name_from_channel(ch)
+    target = _target_name(base, game)
+    if target != ch.name and _can_rename(ch.id):
+        try:
+            await ch.edit(name=target, reason=f"Auto-rename: jeu détecté = {game or 'aucun'}")
+        except Exception as e:
+            logging.debug(f"Rename failed: {e}")
 
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
 async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
@@ -359,30 +445,51 @@ async def liendiscord(interaction: discord.Interaction):
         ephemeral=False
     )
 
-# 🧪 MESSAGE D'ESSAI DANS LE SALON NIVEAUX
-@bot.tree.command(name="test_niveau", description="Poste un exemple d'annonce de level-up dans le salon niveaux")
+# 🧪 MESSAGE D'ESSAI DANS LE SALON NIVEAUX (owner-only)
+@bot.tree.command(name="test_niveau", description="Tester l'annonce de level-up (réservé au propriétaire)")
 @app_commands.describe(
-    membre="Membre à tester (par défaut: toi)",
-    ancien_niveau="Ancien niveau (par défaut 4)",
-    nouveau_niveau="Nouveau niveau (par défaut 5)",
-    xp="XP actuel (optionnel)"
+    niveau="(Optionnel) Test simple: nouveau niveau à simuler",
+    membre="(Optionnel) Membre ciblé (par défaut: toi)",
+    ancien_niveau="(Optionnel) Ancien niveau (défaut 4)",
+    nouveau_niveau="(Optionnel) Nouveau niveau (défaut 5)",
+    xp="(Optionnel) XP actuel; par défaut = seuil du nouveau niveau"
 )
 async def test_niveau(
     interaction: discord.Interaction,
+    niveau: int | None = None,
     membre: discord.Member | None = None,
     ancien_niveau: app_commands.Range[int, 0, 999] = 4,
     nouveau_niveau: app_commands.Range[int, 1, 1000] = 5,
     xp: app_commands.Range[int, 0, 10_000_000] | None = None
 ):
-    await interaction.response.defer(ephemeral=True)
-    member = membre or interaction.user
-    if nouveau_niveau <= ancien_niveau:
-        await interaction.followup.send("❌ Le nouveau niveau doit être supérieur à l'ancien.", ephemeral=True)
+    # Restriction propriétaire
+    if interaction.user.id != 541417878314942495:
+        await interaction.response.send_message("❌ Commande réservée au propriétaire.", ephemeral=True)
         return
-    if xp is None:
-        xp = (nouveau_niveau ** 2 * 100)  # met l'XP au seuil mini du nouveau niveau pour l'aperçu
+
+    await interaction.response.defer(ephemeral=True)
+
+    # Mode simple: /test_niveau niveau:12
+    if niveau is not None:
+        if niveau <= 0:
+            await interaction.followup.send("❌ Le niveau doit être > 0.", ephemeral=True)
+            return
+        member = interaction.user
+        old_lvl = max(0, niveau - 1)
+        new_lvl = niveau
+        xp_val = xp if xp is not None else (new_lvl ** 2 * 100)
+    else:
+        # Mode avancé: membre/anciens/nouveaux/xp
+        member = membre or interaction.user
+        if nouveau_niveau <= ancien_niveau:
+            await interaction.followup.send("❌ Le nouveau niveau doit être supérieur à l'ancien.", ephemeral=True)
+            return
+        old_lvl = ancien_niveau
+        new_lvl = nouveau_niveau
+        xp_val = xp if xp is not None else (new_lvl ** 2 * 100)
+
     try:
-        await announce_level_up(interaction.guild, member, ancien_niveau, nouveau_niveau, xp)
+        await announce_level_up(interaction.guild, member, old_lvl, new_lvl, xp_val)
         await interaction.followup.send("✅ Message d'essai envoyé dans le salon niveaux.", ephemeral=True)
     except Exception as e:
         logging.error(f"/test_niveau échec: {e}")
@@ -913,18 +1020,37 @@ class VCButtonView(View):
             await safe_respond(interaction, "❌ Catégorie vocale temporaire introuvable.", ephemeral=True)
             return
         name = next_vc_name(guild, profile)
+
+        # 🔒 Limite par catégorie
+        limit = TEMP_VC_LIMITS.get(category.id)
+        if limit is not None:
+            current = _count_temp_vc_in_category(category)
+            if current >= limit:
+                await safe_respond(
+                    interaction,
+                    f"⛔ Limite atteinte : il y a déjà **{current}/{limit}** salons temporaires dans **{category.name}**.",
+                    ephemeral=True
+                )
+                return
+
         try:
             vc = await guild.create_voice_channel(
                 name=name, category=category,
                 reason=f"Salon temporaire ({profile}) demandé par {interaction.user}",
             )
             TEMP_VC_IDS.add(vc.id)
+            # Auto-rename initial (si des joueurs sont déjà dedans après move)
             if interaction.user.voice and interaction.user.voice.channel:
                 await interaction.user.move_to(vc, reason="Création de salon temporaire")
                 moved_text = f"Tu as été déplacé dans **{vc.name}**."
             else:
                 moved_text = f"Rejoins **{vc.name}** quand tu veux."
+
             await safe_respond(interaction, f"✅ Salon **{vc.name}** créé. {moved_text}\n_Ce salon sera supprimé lorsqu'il sera vide._", ephemeral=True)
+
+            # Tente une première mise à jour du nom (si un jeu est détecté)
+            await maybe_rename_channel_by_game(vc)
+
         except Exception as e:
             logging.error(f"Erreur création VC: {e}")
             await safe_respond(interaction, "❌ Impossible de créer le salon.", ephemeral=True)
@@ -1065,6 +1191,16 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             TEMP_VC_IDS.discard(before.channel.id)
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
+    # ... après avoir géré les minutes/XP etc.
+
+    # Renommage sur évènements
+    try:
+        if before.channel and isinstance(before.channel, discord.VoiceChannel):
+            await maybe_rename_channel_by_game(before.channel)
+        if after.channel and isinstance(after.channel, discord.VoiceChannel):
+            await maybe_rename_channel_by_game(after.channel)
+    except Exception as e:
+        logging.debug(f"Auto-rename hook failed: {e}")
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
