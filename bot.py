@@ -13,7 +13,14 @@ from discord import app_commands, Embed
 from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
+
+# ── XP CONFIG ───────────────────────────────────────────────
+MSG_XP = 8               # XP par message texte
+VOICE_XP_PER_MIN = 3     # XP par minute en vocal
+
+# ─────────────────────── ENV & LOGGING ─────────────────────
 load_dotenv(override=True)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # accepte plusieurs clés possibles et logge si rien
 TOKEN = (
@@ -31,19 +38,13 @@ if not TOKEN:
 # ─────────────────────── IMPORTS LOCAUX ─────────────────────
 from view import PlayerTypeView
 
-# ─────────────────────── LOGGER ─────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
 # ─────────────────────── CONFIG ─────────────────────────────
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-
 # Fichiers de données
 XP_FILE = "data/data.json"
 BACKUP_FILE = "data/backup.json"
 DAILY_STATS_FILE = "data/daily_stats.json"  # stats quotidiennes (msg + minutes vocal)
 
-# IDs salons / catégories (mets les tiens)
+# IDs salons / catégories (à adapter)
 LEVEL_UP_CHANNEL    = 1402419913716531352
 CHANNEL_ROLES       = 1400560866478395512
 CHANNEL_WELCOME     = 1400550333796716574
@@ -92,6 +93,7 @@ TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
 LFG_SESSIONS: dict[int, dict] = {}     # message_id -> session LFG
 
 # ─────────────────────── HELPERS ────────────────────────────
+
 def ensure_data_dir():
     Path(XP_FILE).parent.mkdir(parents=True, exist_ok=True)
 
@@ -127,7 +129,7 @@ def load_xp() -> dict:
         if backup_path.exists():
             try:
                 data = json.loads(backup_path.read_text(encoding="utf-8"))
-                path.write_text(json.dumps(data, indent=4), encoding="utf-8")
+                path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
                 logging.info("✅ Restauration réussie depuis backup.json.")
                 return data
             except Exception as e:
@@ -173,6 +175,36 @@ async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed:
     img.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
+
+async def announce_level_up(guild: discord.Guild, member: discord.Member, old_level: int, new_level: int, xp: int):
+    """Annonce un level-up dans le salon niveaux avec avatar + carte."""
+    channel = guild.get_channel(LEVEL_UP_CHANNEL)
+    if not isinstance(channel, discord.TextChannel):
+        logging.warning("Salon niveaux introuvable ou invalide.")
+        return
+
+    try:
+        xp_needed = (new_level + 1) ** 2 * 100
+        image = await generate_rank_card(member, new_level, xp, xp_needed)
+        file = discord.File(fp=image, filename="level_up.png")
+
+        embed = discord.Embed(
+            title=f"🚀 Niveau {new_level} débloqué !",
+            description=(
+                f"{member.mention} **passe de {old_level} ➜ {new_level}**\n"
+                f"XP : **{xp} / {xp_needed}**"
+            ),
+            color=0xF4B400,
+            timestamp=datetime.now(PARIS_TZ)
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_image(url="attachment://level_up.png")
+        embed.set_footer(text="GG !")
+
+        await channel.send(content=f"🎉 {member.mention}", embed=embed, file=file)
+    except Exception as e:
+        logging.error(f"Annonce level-up échouée: {e}")
+
 
 def next_vc_name(guild: discord.Guild, base: str) -> str:
     existing_numbers = [
@@ -297,12 +329,11 @@ async def rang(interaction: discord.Interaction):
             await interaction.followup.send(file=file, ephemeral=True)
             return
         except discord.Forbidden:
-            # Pas la permission d'envoyer des fichiers en ephemeral ? (rare)
             pass
         except discord.HTTPException as e:
             logging.warning(f"/rang: envoi ephemeral échoué, fallback public. Raison: {e}")
 
-        # 5) Fallback : on envoie dans le salon (public), si possible
+        # 5) Fallback : envoi public
         try:
             await interaction.channel.send(
                 content=f"{interaction.user.mention} voici ta carte de niveau :",
@@ -320,7 +351,6 @@ async def rang(interaction: discord.Interaction):
             )
 
     except ImportError as e:
-        # Cas typique: Pillow pas installée
         logging.exception(f"/rang: ImportError (Pillow manquante ?) {e}")
         await interaction.followup.send(
             "❌ Erreur interne: dépendance manquante (Pillow).",
@@ -509,28 +539,44 @@ async def auto_backup_xp(interval_seconds: int = 3600):
         await asyncio.sleep(interval_seconds)
 
 async def ensure_vc_buttons_message():
+    """
+    Mini‑patch: si le réattachement échoue, on republie un NOUVEAU message avec la vue fraîche.
+    """
     await bot.wait_until_ready()
     channel = bot.get_channel(LOBBY_TEXT_CHANNEL)
     if not isinstance(channel, discord.TextChannel):
         logging.warning(f"❌ Salon lobby introuvable: {LOBBY_TEXT_CHANNEL}")
         return
+
     view = VCButtonView()
+    found = None
+
+    # On cherche un ancien message "permanent"
     try:
         async for msg in channel.history(limit=100):
             if msg.author == bot.user and PERMA_MESSAGE_MARK in (msg.content or ""):
-                try:
-                    await msg.edit(view=view)
-                    logging.info("🔁 Message permanent des salons vocaux réattaché.")
-                    return
-                except Exception as e:
-                    logging.error(f"Erreur réattachement view: {e}")
-                    break
+                found = msg
+                break
     except Exception as e:
         logging.error(f"Erreur lecture historique: {e}")
+
+    content = (
+        f"{PERMA_MESSAGE_MARK}\n"
+        "👋 **Crée ton salon vocal temporaire** :\n"
+        "Clique sur un bouton ci-dessous. Le salon sera **supprimé quand il sera vide**."
+    )
+
+    if found:
+        try:
+            await found.edit(content=content, view=view)
+            logging.info("🔁 Message permanent réattaché (avec vue).")
+            return
+        except Exception as e:
+            logging.error(f"Échec réattachement, je reposte un nouveau message: {e}")
+
     try:
-        content = f"{PERMA_MESSAGE_MARK}\n👋 **Crée ton salon vocal temporaire** :\nClique sur un bouton ci-dessous. Le salon sera **supprimé quand il sera vide**."
         await channel.send(content, view=view)
-        logging.info("📌 Message permanent des salons vocaux publié.")
+        logging.info("📌 Message permanent des salons vocaux publié (nouveau).")
     except Exception as e:
         logging.error(f"Erreur envoi message permanent: {e}")
 
@@ -603,21 +649,21 @@ async def daily_summary_loop():
                 embed.add_field(
                     name="💬 Top Messages",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {msgs} msgs"
-                                     for i, (uid, msgs, _, _) in enumerate(top_msg)]),
+                                         for i, (uid, msgs, _, _) in enumerate(top_msg)]),
                     inline=False
                 )
             if top_vc:
                 embed.add_field(
                     name="🎙️ Top Vocal (min)",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {vmin} min"
-                                     for i, (uid, _, vmin, _) in enumerate(top_vc)]),
+                                         for i, (uid, _, vmin, _) in enumerate(top_vc)]),
                     inline=False
                 )
             if top_mvp:
                 embed.add_field(
                     name="🏆 MVP (messages + minutes)",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {score} pts"
-                                     for i, (uid, msgs, vmin, score) in enumerate(top_mvp)]),
+                                         for i, (uid, msgs, vmin, score) in enumerate(top_mvp)]),
                     inline=False
                 )
 
@@ -715,30 +761,37 @@ class VCButtonView(View):
 
 # ─────────────────────── EVENTS ─────────────────────────────
 @bot.event
+async def on_ready():
+    logging.info(f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)")
+
+@bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
-    # XP messages
+
+    # Ignorer les commandes (! ou /)
+    if message.content.startswith(("!", "/")):
+        return await bot.process_commands(message)
+
+    # XP messages (8 XP fixes via MSG_XP)
     xp_data = load_xp()
     user_id = str(message.author.id)
     if user_id not in xp_data:
         xp_data[user_id] = {"xp": 0, "level": 0}
-    gained_xp = random.randint(5, 10)
+
+    gained_xp = MSG_XP  # défini plus haut: MSG_XP = 8
     xp_data[user_id]["xp"] += gained_xp
+
     old_level = xp_data[user_id]["level"]
     new_level = get_level(xp_data[user_id]["xp"])
     if new_level > old_level:
         xp_data[user_id]["level"] = new_level
         try:
-            channel = message.guild.get_channel(LEVEL_UP_CHANNEL)
-            if channel:
-                xp = xp_data[user_id]["xp"]
-                xp_needed = (new_level + 1) ** 2 * 100
-                image = await generate_rank_card(message.author, new_level, xp, xp_needed)
-                file = discord.File(fp=image, filename="level_up.png")
-                await channel.send(content=f"🎉 {message.author.mention} est passé **niveau {new_level}** !", file=file)
+            xp = xp_data[user_id]["xp"]
+            await announce_level_up(message.guild, message.author, old_level, new_level, xp)
         except Exception as e:
             logging.error(f"Erreur envoi carte niveau : {e}")
+
     save_xp(xp_data)
 
     # Stats quotidiennes (messages)
@@ -779,28 +832,24 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             seconds_spent = (datetime.utcnow() - joined_at).total_seconds()
             minutes_spent = int(seconds_spent // 60)
             if minutes_spent >= 1:
-                # XP vocal
-                gained_xp = minutes_spent * 5
+                # XP vocal : 3 XP/min
+                gained_xp = minutes_spent * VOICE_XP_PER_MIN
                 xp_data = load_xp()
                 if user_id not in xp_data:
                     xp_data[user_id] = {"xp": 0, "level": 0}
                 xp_data[user_id]["xp"] += gained_xp
+
                 old_level = xp_data[user_id]["level"]
                 new_level = get_level(xp_data[user_id]["xp"])
                 if new_level > old_level:
                     xp_data[user_id]["level"] = new_level
                     try:
-                        channel = member.guild.get_channel(LEVEL_UP_CHANNEL)
-                        if channel:
-                            xp = xp_data[user_id]["xp"]
-                            xp_needed = (new_level + 1) ** 2 * 100
-                            image = await generate_rank_card(member, new_level, xp, xp_needed)
-                            file = discord.File(fp=image, filename="level_up.png")
-                            await channel.send(content=f"🎉 {member.mention} est passé **niveau {new_level}** !", file=file)
+                        xp = xp_data[user_id]["xp"]
+                        await announce_level_up(member.guild, member, old_level, new_level, xp)
                     except Exception as e:
-                        logging.error(f"Erreur XP vocal : {e}")
-                save_xp(xp_data)
+                        logging.error(f"Erreur annonce niveau vocal : {e}")
 
+                save_xp(xp_data)
                 # Stats quotidiennes (vocal minutes)
                 incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
 
@@ -811,26 +860,27 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             seconds_spent = (datetime.utcnow() - joined_at).total_seconds()
             minutes_spent = int(seconds_spent // 60)
             if minutes_spent >= 1:
+                # XP vocal : 3 XP/min (temps dans l'ancien salon)
+                gained_xp = minutes_spent * VOICE_XP_PER_MIN
                 xp_data = load_xp()
                 if user_id not in xp_data:
                     xp_data[user_id] = {"xp": 0, "level": 0}
-                xp_data[user_id]["xp"] += minutes_spent * 5
+                xp_data[user_id]["xp"] += gained_xp
+
                 old_level = xp_data[user_id]["level"]
                 new_level = get_level(xp_data[user_id]["xp"])
                 if new_level > old_level:
                     xp_data[user_id]["level"] = new_level
                     try:
-                        channel = member.guild.get_channel(LEVEL_UP_CHANNEL)
-                        if channel:
-                            xp = xp_data[user_id]["xp"]
-                            xp_needed = (new_level + 1) ** 2 * 100
-                            image = await generate_rank_card(member, new_level, xp, xp_needed)
-                            file = discord.File(fp=image, filename="level_up.png")
-                            await channel.send(content=f"🎉 {member.mention} est passé **niveau {new_level}** !", file=file)
+                        xp = xp_data[user_id]["xp"]
+                        await announce_level_up(member.guild, member, old_level, new_level, xp)
                     except Exception as e:
-                        logging.error(f"Erreur XP vocal (move): {e}")
+                        logging.error(f"Erreur annonce niveau vocal (move): {e}")
+
                 save_xp(xp_data)
                 incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
+
+        # redémarre le chrono de présence dans le nouveau salon
         voice_times[user_id] = datetime.utcnow()
 
     # Suppression des salons temporaires vides
@@ -841,12 +891,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
-# ─────────────────────── VIEWS PERSISTANTES & SETUP ───────────────────────
-class VCButtonView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-    # (callbacks définis plus haut)
 
+# ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
     bot.add_view(VCButtonView())
     bot.add_view(LiveTikTokView())
@@ -860,6 +906,4 @@ bot.setup_hook = _setup_hook
 
 # ─────────────────────── MAIN ──────────────────────────────
 if __name__ == "__main__":
-    if not TOKEN:
-        raise RuntimeError("DISCORD_TOKEN manquant. Vérifie ton .env")
     bot.run(TOKEN)
