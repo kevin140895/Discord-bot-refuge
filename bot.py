@@ -13,6 +13,19 @@ from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
 
+# ─────────────────────── ENV & LOGGING ─────────────────────
+load_dotenv(override=True)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.getLogger().setLevel(logging.DEBUG)
+
+# ─────────────────────── INTENTS / BOT ─────────────────────
+intents = discord.Intents.default()
+intents.members = True
+intents.voice_states = True
+intents.message_content = True
+intents.presences = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 # ── XP CONFIG ───────────────────────────────────────────────
 MSG_XP = 8               # XP par message texte
 VOICE_XP_PER_MIN = 3     # XP par minute en vocal
@@ -44,21 +57,6 @@ AUTO_RENAME_ENABLED = True
 AUTO_RENAME_FORMAT = "{base} • {game}"
 # Fréquence min entre deux renames pour un même salon (anti-spam)
 AUTO_RENAME_COOLDOWN_SEC = 45
-
-# ─────────────────────── ENV & LOGGING ─────────────────────
-load_dotenv(override=True)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-TOKEN = (
-    os.getenv("DISCORD_TOKEN")
-    or os.getenv("TOKEN")
-    or os.getenv("BOT_TOKEN")
-)
-
-if not TOKEN:
-    seen = [k for k in os.environ.keys() if "TOKEN" in k or "DISCORD" in k]
-    logging.error("Aucun token trouvé. Clés visibles: %s", ", ".join(sorted(seen)) or "aucune")
-    raise RuntimeError("DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables")
 
 # ─────────────────────── IMPORTS LOCAUX ─────────────────────
 from view import PlayerTypeView  # inchangé
@@ -96,14 +94,6 @@ VC_PROFILES = {
 VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?: (\d+))?$", re.I)
 PERMA_MESSAGE_MARK = "[VC_BUTTONS_PERMANENT]"
 
-# ─────────────────────── INTENTS / BOT ──────────────────────
-intents = discord.Intents.default()
-intents.members = True
-intents.voice_states = True
-intents.message_content = True
-intents.presences = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
 # ─────────────────────── ETATS RUNTIME ──────────────────────
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
@@ -112,6 +102,17 @@ LFG_SESSIONS: dict[int, dict] = {}     # message_id -> session LFG
 # Anti-spam: derniers rappels rôles par (guild_id, user_id) -> date 'YYYY-MM-DD'
 REMINDER_LAST: dict[tuple[int, int], str] = {}
 REMINDER_DAILY_CAP_PER_GUILD = 20  # maximum de rappels/jour/serveur
+
+# ─────────────────────── TOKEN ──────────────────────────────
+TOKEN = (
+    os.getenv("DISCORD_TOKEN")
+    or os.getenv("TOKEN")
+    or os.getenv("BOT_TOKEN")
+)
+if not TOKEN:
+    seen = [k for k in os.environ.keys() if "TOKEN" in k or "DISCORD" in k]
+    logging.error("Aucun token trouvé. Clés visibles: %s", ", ".join(sorted(seen)) or "aucune")
+    raise RuntimeError("DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables")
 
 # ─────────────────────── FICHIERS & XP CACHE ────────────────
 def ensure_data_dir():
@@ -239,13 +240,14 @@ def _can_rename(ch_id: int) -> bool:
     return True
 
 async def maybe_rename_channel_by_game(ch: discord.VoiceChannel):
-    """Renomme le salon selon le jeu majoritaire, si pertinent."""
+    """Renomme le salon selon le jeu majoritaire (via Rich Presence)."""
     if not AUTO_RENAME_ENABLED:
         return
     if not isinstance(ch, discord.VoiceChannel):
         return
+
+    # si vide -> reset au nom "base"
     if not ch.members:
-        # salon vide : revenir au base name si différent
         base = _base_name_from_channel(ch)
         if ch.name != base and _can_rename(ch.id):
             try:
@@ -254,25 +256,22 @@ async def maybe_rename_channel_by_game(ch: discord.VoiceChannel):
                 logging.debug(f"Rename reset failed: {e}")
         return
 
-    # Collecte des jeux joués
+    # Laisse le temps à Discord d'envoyer les presences
+    await asyncio.sleep(2)
+
     counts: dict[str, int] = {}
     for m in ch.members:
-        # On cherche une activité "Playing"
-        if not m.activities:
-            continue
-        for act in m.activities:
+        for act in (m.activities or []):
+            # On ne garde que les activités "Playing"
             if isinstance(act, discord.Game) and act.name:
-                counts[act.name] = counts.get(act.name, 0) + 1
-                break  # on prend la 1ère activité jeu
+                counts[act.name.strip()] = counts.get(act.name.strip(), 0) + 1
+                break
 
-    # Si pas de jeu détecté -> rien à faire (garde le base)
-    game = None
-    if counts:
-        # jeu majoritaire
-        game = max(counts.items(), key=lambda kv: kv[1])[0]
-
+    game = max(counts, key=counts.get) if counts else None
     base = _base_name_from_channel(ch)
     target = _target_name(base, game)
+
+    logging.debug(f"[auto-rename] ch={ch.id} base='{base}' game='{game}' target='{target}' members={len(ch.members)}")
     if target != ch.name and _can_rename(ch.id):
         try:
             await ch.edit(name=target, reason=f"Auto-rename: jeu détecté = {game or 'aucun'}")
@@ -462,8 +461,8 @@ async def test_niveau(
     nouveau_niveau: app_commands.Range[int, 1, 1000] = 5,
     xp: app_commands.Range[int, 0, 10_000_000] | None = None
 ):
-    # Restriction propriétaire
-    if interaction.user.id != 541417878314942495:
+    # Restriction propriétaire (utiliser OWNER_ID)
+    if interaction.user.id != OWNER_ID:
         await interaction.response.send_message("❌ Commande réservée au propriétaire.", ephemeral=True)
         return
 
@@ -984,6 +983,18 @@ async def weekly_summary_loop():
                 except Exception as e:
                     logging.error(f"Envoi résumé hebdo échoué (guild {guild.id}): {e}")
 
+async def auto_rename_poll():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            for vc_id in list(TEMP_VC_IDS):
+                ch = bot.get_channel(vc_id)
+                if isinstance(ch, discord.VoiceChannel):
+                    await maybe_rename_channel_by_game(ch)
+        except Exception as e:
+            logging.debug(f"auto_rename_poll error: {e}")
+        await asyncio.sleep(20)  # toutes les 20s
+
 # ─────────────────────── VIEWS ─────────────────────────────
 class LiveTikTokView(View):
     def __init__(self):
@@ -1074,6 +1085,13 @@ class VCButtonView(View):
 # ─────────────────────── EVENTS ─────────────────────────────
 @bot.event
 async def on_ready():
+    # (optionnel) chunker les guilds pour précharger les membres si intents activés dans le portail
+    try:
+        for g in bot.guilds:
+            await g.chunk()
+    except Exception as e:
+        logging.debug(f"chunk failed: {e}")
+
     logging.info(f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)")
 
 @bot.event
@@ -1095,6 +1113,8 @@ async def on_message(message: discord.Message):
         user["xp"] += MSG_XP
         old_level = int(user.get("level", 0))
         new_level = get_level(int(user["xp"]))
+
+        # Met à jour le niveau dans le cache
         if new_level > old_level:
             user["level"] = new_level
 
@@ -1213,6 +1233,7 @@ async def _setup_hook():
     asyncio.create_task(ensure_vc_buttons_message())
     asyncio.create_task(daily_summary_loop())   # Résumé quotidien
     asyncio.create_task(weekly_summary_loop())  # Résumé hebdo
+    asyncio.create_task(auto_rename_poll())
 
 bot.setup_hook = _setup_hook
 
