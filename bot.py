@@ -42,6 +42,9 @@ LEVEL_ROLE_REWARDS = {
 # False = il cumule tous les rôles gagnés
 REMOVE_LOWER_TIER_ROLES = True
 
+ROLE_PC       = 1400560541529018408
+ROLE_CONSOLE  = 1400560660710162492
+
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
@@ -58,14 +61,7 @@ AUTO_RENAME_FORMAT = "{base} • {game}"
 # Fréquence min entre deux renames pour un même salon (anti-spam)
 AUTO_RENAME_COOLDOWN_SEC = 45
 
-# ─────────────────────── IMPORTS LOCAUX ─────────────────────
-from view import PlayerTypeView  # inchangé
-
 # ─────────────────────── CONFIG ─────────────────────────────
-XP_FILE = "data/data.json"
-BACKUP_FILE = "data/backup.json"
-DAILY_STATS_FILE = "data/daily_stats.json"  # stats quotidiennes (msg + minutes vocal)
-
 LEVEL_UP_CHANNEL    = 1402419913716531352
 CHANNEL_ROLES       = 1400560866478395512
 CHANNEL_WELCOME     = 1400550333796716574
@@ -93,6 +89,7 @@ VC_PROFILES = {
 
 VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?: (\d+))?$", re.I)
 PERMA_MESSAGE_MARK = "[VC_BUTTONS_PERMANENT]"
+ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 
 # ─────────────────────── ETATS RUNTIME ──────────────────────
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
@@ -114,15 +111,52 @@ if not TOKEN:
     logging.error("Aucun token trouvé. Clés visibles: %s", ", ".join(sorted(seen)) or "aucune")
     raise RuntimeError("DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables")
 
-# ─────────────────────── FICHIERS & XP CACHE ────────────────
+# ─────────────────────── ROLE ─────────────────────
+class PlayerTypeView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Vue persistante
+
+    @discord.ui.button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="role_pc")
+    async def btn_pc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._toggle_role(interaction, ROLE_PC, "PC")
+
+    @discord.ui.button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="role_console")
+    async def btn_console(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._toggle_role(interaction, ROLE_CONSOLE, "Consoles")
+
+    async def _toggle_role(self, interaction: discord.Interaction, role_id: int, label: str):
+        """Ajoute ou retire un rôle en fonction de l'état actuel du membre."""
+        guild = interaction.guild
+        if not guild:
+            return await interaction.response.send_message("❌ Action impossible en message privé.", ephemeral=True)
+
+        role = guild.get_role(role_id)
+        if not role:
+            return await interaction.response.send_message(f"❌ Rôle introuvable ({label}).", ephemeral=True)
+
+        member = interaction.user
+        try:
+            if role in member.roles:
+                await member.remove_roles(role, reason=f"Retrait rôle {label}")
+                await interaction.response.send_message(f"➖ Rôle **{label}** retiré.", ephemeral=True)
+            else:
+                await member.add_roles(role, reason=f"Ajout rôle {label}")
+                await interaction.response.send_message(f"➕ Rôle **{label}** ajouté.", ephemeral=True)
+        except Exception as e:
+            logging.error(f"Erreur toggle rôle {label}: {e}")
+            await interaction.response.send_message("❌ Impossible de modifier tes rôles.", ephemeral=True)
+# ─────────────────────── PERSISTANCE (VOLUME) ─────────────────────
+# Monte un volume Railway sur /app/data (Settings → Attach Volume → mount path: /app/data)
+DATA_DIR = os.getenv("DATA_DIR", "/app/data")  # tu peux aussi définir DATA_DIR=/app/data dans les variables Railway
+
+XP_FILE = f"{DATA_DIR}/data.json"
+BACKUP_FILE = f"{DATA_DIR}/backup.json"
+DAILY_STATS_FILE = f"{DATA_DIR}/daily_stats.json"
+
 def ensure_data_dir():
-    Path(XP_FILE).parent.mkdir(parents=True, exist_ok=True)
+    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
-def save_json(path: str, data: dict):
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
-
-def load_json(path: str) -> dict:
+def _safe_read_json(path: str) -> dict:
     p = Path(path)
     if not p.exists():
         return {}
@@ -130,6 +164,13 @@ def load_json(path: str) -> dict:
         return json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
+
+def save_json(path: str, data: dict):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+
+def load_json(path: str) -> dict:
+    return _safe_read_json(path)
 
 def load_daily_stats() -> dict:
     return load_json(DAILY_STATS_FILE)
@@ -147,28 +188,41 @@ def _disk_load_xp() -> dict:
     backup_path = Path(BACKUP_FILE)
     try:
         if not path.exists():
-            path.write_text("{}", encoding="utf-8")
-            logging.info("📁 Fichier XP manquant, créé automatiquement.")
+            # si rien n'existe mais un backup est présent, on restaure
+            if backup_path.exists():
+                data = _safe_read_json(BACKUP_FILE)
+                save_json(XP_FILE, data)
+                logging.info("📦 XP restauré depuis backup.json (fichier principal manquant).")
+                return data
+            # sinon on init un fichier vide
+            save_json(XP_FILE, {})
+            logging.info("📁 Fichier XP créé (vide).")
             return {}
+        # lecture normale
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        logging.warning("⚠️ Fichier XP corrompu ! Tentative de restauration depuis backup.json...")
+        logging.warning("⚠️ data.json corrompu, tentative de restauration depuis backup.json…")
         if backup_path.exists():
             try:
                 data = json.loads(backup_path.read_text(encoding="utf-8"))
-                path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+                save_json(XP_FILE, data)
                 logging.info("✅ Restauration réussie depuis backup.json.")
                 return data
             except Exception as e:
-                logging.error(f"❌ Impossible de lire le backup : {e}")
-                return {}
+                logging.error(f"❌ Lecture backup impossible: {e}")
         else:
-            logging.error("❌ Aucun backup disponible pour restaurer.")
-            return {}
+            logging.error("❌ Aucun backup disponible.")
+        return {}
 
 def _disk_save_xp(data: dict):
     ensure_data_dir()
+    # on écrit d'abord le principal…
     save_json(XP_FILE, data)
+    # …puis on met à jour le backup (copie 1:1)
+    try:
+        Path(BACKUP_FILE).write_text(Path(XP_FILE).read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception as e:
+        logging.error(f"❌ Écriture backup échouée: {e}")
 
 async def xp_bootstrap_cache():
     global XP_CACHE
@@ -179,6 +233,18 @@ async def xp_flush_cache_to_disk():
     async with XP_LOCK:
         _disk_save_xp(XP_CACHE)
         logging.info("💾 XP flush vers disque (%d utilisateurs).", len(XP_CACHE))
+
+# (optionnel) tu peux remplacer ta tâche auto_backup_xp par une version plus fréquente
+async def auto_backup_xp(interval_seconds: int = 600):  # toutes les 10 min
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            await xp_flush_cache_to_disk()
+            logging.info("🛟 Sauvegarde périodique effectuée.")
+        except Exception as e:
+            logging.error(f"❌ Erreur sauvegarde périodique: {e}")
+        await asyncio.sleep(interval_seconds)
+
 
 # ─────────────────────── HELPERS ────────────────────────────
 def get_level(xp: int) -> int:
@@ -357,12 +423,13 @@ async def announce_level_up(guild: discord.Guild, member: discord.Member, old_le
         logging.error(f"Annonce level-up échouée: {e}")
 
 def next_vc_name(guild: discord.Guild, base: str) -> str:
-    existing_numbers = [
-        int(m.group(2))
-        for ch in guild.voice_channels
-        if (m := VOC_PATTERN.match(ch.name)) and m.group(1).lower() == base.lower()
-    ]
-    n = (max(existing_numbers) + 1) if existing_numbers else 1
+    nums = []
+    for ch in guild.voice_channels:
+        m = VOC_PATTERN.match(ch.name)
+        if m and m.group(1).lower() == base.lower():
+            n = int(m.group(2)) if m.group(2) else 1
+            nums.append(n)
+    n = (max(nums) + 1) if nums else 1
     return base if n == 1 else f"{base} {n}"
 
 def parse_when(when_str: str) -> datetime:
@@ -709,21 +776,6 @@ async def lfg(interaction: discord.Interaction, jeu: str, plateforme: app_comman
     asyncio.create_task(close_task(session_key))
 
 # ─────────────────────── TÂCHES DE FOND ────────────────────
-async def auto_backup_xp(interval_seconds: int = 3600):
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            # Flush cache → disque puis copie en backup
-            await xp_flush_cache_to_disk()
-            source = Path(XP_FILE)
-            backup = Path(BACKUP_FILE)
-            if source.exists():
-                backup.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-                logging.info("💾 Sauvegarde automatique effectuée.")
-        except Exception as e:
-            logging.error(f"❌ Erreur lors de la sauvegarde automatique : {e}")
-        await asyncio.sleep(interval_seconds)
-
 async def ensure_vc_buttons_message():
     """
     Ré-attache ou republie le message permanent avec la vue de création de salons vocaux.
@@ -764,6 +816,50 @@ async def ensure_vc_buttons_message():
         logging.info("📌 Message permanent des salons vocaux publié (nouveau).")
     except Exception as e:
         logging.error(f"Erreur envoi message permanent: {e}")
+
+async def ensure_roles_buttons_message():
+    """
+    (Re)poste le message permanent des rôles PC/Consoles dans CHANNEL_ROLES
+    et (ré)attache la vue PlayerTypeView.
+    """
+    await bot.wait_until_ready()
+    channel = bot.get_channel(CHANNEL_ROLES)
+    if not isinstance(channel, discord.TextChannel):
+        logging.warning(f"❌ Salon des rôles introuvable: {CHANNEL_ROLES}")
+        return
+
+    view = PlayerTypeView()
+    found = None
+
+    # on cherche un ancien message marqué pour l’éditer
+    try:
+        async for msg in channel.history(limit=100):
+            if msg.author == bot.user and ROLES_PERMA_MESSAGE_MARK in (msg.content or ""):
+                found = msg
+                break
+    except Exception as e:
+        logging.error(f"Erreur lecture historique (roles): {e}")
+
+    content = (
+        f"{ROLES_PERMA_MESSAGE_MARK}\n"
+        "🎮 **Choisis ta plateforme** : clique pour t’ajouter/retirer le rôle.\n"
+        "• 💻 PC\n"
+        "• 🎮 Consoles"
+    )
+
+    if found:
+        try:
+            await found.edit(content=content, view=view)
+            logging.info("🔁 Message rôles réattaché (avec vue).")
+            return
+        except Exception as e:
+            logging.error(f"Échec réattachement des rôles, je reposte un nouveau message: {e}")
+
+    try:
+        await channel.send(content, view=view)
+        logging.info("📌 Message rôles publié (nouveau).")
+    except Exception as e:
+        logging.error(f"Erreur envoi message rôles: {e}")
 
 async def reminder_loop_24h():
     """
@@ -1083,6 +1179,15 @@ class VCButtonView(View):
         await self.create_vc(interaction, "Chat")
 
 # ─────────────────────── EVENTS ─────────────────────────────
+@bot.tree.command(name="roles_refresh", description="Reposter/reattacher le message des rôles (réservé au propriétaire)")
+async def roles_refresh(interaction: discord.Interaction):
+    if interaction.user.id != 541417878314942495:
+        return await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
+
+    await interaction.response.defer(ephemeral=True)
+    await ensure_roles_buttons_message()
+    await interaction.followup.send("✅ Message de rôles (re)publié/reattaché.", ephemeral=True)
+
 @bot.event
 async def on_ready():
     # (optionnel) chunker les guilds pour précharger les membres si intents activés dans le portail
@@ -1227,10 +1332,12 @@ async def _setup_hook():
     await xp_bootstrap_cache()
     bot.add_view(VCButtonView())
     bot.add_view(LiveTikTokView())
+    bot.add_view(PlayerTypeView())
     await bot.tree.sync()
     asyncio.create_task(reminder_loop_24h())
     asyncio.create_task(auto_backup_xp())
     asyncio.create_task(ensure_vc_buttons_message())
+    asyncio.create_task(ensure_roles_buttons_message())
     asyncio.create_task(daily_summary_loop())   # Résumé quotidien
     asyncio.create_task(weekly_summary_loop())  # Résumé hebdo
     asyncio.create_task(auto_rename_poll())
