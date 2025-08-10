@@ -533,7 +533,7 @@ async def sondage(interaction: discord.Interaction, question: str):
 async def liendiscord(interaction: discord.Interaction):
     await safe_respond(
         interaction,
-        "🔗 Voici le lien pour rejoindre notre serveur :\nhttps://discord.gg/vaJeReXM",
+        "🔗 Voici le lien pour rejoindre notre serveur :\nhttps://discord.gg/yB7Ekc4GKM",
         ephemeral=False
     )
 
@@ -680,7 +680,7 @@ async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1,
         await interaction.followup.send("❌ Impossible de supprimer les messages.", ephemeral=True)
 
 # ─────────────────────── /LFG ──────────────────────────────
-@bot.tree.command(name="lfg", description="Créer une session pour chercher des joueurs")
+@bot.tree.command(name="invitation", description="Créer une session pour chercher des joueurs")
 @app_commands.describe(
     jeu="Nom du jeu (ex: Ready or Not)",
     plateforme="Plateforme",
@@ -701,7 +701,7 @@ async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1,
         app_commands.Choice(name="consoles", value="consoles"),
     ],
 )
-async def lfg(interaction: discord.Interaction, jeu: str, plateforme: app_commands.Choice[str], heure: str, categorie: app_commands.Choice[str]):
+async def invitation(interaction: discord.Interaction, jeu: str, plateforme: app_commands.Choice[str], heure: str, categorie: app_commands.Choice[str]):
     await interaction.response.defer(ephemeral=True)
     try:
         start_dt = parse_when(heure)
@@ -931,14 +931,17 @@ async def daily_summary_loop():
     """
     await bot.wait_until_ready()
     while not bot.is_closed():
+        # dormir jusqu'au prochain minuit (heure locale Paris)
         now = datetime.now(PARIS_TZ)
         tomorrow = now + timedelta(days=1)
         next_midnight = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
-        delay = (next_midnight - now).total_seconds()
-        await asyncio.sleep(max(1, delay))
+        await asyncio.sleep(max(1, (next_midnight - now).total_seconds()))
 
-        # Résume le jour écoulé
-        day_key = now.strftime("%Y-%m-%d")
+        # après le réveil, on recalcule "aujourd'hui" et on cible "hier"
+        today = datetime.now(PARIS_TZ).date()
+        yesterday = today - timedelta(days=1)
+        day_key = yesterday.strftime("%Y-%m-%d")
+
         stats = load_daily_stats()
 
         for guild in bot.guilds:
@@ -998,14 +1001,18 @@ async def daily_summary_loop():
                     me = guild.me or guild.get_member(bot.user.id)
                     if not ch.permissions_for(me).mention_everyone:
                         await ch.send("⚠️ Je n'ai pas la permission de mentionner @everyone ici.")
-                    content = "@everyone — Voici les joueurs les plus actifs d'hier !"
-                    await ch.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True))
+                        content = "Voici les joueurs les plus actifs d'hier !"
+                        await ch.send(content=content, embed=embed)
+                    else:
+                        await ch.send(content="@everyone — Voici les joueurs les plus actifs d'hier !",
+                                      embed=embed,
+                                      allowed_mentions=discord.AllowedMentions(everyone=True))
                 except Exception as e:
                     logging.error(f"Envoi résumé quotidien échoué (guild {guild.id}): {e}")
 
-        # Purge stats anciennes (> 14 jours)
+        # nettoyage des stats > 14 jours
         try:
-            cutoff = (now - timedelta(days=14)).strftime("%Y-%m-%d")
+            cutoff = (today - timedelta(days=14)).strftime("%Y-%m-%d")
             for gkey in list(stats.keys()):
                 for dkey in list(stats.get(gkey, {}).keys()):
                     if dkey < cutoff:
@@ -1021,17 +1028,18 @@ async def weekly_summary_loop():
     await bot.wait_until_ready()
     while not bot.is_closed():
         now = datetime.now(PARIS_TZ)
-        # prochain lundi
-        days_ahead = (7 - now.weekday()) % 7  # 0 = lundi
+
+        # calcule le prochain lundi 00:05
+        days_ahead = (7 - now.weekday()) % 7  # 0=lundi
         if days_ahead == 0 and (now.hour, now.minute) >= (0, 5):
             days_ahead = 7
         next_run = (now + timedelta(days=days_ahead)).replace(hour=0, minute=5, second=0, microsecond=0)
         await asyncio.sleep(max(1, (next_run - now).total_seconds()))
 
-        # Semaine précédente (lundi -> dimanche)
-        end = next_run - timedelta(seconds=1)
-        last_sunday = (end - timedelta(days=end.weekday()+1-7)).date()
-        last_monday = last_sunday - timedelta(days=6)
+        # après le réveil : calcul de la semaine précédente (lundi→dimanche)
+        today = datetime.now(PARIS_TZ).date()            # on est lundi (date du "run")
+        last_sunday = today - timedelta(days=today.weekday() + 1)   # hier (dimanche)
+        last_monday = last_sunday - timedelta(days=6)               # lundi précédent
 
         stats = load_daily_stats()
 
@@ -1348,15 +1356,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
     # ... après avoir géré les minutes/XP etc.
-
-    # Renommage sur évènements
-    try:
-        if before.channel and isinstance(before.channel, discord.VoiceChannel):
-            await maybe_rename_channel_by_game(before.channel)
-        if after.channel and isinstance(after.channel, discord.VoiceChannel):
-            await maybe_rename_channel_by_game(after.channel)
-    except Exception as e:
-        logging.debug(f"Auto-rename hook failed: {e}")
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
