@@ -305,44 +305,70 @@ def _can_rename(ch_id: int) -> bool:
     _last_rename_at[ch_id] = now
     return True
 
-async def maybe_rename_channel_by_game(ch: discord.VoiceChannel):
-    """Renomme le salon selon le jeu majoritaire (via Rich Presence)."""
-    if not AUTO_RENAME_ENABLED:
-        return
-    if not isinstance(ch, discord.VoiceChannel):
+# ── AJOUTE EN HAUT (près des autres états) ─────────────────
+_rename_state: dict[int, tuple[str, int, str | None]] = {}  # ch_id -> (name, members, game)
+
+# ── REMPLACE ta fonction par ceci ───────────────────────────
+async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presences: bool = False):
+    """Renomme le salon selon le jeu majoritaire. 
+    - wait_presences=True : petit délai (utile après un move/connexion)
+    - Log seulement si un changement réel est détecté.
+    """
+    if not AUTO_RENAME_ENABLED or not isinstance(ch, discord.VoiceChannel):
         return
 
-    # si vide -> reset au nom "base"
+    if wait_presences:
+        # la présence met parfois ~1-2s à se propager après un move
+        await asyncio.sleep(2)
+
+    # vide -> reset au nom "base"
     if not ch.members:
         base = _base_name_from_channel(ch)
         if ch.name != base and _can_rename(ch.id):
             try:
                 await ch.edit(name=base, reason="Auto-rename: salon vide, reset base")
+                logging.debug(f"[auto-rename] reset -> {base} (ch={ch.id})")
             except Exception as e:
-                logging.debug(f"Rename reset failed: {e}")
+                logging.debug(f"[auto-rename] reset failed: {e}")
+        # mets à jour l'état et stoppe le log flood
+        _rename_state[ch.id] = (base, 0, None)
         return
 
-    # Laisse le temps à Discord d'envoyer les presences
-    await asyncio.sleep(2)
-
+    # calcule le jeu majoritaire (type 'Playing')
     counts: dict[str, int] = {}
     for m in ch.members:
         for act in (m.activities or []):
-            # On ne garde que les activités "Playing"
             if isinstance(act, discord.Game) and act.name:
-                counts[act.name.strip()] = counts.get(act.name.strip(), 0) + 1
+                nm = act.name.strip()
+                counts[nm] = counts.get(nm, 0) + 1
                 break
 
     game = max(counts, key=counts.get) if counts else None
     base = _base_name_from_channel(ch)
     target = _target_name(base, game)
+    members_count = len(ch.members)
 
-    logging.debug(f"[auto-rename] ch={ch.id} base='{base}' game='{game}' target='{target}' members={len(ch.members)}")
+    prev = _rename_state.get(ch.id)
+    changed = (
+        prev is None or
+        prev[0] != ch.name or
+        prev[1] != members_count or
+        prev[2] != game
+    )
+
     if target != ch.name and _can_rename(ch.id):
         try:
             await ch.edit(name=target, reason=f"Auto-rename: jeu détecté = {game or 'aucun'}")
         except Exception as e:
-            logging.debug(f"Rename failed: {e}")
+            logging.debug(f"[auto-rename] rename failed: {e}")
+
+    # log UNIQUEMENT si changement (sinon silence radio)
+    if changed:
+        logging.debug(
+            "[auto-rename] ch=%s base='%s' game='%s' target='%s' members=%d",
+            ch.id, base, game or "None", target, members_count
+        )
+    _rename_state[ch.id] = (ch.name, members_count, game)
 
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
 async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
@@ -1257,6 +1283,11 @@ async def on_member_join(member: discord.Member):
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     user_id = str(member.id)
+    if before.channel and isinstance(before.channel, discord.VoiceChannel):
+        await maybe_rename_channel_by_game(before.channel, wait_presences=True)
+
+    if after.channel and isinstance(after.channel, discord.VoiceChannel):
+        await maybe_rename_channel_by_game(after.channel, wait_presences=True)
 
     # Connexion au vocal
     if after.channel and not before.channel:
