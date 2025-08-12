@@ -44,6 +44,7 @@ REMOVE_LOWER_TIER_ROLES = True
 
 ROLE_PC       = 1400560541529018408
 ROLE_CONSOLE  = 1400560660710162492
+ROLE_MOBILE   = 1404791652085928008
 
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 
@@ -123,6 +124,10 @@ class PlayerTypeView(discord.ui.View):
     @discord.ui.button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="role_console")
     async def btn_console(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._toggle_role(interaction, ROLE_CONSOLE, "Consoles")
+
+    @discord.ui.button(label="📱 Mobile", style=discord.ButtonStyle.primary, custom_id="role_mobile")
+    async def btn_mobile(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._toggle_role(interaction, ROLE_MOBILE, "Mobile")
 
     async def _toggle_role(self, interaction: discord.Interaction, role_id: int, label: str):
         """Ajoute ou retire un rôle en fonction de l'état actuel du membre."""
@@ -511,7 +516,7 @@ class LFGJoinView(View):
             logging.error(f"Maj embed LFG échouée: {e}")
 
 # ─────────────────────── COMMANDES SLASH ──────────────────
-@bot.tree.command(name="type_joueur", description="Choisir PC ou Console")
+@bot.tree.command(name="type_joueur", description="Choisir PC, Console ou Mobile")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def type_joueur(interaction: discord.Interaction):
     await safe_respond(interaction, f"Les boutons ont été postés dans <#{CHANNEL_ROLES}> 😉", ephemeral=True)
@@ -867,11 +872,12 @@ async def ensure_roles_buttons_message():
         logging.error(f"Erreur lecture historique (roles): {e}")
 
     content = (
-        f"{ROLES_PERMA_MESSAGE_MARK}\n"
-        "🎮 **Choisis ta plateforme** : clique pour t’ajouter/retirer le rôle.\n"
-        "• 💻 PC\n"
-        "• 🎮 Consoles"
-    )
+    f"{ROLES_PERMA_MESSAGE_MARK}\n"
+    "🎮 **Choisis ta plateforme** : clique pour t’ajouter/retirer le rôle.\n"
+    "• 💻 PC\n"
+    "• 🎮 Consoles\n"
+    "• 📱 Mobile"
+)
 
     if found:
         try:
@@ -888,9 +894,6 @@ async def ensure_roles_buttons_message():
         logging.error(f"Erreur envoi message rôles: {e}")
 
 async def reminder_loop_24h():
-    """
-    Chaque 24h, ping les membres sans rôle. Anti-spam: max N rappels/jour/serveur.
-    """
     await bot.wait_until_ready()
     while not bot.is_closed():
         today = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
@@ -915,7 +918,7 @@ async def reminder_loop_24h():
                     try:
                         await channel.send(
                             f"{member.mention} tu n’as pas encore choisi ton rôle ici. "
-                            "Clique sur un bouton pour sélectionner ta plateforme 🎮💻"
+                            "Clique sur un bouton pour sélectionner ta plateforme 💻🎮📱"
                         )
                         REMINDER_LAST[key] = today
                         sent += 1
