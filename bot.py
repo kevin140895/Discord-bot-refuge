@@ -377,51 +377,53 @@ _rename_state: dict[int, tuple[str, int, str | None]] = {}  # ch_id -> (name, me
 
 # ── REMPLACE ta fonction par ceci ───────────────────────────
 async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presences: bool = False):
-    """Renomme le salon selon le jeu majoritaire. 
-    - wait_presences=True : petit délai (utile après un move/connexion)
-    - Log seulement si un changement réel est détecté.
-    """
+    """Renomme le salon selon le jeu majoritaire (ActivityType.playing)."""
     if not AUTO_RENAME_ENABLED or not isinstance(ch, discord.VoiceChannel):
         return
 
     if wait_presences:
-        # la présence met parfois ~1-2s à se propager après un move
+        # la présence met parfois ~1–2s à se propager après un move/connexion
         await asyncio.sleep(2)
 
-    # vide -> reset au nom "base"
+    base = _base_name_from_channel(ch)
+
+    # Salon vide → reset du nom de base
     if not ch.members:
-        base = _base_name_from_channel(ch)
         if ch.name != base and _can_rename(ch.id):
             try:
                 await ch.edit(name=base, reason="Auto-rename: salon vide, reset base")
                 logging.debug(f"[auto-rename] reset -> {base} (ch={ch.id})")
             except Exception as e:
                 logging.debug(f"[auto-rename] reset failed: {e}")
-        # mets à jour l'état et stoppe le log flood
         _rename_state[ch.id] = (base, 0, None)
         return
 
-    # calcule le jeu majoritaire (type 'Playing')
+    # Détection du jeu majoritaire (type Playing)
     counts: dict[str, int] = {}
     for m in ch.members:
-        for act in (m.activities or []):
-            if isinstance(act, discord.Game) and act.name:
-                nm = act.name.strip()
-                counts[nm] = counts.get(nm, 0) + 1
-                break
+        acts = list(getattr(m, "activities", []) or [])
+        single = getattr(m, "activity", None)
+        if single and single not in acts:
+            acts.append(single)
+
+        for act in acts:
+            name = getattr(act, "name", None)
+            atype = getattr(act, "type", None)
+            if not name:
+                continue
+            # ne compter que les activités "Playing" (ignorer Spotify, Streaming, Custom, etc.)
+            if atype == discord.ActivityType.playing:
+                nm = name.strip()
+                if nm:
+                    counts[nm] = counts.get(nm, 0) + 1
+                break  # on s'arrête à la première activité "Playing" trouvée
 
     game = max(counts, key=counts.get) if counts else None
-    base = _base_name_from_channel(ch)
     target = _target_name(base, game)
     members_count = len(ch.members)
 
     prev = _rename_state.get(ch.id)
-    changed = (
-        prev is None or
-        prev[0] != ch.name or
-        prev[1] != members_count or
-        prev[2] != game
-    )
+    changed = (prev is None or prev[0] != ch.name or prev[1] != members_count or prev[2] != game)
 
     if target != ch.name and _can_rename(ch.id):
         try:
@@ -429,7 +431,6 @@ async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presenc
         except Exception as e:
             logging.debug(f"[auto-rename] rename failed: {e}")
 
-    # log UNIQUEMENT si changement (sinon silence radio)
     if changed:
         logging.debug(
             "[auto-rename] ch=%s base='%s' game='%s' target='%s' members=%d",
