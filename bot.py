@@ -6,11 +6,11 @@ import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from discord.ui import View
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ui import Button, View
 from dotenv import load_dotenv
 
 # ─────────────────────── ENV & LOGGING ─────────────────────
@@ -25,27 +25,31 @@ intents.voice_states = True
 intents.message_content = True
 intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 # ── XP CONFIG ───────────────────────────────────────────────
 MSG_XP = 8               # XP par message texte
 VOICE_XP_PER_MIN = 3     # XP par minute en vocal
 # Formule de niveau: seuil (niveau n -> n+1) = (n+1)^2 * 100 XP
+REMOVE_LOWER_TIER_ROLES = True
 
-# ── RÔLES PAR NIVEAU ───────────────────────────────────────
+# ── Récompenses par niveau (requis par grant_level_roles)
 LEVEL_ROLE_REWARDS = {
     5:  1403510226354700430,  # Bronze
     10: 1403510368340410550,  # Argent
     20: 1403510466818605118,  # Or
 }
 
-# True = le joueur ne garde que le plus haut palier
-# False = il cumule tous les rôles gagnés
-REMOVE_LOWER_TIER_ROLES = True
-
+# ── Rôles plateformes + notifications
 ROLE_PC       = 1400560541529018408
 ROLE_CONSOLE  = 1400560660710162492
 ROLE_MOBILE   = 1404791652085928008
+ROLE_NOTIFICATION = 1404882154370109450
 
+# (facultatif, pratique si tu veux itérer)
+PLATFORM_ROLE_IDS = {
+    "PC": ROLE_PC,
+    "Consoles": ROLE_CONSOLE,
+    "Mobile": ROLE_MOBILE,
+}
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
@@ -111,26 +115,83 @@ if not TOKEN:
     seen = [k for k in os.environ.keys() if "TOKEN" in k or "DISCORD" in k]
     logging.error("Aucun token trouvé. Clés visibles: %s", ", ".join(sorted(seen)) or "aucune")
     raise RuntimeError("DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables")
-
 # ─────────────────────── ROLE ─────────────────────
 class PlayerTypeView(discord.ui.View):
+    """
+    Boutons de rôles :
+      - Plateformes (PC/Consoles/Mobile) : exclusifs entre eux
+      - Notifications : toggle indépendant (coexiste avec n'importe quelle plateforme)
+    """
     def __init__(self):
         super().__init__(timeout=None)  # Vue persistante
 
+    # ── Plateformes (exclusives) ─────────────────────────────────────────
     @discord.ui.button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="role_pc")
     async def btn_pc(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._toggle_role(interaction, ROLE_PC, "PC")
+        await self._set_platform_role(interaction, ROLE_PC, "PC")
 
     @discord.ui.button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="role_console")
     async def btn_console(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._toggle_role(interaction, ROLE_CONSOLE, "Consoles")
+        await self._set_platform_role(interaction, ROLE_CONSOLE, "Consoles")
 
     @discord.ui.button(label="📱 Mobile", style=discord.ButtonStyle.primary, custom_id="role_mobile")
     async def btn_mobile(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._toggle_role(interaction, ROLE_MOBILE, "Mobile")
+        await self._set_platform_role(interaction, ROLE_MOBILE, "Mobile")
+
+    # ── Notifications (toggle indépendant) ───────────────────────────────
+    @discord.ui.button(label="🔔 Notifications", style=discord.ButtonStyle.secondary, custom_id="role_notify")
+    async def btn_notify(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._toggle_role(interaction, ROLE_NOTIFICATION, "Notifications")
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+    async def _set_platform_role(self, interaction: discord.Interaction, role_id: int, label: str):
+        """
+        Règle de gestion (nouvelle) :
+          - Si le membre a DÉJÀ cette plateforme -> ne rien faire (pas de toggle off).
+          - Sinon -> ajouter cette plateforme et retirer automatiquement les AUTRES plateformes.
+          - Le rôle 🔔 Notifications n’est JAMAIS touché ici.
+        """
+        guild = interaction.guild
+        if not guild:
+            return await interaction.response.send_message("❌ Action impossible en message privé.", ephemeral=True)
+
+        role = guild.get_role(role_id)
+        if not role:
+            return await interaction.response.send_message(f"❌ Rôle introuvable ({label}).", ephemeral=True)
+
+        member = interaction.user
+        try:
+            # a) S'il a déjà cette plateforme -> NO-OP (aucun retrait)
+            if role in member.roles:
+                return await interaction.response.send_message(
+                    f"✅ Tu es déjà sur **{label}** (aucun changement).", ephemeral=True
+                )
+
+            # b) Sinon -> ajouter cette plateforme et retirer les autres plateformes
+            other_platform_ids = {ROLE_PC, ROLE_CONSOLE, ROLE_MOBILE} - {role_id}
+            other_platform_roles = [guild.get_role(rid) for rid in other_platform_ids]
+            remove_list = [r for r in other_platform_roles if r and r in member.roles]
+
+            if remove_list:
+                await member.remove_roles(*remove_list, reason=f"Changement de plateforme -> {label}")
+
+            await member.add_roles(role, reason=f"Ajout rôle plateforme {label}")
+
+            removed_txt = f" (retiré: {', '.join(f'**{r.name}**' for r in remove_list)})" if remove_list else ""
+            await interaction.response.send_message(
+                f"✅ Plateforme mise à jour : **{label}**{removed_txt}.\n"
+                f"🔔 *Le rôle Notifications est conservé.*",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            logging.error(f"Erreur set_platform {label}: {e}")
+            await interaction.response.send_message("❌ Impossible de modifier tes rôles.", ephemeral=True)
 
     async def _toggle_role(self, interaction: discord.Interaction, role_id: int, label: str):
-        """Ajoute ou retire un rôle en fonction de l'état actuel du membre."""
+        """
+        Toggle simple (utilisé pour 🔔 Notifications) : ajoute/retire UNIQUEMENT ce rôle.
+        """
         guild = interaction.guild
         if not guild:
             return await interaction.response.send_message("❌ Action impossible en message privé.", ephemeral=True)
@@ -143,13 +204,14 @@ class PlayerTypeView(discord.ui.View):
         try:
             if role in member.roles:
                 await member.remove_roles(role, reason=f"Retrait rôle {label}")
-                await interaction.response.send_message(f"➖ Rôle **{label}** retiré.", ephemeral=True)
+                await interaction.response.send_message(f"🔕 Rôle **{label}** retiré.", ephemeral=True)
             else:
                 await member.add_roles(role, reason=f"Ajout rôle {label}")
-                await interaction.response.send_message(f"➕ Rôle **{label}** ajouté.", ephemeral=True)
+                await interaction.response.send_message(f"🔔 Rôle **{label}** ajouté.", ephemeral=True)
         except Exception as e:
             logging.error(f"Erreur toggle rôle {label}: {e}")
             await interaction.response.send_message("❌ Impossible de modifier tes rôles.", ephemeral=True)
+
 # ─────────────────────── PERSISTANCE (VOLUME) ─────────────────────
 # Monte un volume Railway sur /app/data (Settings → Attach Volume → mount path: /app/data)
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")  # tu peux aussi définir DATA_DIR=/app/data dans les variables Railway
@@ -850,8 +912,8 @@ async def ensure_vc_buttons_message():
 
 async def ensure_roles_buttons_message():
     """
-    (Re)poste le message permanent des rôles PC/Consoles dans CHANNEL_ROLES
-    et (ré)attache la vue PlayerTypeView.
+    (Re)poste le message permanent des rôles PC/Consoles/Mobile/Notifications
+    dans CHANNEL_ROLES et (ré)attache la vue PlayerTypeView.
     """
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ROLES)
@@ -872,12 +934,13 @@ async def ensure_roles_buttons_message():
         logging.error(f"Erreur lecture historique (roles): {e}")
 
     content = (
-    f"{ROLES_PERMA_MESSAGE_MARK}\n"
-    "🎮 **Choisis ta plateforme** : clique pour t’ajouter/retirer le rôle.\n"
-    "• 💻 PC\n"
-    "• 🎮 Consoles\n"
-    "• 📱 Mobile"
-)
+        f"{ROLES_PERMA_MESSAGE_MARK}\n"
+        "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
+        "• 💻 PC\n"
+        "• 🎮 Consoles\n"
+        "• 📱 Mobile\n"
+        "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
+    )
 
     if found:
         try:
