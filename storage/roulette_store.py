@@ -1,6 +1,8 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
 def _safe_read_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
@@ -17,11 +19,15 @@ def _safe_write_json(path: Path, data: Dict[str, Any]) -> None:
 class RouletteStore:
     """
     Persistance JSON pour la Roulette.
-    - claims_path : { "user_id": true, ... }  (déjà utilisé à vie)
+
+    - claims_path : { "user_id": "YYYY-MM-DD", ... }
+        -> la date (Europe/Paris) du dernier tirage du joueur (donc 1 fois / jour)
+
     - roles_path  : {
          "user_id": {"guild_id": "...", "role_id": "...", "expires_at": "iso"},
          ...
-       }
+      }
+
     - poster_path : {"channel_id": "...", "message_id": "..."}
     """
 
@@ -51,13 +57,20 @@ class RouletteStore:
         _safe_write_json(self.poster_path, data)
 
     # ——— high-level helpers ———
-    # Claims (une seule utilisation à vie)
-    def has_claimed(self, user_id: str) -> bool:
-        return bool(self.read_claims().get(user_id, False))
+    # Limite : 1 tirage par jour (Europe/Paris)
+    def get_last_claim_date(self, user_id: str) -> Optional[str]:
+        return self.read_claims().get(user_id)
 
-    def mark_claimed(self, user_id: str) -> None:
+    def has_claimed_today(self, user_id: str, tz: str = "Europe/Paris") -> bool:
+        last = self.get_last_claim_date(user_id)
+        if not last:
+            return False
+        today = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d")
+        return last == today
+
+    def mark_claimed_today(self, user_id: str, tz: str = "Europe/Paris") -> None:
         data = self.read_claims()
-        data[user_id] = True
+        data[user_id] = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d")
         self.write_claims(data)
 
     def unmark_claimed(self, user_id: str) -> None:
