@@ -1427,6 +1427,10 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
     await xp_bootstrap_cache()
+
+    # Exposer l'API XP au cog Roulette
+    bot.award_xp = award_xp
+
     bot.add_view(VCButtonView())
     bot.add_view(LiveTikTokView())
     bot.add_view(PlayerTypeView())
@@ -1438,6 +1442,13 @@ async def _setup_hook():
     asyncio.create_task(daily_summary_loop())   # Résumé quotidien
     asyncio.create_task(weekly_summary_loop())  # Résumé hebdo
     asyncio.create_task(auto_rename_poll())
+
+    # Charger l’extension Roulette (appelle cogs/roulette.setup)
+    try:
+        bot.load_extension("cogs.roulette")
+        logging.info("🎰 Extension cogs.roulette chargée.")
+    except Exception as e:
+        logging.error(f"❌ Impossible de charger cogs.roulette: {e}")
 
 bot.setup_hook = _setup_hook
 
