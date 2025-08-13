@@ -138,7 +138,7 @@ class RouletteCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.tz = getattr(bot, "tz", None) or __import__("zoneinfo").ZoneInfo(PARIS_TZ)
-        data_dir = os.getenv("DATA_DIR", "/app/data")
+        data_dir = "/data"
         self.store = RouletteStore(data_dir=data_dir)
 
         # View "courante" selon l'heure
