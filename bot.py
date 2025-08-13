@@ -552,6 +552,33 @@ def incr_daily_stat(guild_id: int, user_id: int, *, msg_inc: int = 0, voice_min_
     stats[g][date_key][str(user_id)]["voice_min"] += voice_min_inc
     save_daily_stats(stats)
 
+# ─────────────────────── XP PUBLIC API (pour cogs) ───────────────────────
+async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
+    """
+    Ajoute 'amount' d'XP à user_id dans le cache global.
+    Retourne (old_level, new_level, total_xp_après).
+    Ne fait PAS d'annonce ici (le cog peut le faire s'il veut).
+    """
+    uid = str(user_id)
+
+    # No-op cohérent si amount <= 0
+    if amount <= 0:
+        async with XP_LOCK:
+            data = XP_CACHE.get(uid, {"xp": 0, "level": 0})
+            old_level = int(data.get("level", 0))
+            new_level = old_level
+            total_xp = int(data.get("xp", 0))
+            return old_level, new_level, total_xp
+
+    async with XP_LOCK:
+        user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
+        old_level = int(user.get("level", 0))
+        user["xp"] = int(user.get("xp", 0)) + int(amount)
+        new_level = get_level(int(user["xp"]))
+        if new_level > old_level:
+            user["level"] = new_level
+        return old_level, new_level, int(user["xp"])
+
 # ─────────────────────── /LFG VIEW ─────────────────────────
 class LFGJoinView(View):
     def __init__(self, session_msg_id: int):
