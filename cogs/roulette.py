@@ -51,11 +51,18 @@ class RouletteView(discord.ui.View):
                 ephemeral=True
             )
 
-        # 2) Déjà utilisé ?
+                # 2) A-t-il déjà joué aujourd'hui ?
         uid = str(interaction.user.id)
-        if cog.store.has_claimed(uid):
+        if cog.store.has_claimed_today(uid, tz=PARIS_TZ):
+            now = datetime.now(cog.tz)
+            # prochain reset à minuit Europe/Paris
+            tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            rest = int((tomorrow - now).total_seconds() // 60)
+            h, m = divmod(rest, 60)
             return await interaction.response.send_message(
-                "🛑 Tu as **déjà utilisé** la roulette. Une seule utilisation **à vie**.", ephemeral=True
+                f"🗓️ Tu as déjà joué **aujourd’hui**.\n"
+                f"⏳ Tu pourras rejouer dans **{h}h{m:02d}** (après minuit).",
+                ephemeral=True
             )
 
         # 3) Tirage
@@ -106,8 +113,8 @@ class RouletteView(discord.ui.View):
                         # En cas de guild.me/top_role None sur certains shards
                         pass
 
-        # 6) Marque l'utilisateur comme "déjà utilisé" (à vie)
-        cog.store.mark_claimed(uid)
+        # 6) Marque l'utilisateur comme ayant joué aujourd'hui
+        cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
 
         # 7) Message de résultat
         msg = f"🎰 Résultat : **{gain} XP**."
@@ -174,7 +181,7 @@ class RouletteCog(commands.Cog):
                 f"{desc_state}\n\n"
                 "Clique pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
                 "✨ **Le rôle 24h est attribué uniquement si tu gagnes 500 XP.**\n"
-                "♾️ **Une seule utilisation par personne (à vie).**"
+                "🗓️ **Une seule tentative par jour.**"
             ),
             color=0x2ECC71 if self.current_view_enabled else 0xED4245
         )
@@ -294,7 +301,7 @@ class RouletteCog(commands.Cog):
                  else "⛔ **Fermée** (10:00–22:00)\n\n") +
                 "Clique pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
                 "✨ **Le rôle 24h est attribué uniquement si tu gagnes 500 XP.**\n"
-                "♾️ **Une seule utilisation par personne (à vie).**"
+                "🗓️ **Une seule tentative par jour.**"
             ),
             color=0x2ECC71 if self.current_view_enabled else 0xED4245
         )
