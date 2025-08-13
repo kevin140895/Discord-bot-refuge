@@ -1289,6 +1289,17 @@ async def on_ready():
     logging.info(f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)")
 
 @bot.event
+async def on_ready():
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=discord.Activity(
+            type=discord.ActivityType.playing,
+            name=".gg/lerefuge57"
+        )
+    )
+    print(f"Connecté en tant que {bot.user} — Statut appliqué.")
+
+@bot.event
 async def on_message(message: discord.Message):
     # Filtrage bot/DM
     if message.author.bot or not message.guild:
