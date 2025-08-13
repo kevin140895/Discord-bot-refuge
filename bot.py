@@ -101,10 +101,6 @@ voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf U
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
 LFG_SESSIONS: dict[int, dict] = {}     # message_id -> session LFG
 
-# Anti-spam: derniers rappels rôles par (guild_id, user_id) -> date 'YYYY-MM-DD'
-REMINDER_LAST: dict[tuple[int, int], str] = {}
-REMINDER_DAILY_CAP_PER_GUILD = 20  # maximum de rappels/jour/serveur
-
 # ─────────────────────── TOKEN ──────────────────────────────
 TOKEN = (
     os.getenv("DISCORD_TOKEN")
@@ -984,41 +980,6 @@ async def ensure_roles_buttons_message():
     except Exception as e:
         logging.error(f"Erreur envoi message rôles: {e}")
 
-async def reminder_loop_24h():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        today = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
-        for guild in bot.guilds:
-            channel = guild.get_channel(CHANNEL_ROLES)
-            if not isinstance(channel, discord.TextChannel):
-                continue
-
-            me = guild.me or guild.get_member(bot.user.id)
-            if not me or not channel.permissions_for(me).send_messages:
-                continue
-
-            sent = 0
-            for member in guild.members:
-                if member.bot:
-                    continue
-                if len(member.roles) <= 1:
-                    key = (guild.id, member.id)
-                    last = REMINDER_LAST.get(key)
-                    if last == today:
-                        continue
-                    try:
-                        await channel.send(
-                            f"{member.mention} tu n’as pas encore choisi ton rôle ici. "
-                            "Clique sur un bouton pour sélectionner ta plateforme 💻🎮📱"
-                        )
-                        REMINDER_LAST[key] = today
-                        sent += 1
-                        if sent >= REMINDER_DAILY_CAP_PER_GUILD:
-                            break
-                    except Exception as e:
-                        logging.error(f"Erreur rappel rôles {member} ({guild.id}): {e}")
-        await asyncio.sleep(86400)
-
 async def daily_summary_loop():
     """
     Chaque minuit (Europe/Paris), poste le résumé d’activité du jour écoulé pour CHAQUE serveur.
@@ -1462,8 +1423,7 @@ async def _setup_hook():
     bot.add_view(VCButtonView())
     bot.add_view(LiveTikTokView())
     bot.add_view(PlayerTypeView())
-
-    asyncio.create_task(reminder_loop_24h())
+    
     asyncio.create_task(auto_backup_xp())
     asyncio.create_task(ensure_vc_buttons_message())
     asyncio.create_task(ensure_roles_buttons_message())
@@ -1484,6 +1444,13 @@ async def _setup_hook():
         logging.info("🌐 Slash commands synchronisées.")
     except Exception as e:
         logging.error(f"❌ Échec sync des slash commands: {e}")
+
+    # Charger le module de rappels de rôles (72h / suppression 24h)
+    try:
+        await bot.load_extension("cogs.role_reminder")
+        logging.info("⏰ Extension cogs.role_reminder chargée.")
+    except Exception as e:
+        logging.error(f"❌ Impossible de charger cogs.role_reminder: {e}")
 
 bot.setup_hook = _setup_hook
 
