@@ -21,7 +21,7 @@ class RouletteStore:
     Persistance JSON pour la Roulette.
 
     - claims_path : { "user_id": "YYYY-MM-DD", ... }
-        -> la date (Europe/Paris) du dernier tirage du joueur (donc 1 fois / jour)
+        -> date (Europe/Paris) du dernier tirage (1 fois / jour)
 
     - roles_path  : {
          "user_id": {"guild_id": "...", "role_id": "...", "expires_at": "iso"},
