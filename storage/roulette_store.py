@@ -16,17 +16,22 @@ def _safe_write_json(path: Path, data: Dict[str, Any]) -> None:
 
 class RouletteStore:
     """
-    Squelette de persistance pour la Roulette.
-    Étape 5 : on ajoutera les méthodes concrètes (claims, rôles, poster message).
+    Persistance JSON pour la Roulette.
+    - claims_path : { "user_id": true, ... }  (déjà utilisé à vie)
+    - roles_path  : {
+         "user_id": {"guild_id": "...", "role_id": "...", "expires_at": "iso"},
+         ...
+       }
+    - poster_path : {"channel_id": "...", "message_id": "..."}
     """
 
     def __init__(self, data_dir: str):
         base = Path(data_dir)
-        self.claims_path = base / "roulette_claims.json"   # { user_id: true }
-        self.roles_path  = base / "roulette_roles.json"    # { user_id: {...} }
-        self.poster_path = base / "roulette_poster.json"   # { channel_id, message_id }
+        self.claims_path = base / "roulette_claims.json"
+        self.roles_path  = base / "roulette_roles.json"
+        self.poster_path = base / "roulette_poster.json"
 
-    # ───── Accès bas niveau (dict entier) — utiles pour l’étape 5 ─────
+    # ——— low-level ———
     def read_claims(self) -> Dict[str, Any]:
         return _safe_read_json(self.claims_path)
 
@@ -45,4 +50,50 @@ class RouletteStore:
     def write_poster(self, data: Dict[str, Any]) -> None:
         _safe_write_json(self.poster_path, data)
 
-    # Étape 5 : on ajoutera ici des helpers plus pratiques (has_claimed, mark_claimed, upsert_role_assignment, etc.)
+    # ——— high-level helpers ———
+    # Claims (une seule utilisation à vie)
+    def has_claimed(self, user_id: str) -> bool:
+        return bool(self.read_claims().get(user_id, False))
+
+    def mark_claimed(self, user_id: str) -> None:
+        data = self.read_claims()
+        data[user_id] = True
+        self.write_claims(data)
+
+    def unmark_claimed(self, user_id: str) -> None:
+        data = self.read_claims()
+        if user_id in data:
+            data.pop(user_id)
+            self.write_claims(data)
+
+    # Rôles temporaires 24h
+    def upsert_role_assignment(self, *, user_id: str, guild_id: str, role_id: str, expires_at: str) -> None:
+        data = self.read_roles()
+        data[user_id] = {
+            "guild_id": guild_id,
+            "role_id": role_id,
+            "expires_at": expires_at
+        }
+        self.write_roles(data)
+
+    def get_role_assignment(self, user_id: str) -> Optional[Dict[str, Any]]:
+        return self.read_roles().get(user_id)
+
+    def clear_role_assignment(self, user_id: str) -> None:
+        data = self.read_roles()
+        if user_id in data:
+            data.pop(user_id)
+            self.write_roles(data)
+
+    def get_all_role_assignments(self) -> Dict[str, Dict[str, Any]]:
+        return self.read_roles()
+
+    # Poster message
+    def set_poster(self, *, channel_id: str, message_id: str) -> None:
+        self.write_poster({"channel_id": channel_id, "message_id": message_id})
+
+    def get_poster(self) -> Optional[Dict[str, Any]]:
+        p = self.read_poster()
+        if "channel_id" in p and "message_id" in p:
+            return p
+        return None
