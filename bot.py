@@ -201,21 +201,7 @@ class PlayerTypeView(discord.ui.View):
             logging.error(f"Erreur toggle rôle {label}: {e}")
             await interaction.response.send_message("❌ Impossible de modifier tes rôles.", ephemeral=True)
 
-# ── PERSISTANCE DU MESSAGE PERMANENT VC ────────────────────
-PERMA_MSG_FILE = f"{DATA_DIR}/vc_buttons_msg.json"
 
-def _load_perma_msg_id() -> int | None:
-    d = _safe_read_json(PERMA_MSG_FILE)
-    mid = d.get("message_id")
-    if isinstance(mid, int):
-        return mid
-    if isinstance(mid, str) and mid.isdigit():
-        return int(mid)
-    return None
-
-def _save_perma_msg_id(mid: int):
-    ensure_data_dir()
-    Path(PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
 
 # ─────────────────────── PERSISTANCE (VOLUME) ─────────────────────
 # Monte un volume Railway sur /app/data (Settings → Attach Volume → mount path: /app/data)
@@ -317,7 +303,21 @@ async def auto_backup_xp(interval_seconds: int = 600):  # toutes les 10 min
             logging.error(f"❌ Erreur sauvegarde périodique: {e}")
         await asyncio.sleep(interval_seconds)
 
+# ── PERSISTANCE DU MESSAGE PERMANENT VC ────────────────────
+PERMA_MSG_FILE = f"{DATA_DIR}/vc_buttons_msg.json"
 
+def _load_perma_msg_id() -> int | None:
+    d = _safe_read_json(PERMA_MSG_FILE)
+    mid = d.get("message_id")
+    if isinstance(mid, int):
+        return mid
+    if isinstance(mid, str) and mid.isdigit():
+        return int(mid)
+    return None
+
+def _save_perma_msg_id(mid: int):
+    ensure_data_dir()
+    Path(PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
 # ─────────────────────── HELPERS ────────────────────────────
 def get_level(xp: int) -> int:
     level = 0
@@ -1260,6 +1260,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
                     user["level"] = get_level(int(user["xp"]))
+                    incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
 
     # Move de salon → clôture partielle + restart chrono
     elif before.channel and after.channel and before.channel != after.channel:
@@ -1273,6 +1274,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
                     user["level"] = get_level(int(user["xp"]))
+                    incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
         voice_times[uid] = now_utc
 
     # ── Suppression des salons temporaires vides
@@ -1325,6 +1327,58 @@ async def _setup_hook():
         logging.error(f"❌ Impossible de charger cogs.role_reminder: {e}")
 
 async def ensure_roles_buttons_message():
+    """
+    (Re)poste le message permanent des rôles PC/Consoles/Mobile/Notifications
+    dans CHANNEL_ROLES et (ré)attache la vue PlayerTypeView.
+    """
+    await bot.wait_until_ready()
+    channel = bot.get_channel(CHANNEL_ROLES)
+    if not isinstance(channel, discord.TextChannel):
+        logging.warning(f"❌ Salon des rôles introuvable: {CHANNEL_ROLES}")
+        return
+
+    view = PlayerTypeView()
+    found = None
+
+    # Cherche un ancien message marqué pour l’éditer
+    try:
+        async for msg in channel.history(limit=100):
+            if msg.author == bot.user and ROLES_PERMA_MESSAGE_MARK in (msg.content or ""):
+                found = msg
+                break
+    except Exception as e:
+        logging.error(f"Erreur lecture historique (roles): {e}")
+
+    content = (
+        f"{ROLES_PERMA_MESSAGE_MARK}\n"
+        "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
+        "• 💻 PC\n"
+        "• 🎮 Consoles\n"
+        "• 📱 Mobile\n"
+        "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
+    )
+
+    if found:
+        try:
+            await found.edit(content=content, view=view)
+            try:
+                await found.pin(reason="Message rôles permanent")
+            except Exception:
+                pass
+            logging.info("🔁 Message rôles réattaché (avec vue).")
+            return
+        except Exception as e:
+            logging.error(f"Échec réattachement des rôles, je reposte: {e}")
+
+    try:
+        new_msg = await channel.send(content, view=view)
+        try:
+            await new_msg.pin(reason="Message rôles permanent")
+        except Exception:
+            pass
+        logging.info("📌 Message rôles publié (nouveau).")
+    except Exception as e:
+        logging.error(f"Erreur envoi message rôles: {e}")
 
 bot.setup_hook = _setup_hook
 
