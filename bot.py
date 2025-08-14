@@ -586,11 +586,11 @@ async def sondage(interaction: discord.Interaction, question: str):
     await msg.add_reaction("❌")
     await safe_respond(interaction, "Sondage créé ✔️", ephemeral=True)
 
-@bot.tree.command(name="liendiscord", description="Affiche le lien pour rejoindre le serveur Discord")
-async def liendiscord(interaction: discord.Interaction):
+@bot.tree.command(name="lien", description="Affiche le lien pour rejoindre le serveur Discord")
+async def lien(interaction: discord.Interaction):
     await safe_respond(
         interaction,
-        "🔗 Voici le lien pour rejoindre notre serveur :\nhttps://discord.gg/yB7Ekc4GKM",
+        "🔗 Voici le lien pour rejoindre notre serveur :\nhttps://discord.com/invite/lerefuge57",
         ephemeral=False
     )
 
