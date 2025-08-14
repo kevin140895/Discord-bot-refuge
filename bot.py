@@ -4,9 +4,10 @@ import json
 import logging
 import asyncio
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from discord.ui import View
+from discord import PermissionOverwrite
 
 import discord
 from discord import app_commands
@@ -51,6 +52,7 @@ PLATFORM_ROLE_IDS = {
     "Mobile": ROLE_MOBILE,
 }
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
+LOBBY_VC_ID = 1405630965803520221
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
 # Limite par catégorie (par défaut: pas de limite si non présent dans ce dict)
@@ -74,14 +76,6 @@ LOBBY_TEXT_CHANNEL  = 1402258805533970472
 TIKTOK_ANNOUNCE_CH  = 1400552164979507263
 ACTIVITY_SUMMARY_CH = 1400552164979507263
 
-LFG_CATEGORIES = {
-    "fps":        1400553078373089301,
-    "mmo-rpg":    1400553114918064178,
-    "battleroyal":1400553162594582641,
-    "strategie":  1400554881663631513,
-    "consoles":   1400553622919712868,
-}
-
 PARIS_TZ = ZoneInfo("Europe/Paris")
 OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
 
@@ -99,7 +93,6 @@ ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 # ─────────────────────── ETATS RUNTIME ──────────────────────
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
-LFG_SESSIONS: dict[int, dict] = {}     # message_id -> session LFG
 
 # ─────────────────────── TOKEN ──────────────────────────────
 TOKEN = (
@@ -207,6 +200,22 @@ class PlayerTypeView(discord.ui.View):
         except Exception as e:
             logging.error(f"Erreur toggle rôle {label}: {e}")
             await interaction.response.send_message("❌ Impossible de modifier tes rôles.", ephemeral=True)
+
+# ── PERSISTANCE DU MESSAGE PERMANENT VC ────────────────────
+PERMA_MSG_FILE = f"{DATA_DIR}/vc_buttons_msg.json"
+
+def _load_perma_msg_id() -> int | None:
+    d = _safe_read_json(PERMA_MSG_FILE)
+    mid = d.get("message_id")
+    if isinstance(mid, int):
+        return mid
+    if isinstance(mid, str) and mid.isdigit():
+        return int(mid)
+    return None
+
+def _save_perma_msg_id(mid: int):
+    ensure_data_dir()
+    Path(PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
 
 # ─────────────────────── PERSISTANCE (VOLUME) ─────────────────────
 # Monte un volume Railway sur /app/data (Settings → Attach Volume → mount path: /app/data)
@@ -522,23 +531,6 @@ def next_vc_name(guild: discord.Guild, base: str) -> str:
     n = (max(nums) + 1) if nums else 1
     return base if n == 1 else f"{base} {n}"
 
-def parse_when(when_str: str) -> datetime:
-    s = when_str.strip()
-    try:
-        dt = datetime.strptime(s, "%Y-%m-%d %H:%M").replace(tzinfo=PARIS_TZ)
-        return dt
-    except ValueError:
-        pass
-    try:
-        h, m = map(int, s.split(":"))
-        now = datetime.now(PARIS_TZ)
-        dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        if dt <= now:
-            dt += timedelta(days=1)
-        return dt
-    except Exception:
-        raise ValueError("Format d'heure invalide. Utilise 'HH:MM' ou 'YYYY-MM-DD HH:MM'.")
-
 def incr_daily_stat(guild_id: int, user_id: int, *, msg_inc: int = 0, voice_min_inc: int = 0):
     stats = load_daily_stats()
     g = str(guild_id)
@@ -574,33 +566,7 @@ async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
         if new_level > old_level:
             user["level"] = new_level
         return old_level, new_level, int(user["xp"])
-
-# ─────────────────────── /LFG VIEW ─────────────────────────
-class LFGJoinView(View):
-    def __init__(self, session_msg_id: int):
-        super().__init__(timeout=60*60*12)
-        self.session_msg_id = session_msg_id
-
-    @discord.ui.button(label="✅ Je viens", style=discord.ButtonStyle.success, custom_id="lfg_join")
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        sess = LFG_SESSIONS.get(self.session_msg_id)
-        if not sess:
-            await safe_respond(interaction, "❌ Cette session n'existe plus.", ephemeral=True)
-            return
-        members: set[int] = sess["members"]
-        if interaction.user.id in members:
-            await safe_respond(interaction, "🔁 Tu es déjà inscrit.", ephemeral=True)
-            return
-        members.add(interaction.user.id)
-        await safe_respond(interaction, "✅ Inscription enregistrée !", ephemeral=True)
-        try:
-            msg = await interaction.channel.fetch_message(self.session_msg_id)
-            emb = msg.embeds[0] if msg.embeds else discord.Embed(title="Session LFG")
-            emb.set_footer(text=f"Participants: {len(members)}")
-            await msg.edit(embed=emb, view=self)
-        except Exception as e:
-            logging.error(f"Maj embed LFG échouée: {e}")
-
+        
 # ─────────────────────── COMMANDES SLASH ──────────────────
 @bot.tree.command(name="type_joueur", description="Choisir PC, Console ou Mobile")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -770,133 +736,8 @@ async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1,
         logging.error(f"Erreur lors de la purge lente: {ee}")
         await interaction.followup.send("❌ Impossible de supprimer les messages.", ephemeral=True)
 
-# ─────────────────────── /LFG ──────────────────────────────
-@bot.tree.command(name="invitation", description="Créer une session pour chercher des joueurs")
-@app_commands.describe(
-    jeu="Nom du jeu (ex: Ready or Not)",
-    plateforme="Plateforme",
-    heure="Heure de début (HH:MM ou YYYY-MM-DD HH:MM, Europe/Paris)",
-    categorie="Catégorie où créer le vocal"
-)
-@app_commands.choices(
-    plateforme=[
-        app_commands.Choice(name="PC", value="PC"),
-        app_commands.Choice(name="Crossplay", value="Crossplay"),
-        app_commands.Choice(name="Consoles", value="Consoles"),
-    ],
-    categorie=[
-        app_commands.Choice(name="fps", value="fps"),
-        app_commands.Choice(name="mmo-rpg", value="mmo-rpg"),
-        app_commands.Choice(name="battleroyal", value="battleroyal"),
-        app_commands.Choice(name="strategie", value="strategie"),
-        app_commands.Choice(name="consoles", value="consoles"),
-    ],
-)
-async def invitation(interaction: discord.Interaction, jeu: str, plateforme: app_commands.Choice[str], heure: str, categorie: app_commands.Choice[str]):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        start_dt = parse_when(heure)
-    except ValueError as e:
-        await interaction.followup.send(f"❌ {e}", ephemeral=True); return
-
-    guild = interaction.guild
-    if guild is None:
-        await interaction.followup.send("❌ Utilisable uniquement sur un serveur.", ephemeral=True); return
-
-    cat_id = LFG_CATEGORIES.get(categorie.value)
-    category = guild.get_channel(cat_id)
-    if not isinstance(category, discord.CategoryChannel):
-        category = guild.get_channel(TEMP_VC_CATEGORY)
-        if not isinstance(category, discord.CategoryChannel):
-            await interaction.followup.send("❌ Catégorie cible introuvable.", ephemeral=True); return
-
-    vc_name = f"{plateforme.value} {jeu}"
-    try:
-        voice = await guild.create_voice_channel(name=vc_name, category=category, reason=f"LFG par {interaction.user} | {jeu}")
-        TEMP_VC_IDS.add(voice.id)
-    except Exception as e:
-        logging.error(f"Création VC LFG échouée: {e}")
-        await interaction.followup.send("❌ Impossible de créer le salon vocal.", ephemeral=True); return
-
-    dt_str = start_dt.strftime("%Y-%m-%d %H:%M")
-    emb = discord.Embed(
-        title="🎮 Session LFG",
-        description=(f"**Jeu :** {jeu}\n**Plateforme :** {plateforme.value}\n**Heure :** {dt_str} (Europe/Paris)\n**Vocal :** <#{voice.id}>\n"),
-        color=0x00C896
-    )
-    emb.set_footer(text="Participants: 1")
-    try:
-        msg = await interaction.channel.send(embed=emb)
-        thread = await msg.create_thread(name=f"LFG • {jeu} • {dt_str}")
-    except Exception as e:
-        logging.error(f"Création message/thread LFG échouée: {e}")
-        await interaction.followup.send("❌ Impossible de créer le thread.", ephemeral=True); return
-
-    session_key = msg.id
-    LFG_SESSIONS[session_key] = {
-        "creator": interaction.user.id,
-        "members": {interaction.user.id},
-        "thread_id": thread.id,
-        "vc_id": voice.id,
-        "when": start_dt,
-        "jeu": jeu,
-        "plateforme": plateforme.value,
-    }
-    try:
-        await msg.edit(view=LFGJoinView(session_msg_id=session_key))
-    except Exception as e:
-        logging.error(f"Attache view LFG échouée: {e}")
-    await interaction.followup.send(f"✅ Session créée ! Thread : <#{thread.id}> | Vocal : <#{voice.id}>", ephemeral=True)
-
-    async def reminder_task(key: int):
-        sess = LFG_SESSIONS.get(key)
-        if not sess: return
-        when: datetime = sess["when"]
-        remind_at = when - timedelta(minutes=10)
-        now = datetime.now(PARIS_TZ)
-        delay = (remind_at - now).total_seconds()
-        if delay > 0: await asyncio.sleep(delay)
-        thread_ch = bot.get_channel(sess["thread_id"])
-        if not isinstance(thread_ch, (discord.Thread, discord.TextChannel)): return
-        members = sess["members"]; mentions = " ".join(f"<@{uid}>" for uid in members) if members else ""
-        try:
-            await thread_ch.send(content=f"{mentions}\n⏰ **Rappel** : session dans 10 minutes ({when.strftime('%H:%M')}). Rejoignez le vocal ➜ <#{sess['vc_id']}>")
-        except Exception as e:
-            logging.error(f"Envoi rappel LFG échoué: {e}")
-
-    async def close_task(key: int):
-        sess = LFG_SESSIONS.get(key)
-        if not sess: return
-        when: datetime = sess["when"]
-        close_at = when + timedelta(hours=1)
-        now = datetime.now(PARIS_TZ)
-        delay = (close_at - now).total_seconds()
-        if delay > 0: await asyncio.sleep(delay)
-        thread_ch = bot.get_channel(sess["thread_id"])
-        if isinstance(thread_ch, discord.Thread):
-            try:
-                await thread_ch.send("⏱️ Session terminée — le thread est archivé. GG à tous !")
-                await thread_ch.edit(archived=True, locked=True)
-            except Exception as e:
-                logging.error(f"Archivage thread LFG échoué: {e}")
-        vc = bot.get_channel(sess["vc_id"])
-        if isinstance(vc, discord.VoiceChannel):
-            try:
-                if not vc.members:
-                    await vc.delete(reason="LFG terminé (salon vide)")
-                    TEMP_VC_IDS.discard(vc.id)
-            except Exception as e:
-                logging.error(f"Suppression VC LFG échouée: {e}")
-        LFG_SESSIONS.pop(key, None)
-
-    asyncio.create_task(reminder_task(session_key))
-    asyncio.create_task(close_task(session_key))
-
 # ─────────────────────── TÂCHES DE FOND ────────────────────
 async def ensure_vc_buttons_message():
-    """
-    Ré-attache ou republie le message permanent avec la vue de création de salons vocaux.
-    """
     await bot.wait_until_ready()
     channel = bot.get_channel(LOBBY_TEXT_CHANNEL)
     if not isinstance(channel, discord.TextChannel):
@@ -904,81 +745,63 @@ async def ensure_vc_buttons_message():
         return
 
     view = VCButtonView()
-    found = None
+    content = (
+        f"{PERMA_MESSAGE_MARK}\n"
+        "👋 **Crée ton salon vocal temporaire** :\n"
+        f"1) Rejoins le **vocal lobby** (<#{LOBBY_VC_ID}>)\n"
+        "2) Clique sur un bouton ci-dessous — tu seras **déplacé automatiquement** dans le salon créé.\n"
+        "ℹ️ Le salon est **supprimé quand il est vide**."
+    )
 
+    # 1) Essayer avec le message mémorisé
+    remembered_id = _load_perma_msg_id()
+    if remembered_id:
+        try:
+            msg = await channel.fetch_message(remembered_id)
+            await msg.edit(content=content, view=view)
+            try:
+                await msg.pin(reason="Message permanent des salons vocaux")
+            except Exception:
+                pass
+            logging.info("🔁 Message permanent (ID mémorisé) réattaché.")
+            return
+        except Exception:
+            logging.debug("Message mémorisé introuvable — on va rechercher/reposter.")
+
+    # 2) Chercher un message existant marqué
+    found = None
     try:
-        async for msg in channel.history(limit=100):
-            if msg.author == bot.user and PERMA_MESSAGE_MARK in (msg.content or ""):
-                found = msg
+        async for m in channel.history(limit=100):
+            if m.author == bot.user and PERMA_MESSAGE_MARK in (m.content or ""):
+                found = m
                 break
     except Exception as e:
         logging.error(f"Erreur lecture historique: {e}")
 
-    content = (
-        f"{PERMA_MESSAGE_MARK}\n"
-        "👋 **Crée ton salon vocal temporaire** :\n"
-        "Clique sur un bouton ci-dessous. Le salon sera **supprimé quand il sera vide**."
-    )
-
     if found:
         try:
             await found.edit(content=content, view=view)
-            logging.info("🔁 Message permanent réattaché (avec vue).")
+            try:
+                await found.pin(reason="Message permanent des salons vocaux")
+            except Exception:
+                pass
+            _save_perma_msg_id(found.id)
+            logging.info("🔁 Message permanent réattaché (via recherche).")
             return
         except Exception as e:
-            logging.error(f"Échec réattachement, je reposte un nouveau message: {e}")
+            logging.error(f"Échec réattachement, on reposte: {e}")
 
+    # 3) Reposter un nouveau message
     try:
-        await channel.send(content, view=view)
-        logging.info("📌 Message permanent des salons vocaux publié (nouveau).")
+        new_msg = await channel.send(content, view=view)
+        _save_perma_msg_id(new_msg.id)
+        try:
+            await new_msg.pin(reason="Message permanent des salons vocaux")
+        except Exception:
+            pass
+        logging.info("📌 Message permanent publié (nouveau).")
     except Exception as e:
         logging.error(f"Erreur envoi message permanent: {e}")
-
-async def ensure_roles_buttons_message():
-    """
-    (Re)poste le message permanent des rôles PC/Consoles/Mobile/Notifications
-    dans CHANNEL_ROLES et (ré)attache la vue PlayerTypeView.
-    """
-    await bot.wait_until_ready()
-    channel = bot.get_channel(CHANNEL_ROLES)
-    if not isinstance(channel, discord.TextChannel):
-        logging.warning(f"❌ Salon des rôles introuvable: {CHANNEL_ROLES}")
-        return
-
-    view = PlayerTypeView()
-    found = None
-
-    # on cherche un ancien message marqué pour l’éditer
-    try:
-        async for msg in channel.history(limit=100):
-            if msg.author == bot.user and ROLES_PERMA_MESSAGE_MARK in (msg.content or ""):
-                found = msg
-                break
-    except Exception as e:
-        logging.error(f"Erreur lecture historique (roles): {e}")
-
-    content = (
-        f"{ROLES_PERMA_MESSAGE_MARK}\n"
-        "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
-        "• 💻 PC\n"
-        "• 🎮 Consoles\n"
-        "• 📱 Mobile\n"
-        "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
-    )
-
-    if found:
-        try:
-            await found.edit(content=content, view=view)
-            logging.info("🔁 Message rôles réattaché (avec vue).")
-            return
-        except Exception as e:
-            logging.error(f"Échec réattachement des rôles, je reposte un nouveau message: {e}")
-
-    try:
-        await channel.send(content, view=view)
-        logging.info("📌 Message rôles publié (nouveau).")
-    except Exception as e:
-        logging.error(f"Erreur envoi message rôles: {e}")
 
 async def daily_summary_loop():
     """
@@ -1180,6 +1003,17 @@ async def auto_rename_poll():
             logging.debug(f"auto_rename_poll error: {e}")
         await asyncio.sleep(20)  # toutes les 20s
 
+async def vc_buttons_watchdog(interval_seconds: int = 300):
+    """Vérifie périodiquement que le message permanent existe et est à jour."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            await ensure_vc_buttons_message()
+        except Exception as e:
+            logging.debug(f"vc_buttons_watchdog: {e}")
+        await asyncio.sleep(interval_seconds)
+
+
 # ─────────────────────── VIEWS ─────────────────────────────
 class LiveTikTokView(View):
     def __init__(self):
@@ -1209,48 +1043,93 @@ class VCButtonView(View):
     async def create_vc(self, interaction: discord.Interaction, profile: str):
         guild = interaction.guild
         if guild is None:
-            await safe_respond(interaction, "❌ Action impossible en DM.", ephemeral=True)
-            return
+            return await interaction.response.send_message("❌ Action impossible en DM.", ephemeral=True)
+
+        member = interaction.user
+
+        # Vérif présence dans le lobby
+        if not member.voice or not member.voice.channel:
+            return await interaction.response.send_message(
+                "⛔ Rejoins d’abord le **vocal lobby** puis reclique sur un bouton.", ephemeral=True
+            )
+        if member.voice.channel.id != LOBBY_VC_ID:
+            return await interaction.response.send_message(
+                "⛔ Tu dois être **dans le vocal lobby** pour choisir le type (PC/Consoles/Crossplay/Chat).",
+                ephemeral=True
+            )
+
+        # Vérif permissions du bot
+        me = guild.me or guild.get_member(bot.user.id)
+        if not (me and me.guild_permissions.move_members):
+            return await interaction.response.send_message(
+                "⛔ Il me manque la permission **Déplacer des membres**.", ephemeral=True
+            )
+
+        # Vérif catégorie
         category = guild.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
-            await safe_respond(interaction, "❌ Catégorie vocale temporaire introuvable.", ephemeral=True)
-            return
-        name = next_vc_name(guild, profile)
+            return await interaction.response.send_message("❌ Catégorie vocale temporaire introuvable.", ephemeral=True)
 
-        # 🔒 Limite par catégorie
+        perms_cat = category.permissions_for(me)
+        if not (perms_cat.manage_channels and perms_cat.view_channel and perms_cat.connect):
+            return await interaction.response.send_message(
+                "⛔ Permissions manquantes sur la catégorie (**Gérer les salons / Voir / Se connecter**).",
+                ephemeral=True
+            )
+
+        # Limite éventuelle
         limit = TEMP_VC_LIMITS.get(category.id)
         if limit is not None:
-            current = _count_temp_vc_in_category(category)
+            current = sum(1 for ch in category.voice_channels if ch.id in TEMP_VC_IDS)
             if current >= limit:
-                await safe_respond(
-                    interaction,
-                    f"⛔ Limite atteinte : il y a déjà **{current}/{limit}** salons temporaires dans **{category.name}**.",
+                return await interaction.response.send_message(
+                    f"⛔ Limite atteinte : **{current}/{limit}** salons temporaires dans **{category.name}**.",
                     ephemeral=True
                 )
-                return
 
+        # Création du vocal + permission membre
+        name = next_vc_name(guild, profile)
+        overwrites = {member: PermissionOverwrite(connect=True, speak=True)}
         try:
             vc = await guild.create_voice_channel(
-                name=name, category=category,
-                reason=f"Salon temporaire ({profile}) demandé par {interaction.user}",
+                name=name,
+                category=category,
+                overwrites=overwrites,
+                reason=f"Salon temporaire ({profile}) demandé depuis le lobby par {member}",
             )
             TEMP_VC_IDS.add(vc.id)
-            # Auto-rename initial (si des joueurs sont déjà dedans après move)
-            if interaction.user.voice and interaction.user.voice.channel:
-                await interaction.user.move_to(vc, reason="Création de salon temporaire")
-                moved_text = f"Tu as été déplacé dans **{vc.name}**."
-            else:
-                moved_text = f"Rejoins **{vc.name}** quand tu veux."
-
-            await safe_respond(interaction, f"✅ Salon **{vc.name}** créé. {moved_text}\n_Ce salon sera supprimé lorsqu'il sera vide._", ephemeral=True)
-
-            # Tente une première mise à jour du nom (si un jeu est détecté)
-            await maybe_rename_channel_by_game(vc)
-
         except Exception as e:
             logging.error(f"Erreur création VC: {e}")
-            await safe_respond(interaction, "❌ Impossible de créer le salon.", ephemeral=True)
+            return await interaction.response.send_message("❌ Impossible de créer le salon.", ephemeral=True)
 
+        # Déplacement obligatoire
+        try:
+            await member.move_to(vc, reason="Choix de type depuis le lobby (move obligatoire)")
+        except Exception as e:
+            logging.error(f"Move failed (rollback): {e}")
+            try:
+                await vc.delete(reason="Rollback: déplacement impossible")
+            except Exception as de:
+                logging.error(f"Rollback delete failed: {de}")
+            TEMP_VC_IDS.discard(vc.id)
+            return await interaction.response.send_message(
+                "❌ Je n’ai pas pu te déplacer. Vérifie que tu es bien **dans le vocal lobby** et réessaie.",
+                ephemeral=True
+            )
+
+        # Auto-rename initial
+        try:
+            await maybe_rename_channel_by_game(vc, wait_presences=True)
+        except Exception:
+            pass
+
+        # Confirmation
+        if interaction.response.is_done():
+            await interaction.followup.send(f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True)
+
+    # Boutons
     @discord.ui.button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="create_vc_pc")
     async def btn_pc(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.create_vc(interaction, "PC")
@@ -1279,25 +1158,23 @@ async def roles_refresh(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
-    # (optionnel) chunker les guilds pour précharger les membres si intents activés dans le portail
+    # chunk des guilds
     try:
         for g in bot.guilds:
             await g.chunk()
     except Exception as e:
         logging.debug(f"chunk failed: {e}")
 
-    logging.info(f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)")
-
-@bot.event
-async def on_ready():
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=discord.Activity(
-            type=discord.ActivityType.playing,
-            name=".gg/lerefuge57"
+    # présence
+    try:
+        await bot.change_presence(
+            status=discord.Status.online,
+            activity=discord.Activity(type=discord.ActivityType.playing, name=".gg/lerefuge57")
         )
-    )
-    print(f"Connecté en tant que {bot.user} — Statut appliqué.")
+    except Exception as e:
+        logging.debug(f"presence failed: {e}")
+
+    logging.info(f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)")
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -1356,72 +1233,55 @@ async def on_member_join(member: discord.Member):
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    user_id = str(member.id)
+    uid = str(member.id)
+
+    # ── Auto-rename: ancien et nouveau salon
     if before.channel and isinstance(before.channel, discord.VoiceChannel):
         await maybe_rename_channel_by_game(before.channel, wait_presences=True)
-
     if after.channel and isinstance(after.channel, discord.VoiceChannel):
         await maybe_rename_channel_by_game(after.channel, wait_presences=True)
 
-    # Connexion au vocal
+    # ── Chrono XP (UTC aware)
+    now_utc = datetime.now(timezone.utc)
+
+    # Connexion au vocal → start chrono
     if after.channel and not before.channel:
-        voice_times[user_id] = datetime.utcnow()
+        voice_times[uid] = now_utc
 
-    # Déconnexion du vocal
+    # Déconnexion du vocal → calcule minutes + XP
     elif before.channel and not after.channel:
-        joined_at = voice_times.pop(user_id, None)
-        if joined_at:
-            seconds_spent = (datetime.utcnow() - joined_at).total_seconds()
+        started = voice_times.pop(uid, None)
+        if started:
+            seconds_spent = (now_utc - started).total_seconds()
             minutes_spent = int(seconds_spent // 60)
             if minutes_spent >= 1:
                 gained_xp = minutes_spent * VOICE_XP_PER_MIN
                 async with XP_LOCK:
-                    user = XP_CACHE.setdefault(user_id, {"xp": 0, "level": 0})
+                    user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
-                    old_level = int(user.get("level", 0))
-                    new_level = get_level(int(user["xp"]))
-                    if new_level > old_level:
-                        user["level"] = new_level
-                if new_level > old_level:
-                    try:
-                        await announce_level_up(member.guild, member, old_level, new_level, int(user["xp"]))
-                    except Exception as e:
-                        logging.error(f"Erreur annonce niveau vocal : {e}")
-                incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
+                    user["level"] = get_level(int(user["xp"]))
 
-    # Changement de salon
+    # Move de salon → clôture partielle + restart chrono
     elif before.channel and after.channel and before.channel != after.channel:
-        joined_at = voice_times.get(user_id)
-        if joined_at:
-            seconds_spent = (datetime.utcnow() - joined_at).total_seconds()
+        started = voice_times.get(uid)
+        if started:
+            seconds_spent = (now_utc - started).total_seconds()
             minutes_spent = int(seconds_spent // 60)
             if minutes_spent >= 1:
                 gained_xp = minutes_spent * VOICE_XP_PER_MIN
                 async with XP_LOCK:
-                    user = XP_CACHE.setdefault(user_id, {"xp": 0, "level": 0})
+                    user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
-                    old_level = int(user.get("level", 0))
-                    new_level = get_level(int(user["xp"]))
-                    if new_level > old_level:
-                        user["level"] = new_level
-                if new_level > old_level:
-                    try:
-                        await announce_level_up(member.guild, member, old_level, new_level, int(user["xp"]))
-                    except Exception as e:
-                        logging.error(f"Erreur annonce niveau vocal (move): {e}")
-                incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
+                    user["level"] = get_level(int(user["xp"]))
+        voice_times[uid] = now_utc
 
-        # redémarre le chrono pour le nouveau salon
-        voice_times[user_id] = datetime.utcnow()
-
-    # Suppression des salons temporaires vides
+    # ── Suppression des salons temporaires vides
     if before.channel and before.channel.id in TEMP_VC_IDS and not before.channel.members:
         try:
             await before.channel.delete(reason="Salon temporaire vide")
             TEMP_VC_IDS.discard(before.channel.id)
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
-    # ... après avoir géré les minutes/XP etc.
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
@@ -1434,7 +1294,8 @@ async def _setup_hook():
     bot.add_view(VCButtonView())
     bot.add_view(LiveTikTokView())
     bot.add_view(PlayerTypeView())
-    
+
+    asyncio.create_task(vc_buttons_watchdog())
     asyncio.create_task(auto_backup_xp())
     asyncio.create_task(ensure_vc_buttons_message())
     asyncio.create_task(ensure_roles_buttons_message())
@@ -1462,6 +1323,8 @@ async def _setup_hook():
         logging.info("⏰ Extension cogs.role_reminder chargée.")
     except Exception as e:
         logging.error(f"❌ Impossible de charger cogs.role_reminder: {e}")
+
+async def ensure_roles_buttons_message():
 
 bot.setup_hook = _setup_hook
 
