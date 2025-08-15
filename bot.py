@@ -636,7 +636,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         try:
             await _reset_voice_session(guild)
             # ❗ garder self_deaf=False ici aussi
-            vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
+             vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
             logging.info("[radio] Connexion voice OK après reset (path générique).")
             return vc
         except Exception as ee:
@@ -661,16 +661,26 @@ def _wire_ffmpeg_stderr_to_log(source):
     proc = getattr(source, "_process", None) or getattr(source, "process", None)
     if not proc or not getattr(proc, "stderr", None):
         return
-    import threading
+    import threading, collections
+
+    tail = collections.deque(maxlen=50)
+
     def _reader():
         try:
             for line in iter(proc.stderr.readline, b""):
                 try:
-                    logging.debug("[ffmpeg] " + line.decode("utf-8", "ignore").rstrip())
+                    text = line.decode("utf-8", "ignore").rstrip()
+                    tail.append(text)
+                    logging.debug("[ffmpeg] " + text)
                 except Exception:
                     pass
         except Exception:
             pass
+        try:
+            proc._stderr_tail = list(tail)
+        except Exception:
+            pass
+
     threading.Thread(target=_reader, daemon=True).start()
 
 # ─play_once ─
@@ -696,20 +706,7 @@ async def _play_once(guild: discord.Guild) -> None:
 
     # ---------- Création de la source ----------
     source = None
-
-    # ✅ Opus natif SANS PROBE (évite ffprobe)
-    try:
-        source = discord.FFmpegOpusAudio(
-            RADIO_STREAM_URL,
-            executable=FFMPEG_PATH,
-            bitrate=128,  # kbps
-            before_options=_before_opts(),
-            options="-loglevel error",
-            stderr=subprocess.PIPE,
-        )
-        logging.info("[radio] Source FFmpegOpusAudio prête (opus natif sans probe).")
-    except Exception as e:
-        logging.warning(f"[radio] OpusAudio direct failed ({e}) → fallback PCM")
+@@ -713,56 +723,73 @@ async def _play_once(guild: discord.Guild) -> None:
         source = None
 
     # 🔁 Fallback PCM si besoin
@@ -735,12 +732,29 @@ async def _play_once(guild: discord.Guild) -> None:
 
     def _after(err: Exception | None):
         rc = None
+        proc = None
         try:
             proc = getattr(source, "_process", None) or getattr(source, "process", None)
-            rc = getattr(proc, "returncode", None)
+            if proc:
+                try:
+                    proc.wait()
+                except Exception:
+                    pass
+                rc = getattr(proc, "returncode", None)
         except Exception:
+            proc = None
             pass
-        if err:
+
+        if rc is not None and rc < 0:
+            logging.error(f"[radio] FFmpeg exited with signal {-rc} (rc={rc})")
+            tail = getattr(proc, "_stderr_tail", None)
+            if tail:
+                logging.error("[radio] FFmpeg stderr tail:\n" + "\n".join(tail))
+            try:
+                bot.loop.call_soon_threadsafe(bot.loop.create_task, _play_once(guild))
+            except Exception:
+                logging.exception("[radio] Failed to schedule retry after crash")
+        elif err:
             logging.warning(f"[radio] Lecture terminée avec erreur: {err} (rc={rc})")
         else:
             logging.info(f"[radio] Lecture terminée (rc={rc})")
