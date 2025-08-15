@@ -60,7 +60,7 @@ PLATFORM_ROLE_IDS = {
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
-RADIO_STREAM_URL = "http://stream.laut.fm/hiphop"
+RADIO_STREAM_URL = "https://laut.fm/englishrap"
 
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
