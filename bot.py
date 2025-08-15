@@ -648,7 +648,7 @@ async def _play_once(guild: discord.Guild) -> None:
     # -headers ... + timeouts raisonnables + non-seekable (live)
     before = f'{_FF_BEFORE} -headers "{headers_direct}" -rw_timeout 15000000 -seekable 0'
 
-    # ⚙️ Sortie PCM 48 kHz stéréo (super stable côté Discord)
+        # ⚙️ Sortie PCM 48 kHz stéréo (super stable côté Discord)
     try:
         source = discord.FFmpegPCMAudio(
             source=url,
@@ -656,6 +656,10 @@ async def _play_once(guild: discord.Guild) -> None:
             before_options=before,
             options="-vn -f s16le -ac 2 -ar 48000",
         )
+    except Exception as e:
+        logging.error(f"[radio] Préparation source échouée: {e}")
+        await asyncio.sleep(5)
+        return
     except Exception as e:
         logging.error(f"[radio] Préparation source échouée: {e}")
         await asyncio.sleep(5)
@@ -685,6 +689,8 @@ async def _play_once(guild: discord.Guild) -> None:
             pass
         await asyncio.sleep(5)
         return
+
+
 
     # Boucle de vie
     try:
