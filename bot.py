@@ -620,32 +620,38 @@ async def _play_once(guild: discord.Guild) -> None:
 
     try:
         base_url = RADIO_YT_URL
-        headers_str = ""
-        url = base_url
+        is_youtube = ("youtube.com" in base_url) or ("youtu.be" in base_url)
 
-        # Si c'est YouTube → récupérer l’URL de stream + headers via yt-dlp
-        if "youtube.com" in base_url or "youtu.be" in base_url:
+        if is_youtube:
+            # YouTube → récup URL + headers via yt-dlp et encode en Opus côté FFmpeg
+            headers_str = ""
             try:
-                # nouvelle signature (url, headers_str)
                 url, headers_str = await _ytdlp_get_best_audio_url(base_url)
             except TypeError:
-                # compat: ancienne signature qui retournait seulement l’URL
                 url = await _ytdlp_get_best_audio_url(base_url)
                 headers_str = ""
 
-        # Construire les before_options (reconnect + headers si présents)
-        before = _FF_BEFORE
-        if headers_str:
-            # sécuriser les guillemets pour la ligne de commande
-            safe_headers = headers_str.replace('"', r'\"')
-            before = f'{before} -headers "{safe_headers}"'
+            before = _FF_BEFORE
+            if headers_str:
+                safe_headers = headers_str.replace('"', r'\"')
+                before = f'{before} -headers "{safe_headers}"'
 
-        source = discord.FFmpegOpusAudio(
-            source=url,
-            executable=FFMPEG_PATH,
-            before_options=before,
-            options=_FF_OPTS
-        )
+            source = discord.FFmpegOpusAudio(
+                source=url,
+                executable=FFMPEG_PATH,
+                before_options=before,
+                options=_FF_OPTS
+            )
+        else:
+            # Flux direct (MP3, Icecast…) → sortir en PCM 48 kHz (très stable)
+            url = base_url
+            before = _FF_BEFORE
+            source = discord.FFmpegPCMAudio(
+                source=url,
+                executable=FFMPEG_PATH,
+                before_options=before,
+                options="-vn -f s16le -ac 2 -ar 48000"
+            )
     except Exception as e:
         logging.error(f"[radio] Préparation source échouée: {e}")
         await asyncio.sleep(5)
@@ -683,7 +689,6 @@ async def _play_once(guild: discord.Guild) -> None:
                 logging.warning("[radio] VC déconnecté, on relancera.")
                 break
             if not vc.is_playing():
-                # petite tolérance: micro-stalls réseau
                 await asyncio.sleep(2)
                 if not vc.is_playing():
                     logging.warning("[radio] Lecture stoppée, on relancera.")
@@ -695,53 +700,6 @@ async def _play_once(guild: discord.Guild) -> None:
         except Exception:
             pass
 
-    try:
-        vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée.")
-    except Exception as e:
-        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
-        try:
-            source.cleanup()
-        except Exception:
-            pass
-        await asyncio.sleep(5)
-        return
-
-    # Attendre la fin (ou un kick/déco)
-    try:
-        while True:
-            if done.is_set():
-                break
-            if not vc.is_connected():
-                logging.warning("[radio] VC déconnecté, on relancera.")
-                break
-            if not vc.is_playing():
-                # Petite tolérance: parfois is_playing False pendant un bref stall réseau
-                await asyncio.sleep(2)
-                if not vc.is_playing():
-                    logging.warning("[radio] Lecture stoppée, on relancera.")
-                    break
-            await asyncio.sleep(3)
-    finally:
-        # Nettoyage: discord.py s'en charge en général, mais au cas où:
-        try:
-            vc.stop()
-        except Exception:
-            pass
-
-async def _radio_loop():
-    """Boucle infinie: assure connexion + relance quand nécessaire (H24)."""
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            # Tourne sur la 1ère guilde du bot (si plusieurs guilds et même radio, on peut adapter)
-            for guild in bot.guilds:
-                async with _radio_lock:
-                    await _play_once(guild)
-        except Exception as e:
-            logging.error(f"[radio] Exception non gérée dans la boucle: {e}")
-        # petite pause pour éviter le spam en cas d'échec en boucle
-        await asyncio.sleep(2)
 
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
 async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
