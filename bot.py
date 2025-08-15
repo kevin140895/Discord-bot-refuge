@@ -106,6 +106,29 @@ FFMPEG_PATH = get_ffmpeg_exe()  # binaire FFmpeg fourni par imageio-ffmpeg
 _radio_task: asyncio.Task | None = None
 _radio_lock = asyncio.Lock()
 
+# ─────────────────────── ETATS RUNTIME ──────────────────────
+voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
+TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
+# ─ INSERT HERE ─ [ETATS MUSIQUE]
+FFMPEG_PATH = get_ffmpeg_exe()  # binaire FFmpeg fourni par imageio-ffmpeg
+
+# ─ Vérif/lib chargement Opus (log au démarrage) ─
+try:
+    import discord.opus as _opus
+    if not _opus.is_loaded():
+        for _name in ("libopus.so.0", "libopus.so", "opus"):
+            try:
+                _opus.load_opus(_name)
+                break
+            except Exception:
+                pass
+    logging.info(f"[voice] Opus loaded: {_opus.is_loaded()}")
+except Exception as e:
+    logging.warning(f"[voice] Opus check failed: {e}")
+
+_radio_task: asyncio.Task | None = None
+_radio_lock = asyncio.Lock()
+
 # ─────────────────────── TOKEN ──────────────────────────────
 TOKEN = (
     os.getenv("DISCORD_TOKEN")
