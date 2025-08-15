@@ -59,7 +59,7 @@ PLATFORM_ROLE_IDS = {
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
-RADIO_YT_URL: str   = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
+url = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
 
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
@@ -649,10 +649,12 @@ async def _play_once(guild: discord.Guild) -> None:
 
     # Options FFmpeg robustes
     before = (
-    f'{_FF_BEFORE} '
-    '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
-    f'-headers "{headers_direct}" '
-    '-rw_timeout 15000000 -seekable 0 -buffer_size 512k'
+-    f'{_FF_BEFORE} '
+-    '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+-    f'-headers "{headers_direct}" '
+-    '-rw_timeout 15000000 -seekable 0 -buffer_size 512k'
++    f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
++    f'-headers "{headers_direct}"'
 )
     if not FFMPEG_PATH or not os.path.isfile(FFMPEG_PATH):
         logging.error(f"[radio] FFmpeg introuvable à : {FFMPEG_PATH}")
@@ -661,11 +663,12 @@ async def _play_once(guild: discord.Guild) -> None:
 
     try:
         source = discord.FFmpegPCMAudio(
-            source=url,
-            executable=FFMPEG_PATH,
-            before_options=before,
-            options="-vn -f s16le -ac 2 -ar 48000",
-        )
+    source=url,
+    executable=FFMPEG_PATH,
+    before_options=before,
+-    options="-vn -f s16le -ac 2 -ar 48000",
++    options="-vn -loglevel error"
+)
     except Exception as e:
         logging.error(f"[radio] Préparation source FFmpeg échouée: {e}")
         await asyncio.sleep(5)
