@@ -12,18 +12,21 @@ from zoneinfo import ZoneInfo
 from utils.timewin import is_open_now, next_boundary_dt
 from storage.roulette_store import RouletteStore
 
+# ───────────────────────────────────────────────────────────
+# Config & constantes
+# ───────────────────────────────────────────────────────────
 PARIS_TZ = "Europe/Paris"
 
 # — Annonces ouverture/fermeture —
-ANNOUNCE_CHANNEL_ID: int = 1400552164979507263   # salon pour les annonces auto
-NOTIF_ROLE_ID: int       = 1404882154370109450   # rôle @notification à ping
+ANNOUNCE_CHANNEL_ID: int = 1400552164979507263   # salon pour les annonces auto (10h/22h)
+NOTIF_ROLE_ID: int       = 1404882154370109450   # rôle @notification à ping à 10h
 
 # — Nom “officiel” du rôle gagnant (affichage) —
 WINNER_ROLE_NAME = "🏆 Gagnant Roulette"
 
 # ✅ Tes IDs
-ROLE_ID: int = 1405170057792979025          # Rôle temporaire attribué quand on gagne 500 XP (durée 24h)
-CHANNEL_ID: int = 1405170020748755034       # Salon où poster la roulette
+ROLE_ID: int = 1405170057792979025          # Rôle temporaire attribué en cas de 500 XP (24h)
+CHANNEL_ID: int = 1405170020748755034       # Salon où poster le message principal de la roulette
 
 # Tirage pondéré
 REWARDS = [0, 5, 50, 500]
@@ -33,11 +36,14 @@ def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+# ───────────────────────────────────────────────────────────
+# Vue du bouton
+# ───────────────────────────────────────────────────────────
 class RouletteView(discord.ui.View):
     """Vue persistante avec le bouton 🎰 Roulette."""
     def __init__(self, *, enabled: bool):
         super().__init__(timeout=None)
-        # on initialise disabled en fonction de enabled
+        # initialiser l'état du bouton
         try:
             self.play_button.disabled = not enabled  # type: ignore[attr-defined]
         except Exception:
@@ -78,7 +84,7 @@ class RouletteView(discord.ui.View):
         # 3) Tirage
         gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
 
-        # 4) Attribution XP via l'API exposée par le bot
+        # 4) Attribution XP
         try:
             old_lvl, new_lvl, total_xp = await cog.bot.award_xp(interaction.user.id, gain)  # type: ignore[attr-defined]
         except Exception as e:
@@ -116,7 +122,7 @@ class RouletteView(discord.ui.View):
                 except Exception as e:
                     logging.error("[Roulette] add_roles échec: %s", e)
 
-        # 6) Marque l'utilisateur comme ayant joué aujourd'hui
+        # 6) Marquer l'utilisateur comme ayant joué aujourd'hui
         cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
 
         # 7) Message de résultat
@@ -146,20 +152,22 @@ class RouletteView(discord.ui.View):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
+# ───────────────────────────────────────────────────────────
+# Cog
+# ───────────────────────────────────────────────────────────
 class RouletteCog(commands.Cog):
-    """Roulette : horaires, tirage, XP, rôle 24h, persistance quotidienne, commandes d’admin."""
+    """Roulette : horaires, tirage, XP, rôle 24h, persistance quotidienne, annonces d’état, commandes d’admin."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.tz = ZoneInfo(PARIS_TZ)
-        # 🔒 Force le stockage sur /data (volume Railway)
+        # 🔒 Stockage sur /data (volume Railway)
         data_dir = "/data"
         self.store = RouletteStore(data_dir=data_dir)
 
         # État initial du bouton selon l’heure
         self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
-        # État déjà annoncé (pour éviter le spam au redémarrage)
-        self._last_announced_state = self.current_view_enabled
+        self._last_announced_state: Optional[bool] = None  # None au démarrage
 
     # ——— UI helpers ———
     def _build_view(self) -> RouletteView:
@@ -177,12 +185,73 @@ class RouletteCog(commands.Cog):
             description=(
                 f"{desc_state}\n\n"
                 "Clique pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
-                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant **24h** "
-                "uniquement si tu gagnes **500 XP**.\n"
+                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant **24h** uniquement si tu gagnes **500 XP**.\n"
                 "🗓️ **Une seule tentative par jour.**"
             ),
             color=0x2ECC71 if self.current_view_enabled else 0xED4245
         )
+
+    def _state_embed(self, opened: bool) -> discord.Embed:
+        if opened:
+            title = "🎰 Roulette — OUVERTE"
+            desc  = (
+                "✅ La roulette est **ouverte** de **10:00 à 22:00** (Europe/Paris).\n"
+                "Clique sur le message principal pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
+                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant **24h** uniquement sur un **500 XP**."
+            )
+            color = 0x2ECC71
+        else:
+            title = "🎰 Roulette — FERMÉE"
+            desc  = (
+                "⛔ La roulette est **fermée**. Rendez-vous **demain à 10:00** (Europe/Paris) !\n"
+                "Rappel : une seule tentative par jour."
+            )
+            color = 0xED4245
+        return discord.Embed(title=title, description=desc, color=color)
+
+    async def _delete_old_state_message(self):
+        """Supprime le dernier message d’état si on l’a en mémoire."""
+        ref = self.store.get_state_message()
+        if not ref:
+            return
+        ch = self.bot.get_channel(int(ref.get("channel_id", 0)))
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            self.store.clear_state_message()
+            return
+        try:
+            msg = await ch.fetch_message(int(ref.get("message_id", 0)))
+            await msg.delete()
+        except Exception:
+            pass
+        finally:
+            self.store.clear_state_message()
+
+    async def _post_state_message(self, opened: bool):
+        """Poste un nouveau message d’état (après avoir supprimé l’ancien)."""
+        # 1) supprimer l’ancien si présent
+        await self._delete_old_state_message()
+
+        # 2) poster le nouveau dans le salon d’annonces
+        ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            logging.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
+            return
+
+        # Ping du rôle uniquement quand ça OUVRE
+        content = None
+        allowed = None
+        if opened:
+            content = (
+                f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant — "
+                "vous pouvez jouer jusqu’à **22:00**."
+            )
+            allowed = discord.AllowedMentions(roles=True)
+
+        try:
+            msg = await ch.send(content=content, embed=self._state_embed(opened), allowed_mentions=allowed)
+            self.store.set_state_message(channel_id=str(ch.id), message_id=str(msg.id))
+        except Exception as e:
+            logging.error("[Roulette] Post state message fail: %s", e)
 
     async def _refresh_poster_message(self):
         """Réédite le message posté (s’il existe) pour refléter l’état du bouton."""
@@ -239,40 +308,27 @@ class RouletteCog(commands.Cog):
     @tasks.loop(seconds=60.0)
     async def boundary_watch_loop(self):
         """
-        Surveille la fenêtre horaire : si on franchit 10:00/22:00,
-        (dés)active le bouton, met à jour le message et annonce l'état.
+        Toutes les minutes : si on franchit 10:00/22:00,
+        - (dés)active le bouton,
+        - met à jour le poster principal,
+        - supprime l’ancienne annonce d’état et poste la nouvelle.
         """
         try:
             enabled_now = is_open_now(PARIS_TZ, 10, 22)
 
-            # Changement d'état ?
-            if enabled_now != self._last_announced_state:
-                # 1) mettre à jour l'état interne et la view
+            # Premier passage : None → force annonce + refresh
+            if self._last_announced_state is None:
+                self._last_announced_state = enabled_now
                 self.current_view_enabled = enabled_now
                 await self._refresh_poster_message()
+                await self._post_state_message(enabled_now)
+                return
 
-                # 2) annonce dans le salon ANNOUNCE_CHANNEL_ID (+ ping rôle)
-                ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
-                if isinstance(ch, (discord.TextChannel, discord.Thread)):
-                    try:
-                        if enabled_now:
-                            txt = (
-                                f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant ! "
-                                "Tu peux tenter ta chance jusqu’à **22:00**."
-                            )
-                        else:
-                            txt = (
-                                f"<@&{NOTIF_ROLE_ID}> ⛔ La **roulette ferme** maintenant. "
-                                "Rendez-vous demain à **10:00** pour rejouer."
-                            )
-                        await ch.send(
-                            content=txt,
-                            allowed_mentions=discord.AllowedMentions(roles=True)
-                        )
-                    except Exception as e:
-                        logging.error("[Roulette] annonce ouverture/fermeture échouée: %s", e)
-
-                # 3) mémoriser l'état annoncé
+            # Changement d’état ?
+            if enabled_now != self._last_announced_state:
+                self.current_view_enabled = enabled_now
+                await self._refresh_poster_message()
+                await self._post_state_message(enabled_now)
                 self._last_announced_state = enabled_now
 
         except Exception as e:
@@ -290,9 +346,10 @@ class RouletteCog(commands.Cog):
         self.roles_cleanup_loop.start()
         self.boundary_watch_loop.start()
 
-        # Sweep initial
+        # Sweep initial (poster + annonce d’état conforme à l’heure)
         try:
             await self._refresh_poster_message()
+            await self._post_state_message(self.current_view_enabled)
         except Exception:
             pass
 
@@ -330,7 +387,10 @@ class RouletteCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         poster = self.store.get_poster()
         if not poster:
-            return await interaction.followup.send("❌ Aucun message enregistré. Utilise d’abord `/roulette-poster`.", ephemeral=True)
+            return await interaction.followup.send(
+                "❌ Aucun message enregistré. Utilise d’abord `/roulette-poster`.",
+                ephemeral=True
+            )
         await self._refresh_poster_message()
         await interaction.followup.send("🔁 Message Roulette réédité.", ephemeral=True)
 
@@ -359,6 +419,17 @@ class RouletteCog(commands.Cog):
             self.store.clear_role_assignment(uid)
 
         await interaction.followup.send(f"♻️ **{membre.display_name}** peut rejouer **aujourd’hui**.", ephemeral=True)
+
+    @app_commands.command(name="roulette-state-refresh", description="Reposte le message d’état (supprime l’ancien)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def roulette_state_refresh(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self._post_state_message(self.current_view_enabled)
+            await interaction.followup.send("🔁 Message d’état ré-affiché (ancien supprimé).", ephemeral=True)
+        except Exception as e:
+            logging.error("[Roulette] state refresh fail: %s", e)
+            await interaction.followup.send("❌ Échec du refresh.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
