@@ -562,7 +562,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
             vc = ch.guild.voice_client
         else:
             # ⚠️ reconnect=False pour éviter les boucles internes ; on gère notre retry
-            vc = await ch.connect(reconnect=False, self_deaf=True, self_mute=False)
+            vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
 
         # Bot éventuellement server-mute → dé-mute
         try:
@@ -700,6 +700,19 @@ async def _play_once(guild: discord.Guild) -> None:
         except Exception:
             pass
 
+async def _radio_loop():
+    """Boucle infinie: assure connexion + relance quand nécessaire (H24)."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            # Tourne sur la 1ère guilde du bot (si plusieurs guildes, on boucle)
+            for guild in bot.guilds:
+                async with _radio_lock:
+                    await _play_once(guild)
+        except Exception as e:
+            logging.error(f"[radio] Exception non gérée dans la boucle: {e}")
+        # petite pause pour éviter le spam en cas d'échec en boucle
+        await asyncio.sleep(2)
 
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
 async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
