@@ -57,7 +57,7 @@ PLATFORM_ROLE_IDS = {
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
-RADIO_YT_URL: str = "https://www.youtube.com/watch?v=Yul7DarvL4E"
+RADIO_YT_URL: str = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
 
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
