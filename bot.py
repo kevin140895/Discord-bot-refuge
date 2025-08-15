@@ -660,17 +660,21 @@ async def _play_once(guild: discord.Guild) -> None:
 
     try:
     source = discord.FFmpegPCMAudio(
-    source=url,
-    executable=FFMPEG_PATH,
-    before_options=before,
-    options="-vn -loglevel error"
-)
-    except Exception as e:
-        logging.error(f"[radio] Préparation source FFmpeg échouée: {e}")
-        await asyncio.sleep(5)
-        return
+        source=url,
+        executable=FFMPEG_PATH,
+        before_options=(
+            '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+            '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n'
+            'Icy-MetaData: 1\r\nAccept: */*\r\n"'
+        ),
+        options="-vn -loglevel error"
+    )
+except Exception as e:
+    logging.error(f"[radio] Préparation source FFmpeg échouée: {e}")
+    await asyncio.sleep(5)
+    return
 
-    done = asyncio.Event()
+done = asyncio.Event()
 
     def _after(err: Exception | None):
         if err:
