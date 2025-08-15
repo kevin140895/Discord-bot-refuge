@@ -119,9 +119,14 @@ try:
 
             except Exception as e:
                 tried.append((_name, f"ERR: {e!r}"))
+    if not _opus.is_loaded():
+        raise RuntimeError(
+            "Opus library could not be loaded. Install libopus0 (e.g. `apt install libopus0`)."
+        )
     logging.info(f"[voice] Opus loaded: {_opus.is_loaded()} (tries={tried})")
 except Exception as e:
     logging.warning(f"[voice] Opus check failed: {e}")
+    raise
 
 # Tâches radio
 _radio_task: asyncio.Task | None = None
