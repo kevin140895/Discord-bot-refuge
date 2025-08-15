@@ -1,4 +1,3 @@
-import os
 import re
 import json
 import logging
@@ -98,6 +97,17 @@ VC_PROFILES = {
 VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?: (\d+))?$", re.I)
 PERMA_MESSAGE_MARK = "[VC_BUTTONS_PERMANENT]"
 ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
+
+def _is_roles_permanent_message(msg: discord.Message) -> bool:
+    """Reconnaît le message permanent Rôles soit par contenu (legacy), soit par footer d'embed (nouveau)."""
+    if msg.author != bot.user:
+        return False
+    if ROLES_PERMA_MESSAGE_MARK in (msg.content or ""):
+        return True
+    for e in msg.embeds or []:
+        if e.footer and e.footer.text == ROLES_PERMA_MESSAGE_MARK:
+            return True
+    return False
 
 # ─────────────────────── ETATS RUNTIME ──────────────────────
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
@@ -358,6 +368,17 @@ def _load_perma_msg_id() -> int | None:
 def _save_perma_msg_id(mid: int):
     ensure_data_dir()
     Path(PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
+
+def _is_vc_permanent_message(msg: discord.Message) -> bool:
+    """Reconnaît le message permanent VC soit par contenu (legacy), soit par footer d'embed (nouveau)."""
+    if msg.author != bot.user:
+        return False
+    if PERMA_MESSAGE_MARK in (msg.content or ""):
+        return True
+    for e in msg.embeds or []:
+        if e.footer and e.footer.text == PERMA_MESSAGE_MARK:
+            return True
+    return False
 # ─────────────────────── HELPERS ────────────────────────────
 def get_level(xp: int) -> int:
     level = 0
@@ -1118,20 +1139,23 @@ async def ensure_vc_buttons_message():
         return
 
     view = VCButtonView()
-    content = (
-        f"{PERMA_MESSAGE_MARK}\n"
+
+    # Texte visible par les membres (sans le marqueur)
+    display_text = (
         "👋 **Crée ton salon vocal temporaire** :\n"
         f"1) Rejoins le **vocal lobby** (<#{LOBBY_VC_ID}>)\n"
         "2) Clique sur un bouton ci-dessous — tu seras **déplacé automatiquement** dans le salon créé.\n"
         "ℹ️ Le salon est **supprimé quand il est vide**."
     )
+    embed = discord.Embed(description=display_text, color=0x5865F2)
+    embed.set_footer(text=PERMA_MESSAGE_MARK)  # ← marqueur invisible
 
-    # 1) Essayer avec le message mémorisé
+    # 1) Essayer avec l'ID mémorisé
     remembered_id = _load_perma_msg_id()
     if remembered_id:
         try:
             msg = await channel.fetch_message(remembered_id)
-            await msg.edit(content=content, view=view)
+            await msg.edit(content=None, embeds=[embed], view=view)
             try:
                 await msg.pin(reason="Message permanent des salons vocaux")
             except Exception:
@@ -1141,11 +1165,11 @@ async def ensure_vc_buttons_message():
         except Exception:
             logging.debug("Message mémorisé introuvable — on va rechercher/reposter.")
 
-    # 2) Chercher un message existant marqué
+    # 2) Chercher un message existant marqué (footer OU contenu legacy)
     found = None
     try:
         async for m in channel.history(limit=100):
-            if m.author == bot.user and PERMA_MESSAGE_MARK in (m.content or ""):
+            if _is_vc_permanent_message(m):
                 found = m
                 break
     except Exception as e:
@@ -1153,7 +1177,7 @@ async def ensure_vc_buttons_message():
 
     if found:
         try:
-            await found.edit(content=content, view=view)
+            await found.edit(content=None, embeds=[embed], view=view)
             try:
                 await found.pin(reason="Message permanent des salons vocaux")
             except Exception:
@@ -1164,9 +1188,9 @@ async def ensure_vc_buttons_message():
         except Exception as e:
             logging.error(f"Échec réattachement, on reposte: {e}")
 
-    # 3) Reposter un nouveau message
+    # 3) Reposter un nouveau message (sans marqueur en clair)
     try:
-        new_msg = await channel.send(content, view=view)
+        new_msg = await channel.send(embed=embed, view=view)
         _save_perma_msg_id(new_msg.id)
         try:
             await new_msg.pin(reason="Message permanent des salons vocaux")
@@ -1620,6 +1644,11 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     if after.channel and isinstance(after.channel, discord.VoiceChannel):
         await maybe_rename_channel_by_game(after.channel, wait_presences=True)
 
+    # ⛔ Ignore entièrement les utilisateurs bot pour l'XP vocal / chrono / stats
+    if member.bot:
+        voice_times.pop(uid, None)  # nettoie un éventuel chrono
+        return
+
     # ── Chrono XP (UTC aware)
     now_utc = datetime.now(timezone.utc)
 
@@ -1639,7 +1668,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
                     user["level"] = get_level(int(user["xp"]))
-                    incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
+                incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
 
     # Move de salon → clôture partielle + restart chrono
     elif before.channel and after.channel and before.channel != after.channel:
@@ -1653,7 +1682,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
                     user["level"] = get_level(int(user["xp"]))
-                    incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
+                incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
         voice_times[uid] = now_utc
 
     # ── Suppression des salons temporaires vides (⚠️ jamais le salon radio)
@@ -1669,7 +1698,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
-    # ── Auto-mute/unmute sur le canal radio
+    # ── Auto-mute/unmute sur le canal radio (uniquement humains)
     try:
         joined_radio = (
             after.channel and after.channel.id == RADIO_VC_ID
@@ -1680,14 +1709,10 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             and (not after.channel or after.channel.id != RADIO_VC_ID)
         )
 
-        # Ne jamais auto-mute le bot lui-même
-        is_bot_self = (member.id == bot.user.id)
-
-        if not is_bot_self and joined_radio:
-            # Évite l'erreur 40032 si la personne a déjà quitté entre-temps
+        if joined_radio:
             if member.voice and member.voice.channel and member.voice.channel.id == RADIO_VC_ID:
                 await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
-        elif not is_bot_self and left_radio:
+        elif left_radio:
             await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
     except Exception as e:
         logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
@@ -1736,7 +1761,7 @@ async def _setup_hook():
 async def ensure_roles_buttons_message():
     """
     (Re)poste le message permanent des rôles PC/Consoles/Mobile/Notifications
-    dans CHANNEL_ROLES et (ré)attache la vue PlayerTypeView.
+    dans CHANNEL_ROLES et (ré)attache la vue PlayerTypeView, sans afficher le marqueur.
     """
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ROLES)
@@ -1745,29 +1770,30 @@ async def ensure_roles_buttons_message():
         return
 
     view = PlayerTypeView()
-    found = None
 
-    # Cherche un ancien message marqué pour l’éditer
-    try:
-        async for msg in channel.history(limit=100):
-            if msg.author == bot.user and ROLES_PERMA_MESSAGE_MARK in (msg.content or ""):
-                found = msg
-                break
-    except Exception as e:
-        logging.error(f"Erreur lecture historique (roles): {e}")
-
-    content = (
-        f"{ROLES_PERMA_MESSAGE_MARK}\n"
+    display_text = (
         "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
         "• 💻 PC\n"
         "• 🎮 Consoles\n"
         "• 📱 Mobile\n"
         "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
     )
+    embed = discord.Embed(description=display_text, color=0x00C896)
+    embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)  # ← marqueur invisible
+
+    # 1) chercher un message existant (legacy content ou nouveau footer)
+    found = None
+    try:
+        async for msg in channel.history(limit=100):
+            if _is_roles_permanent_message(msg):
+                found = msg
+                break
+    except Exception as e:
+        logging.error(f"Erreur lecture historique (roles): {e}")
 
     if found:
         try:
-            await found.edit(content=content, view=view)
+            await found.edit(content=None, embeds=[embed], view=view)
             try:
                 await found.pin(reason="Message rôles permanent")
             except Exception:
@@ -1778,7 +1804,7 @@ async def ensure_roles_buttons_message():
             logging.error(f"Échec réattachement des rôles, je reposte: {e}")
 
     try:
-        new_msg = await channel.send(content, view=view)
+        new_msg = await channel.send(embed=embed, view=view)
         try:
             await new_msg.pin(reason="Message rôles permanent")
         except Exception:
