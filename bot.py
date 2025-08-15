@@ -486,25 +486,49 @@ _YTDL_OPTS = {
 }
 
 # FFmpeg: options robustes pour stream (reconnexion automatique, buffer raisonnable)
-_FF_BEFORE = (
-    "-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 "
-    "-reconnect_at_eof 1 -nostdin"
-)
-_FF_OPTS = "-vn -bufsize 1M -avioflags +directio"
+_FF_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
+_FF_OPTS = "-vn -loglevel error"
 
-async def _ytdlp_get_best_audio_url(youtube_url: str) -> str:
+async def _ytdlp_get_best_audio_url(youtube_url: str) -> tuple[str, str]:
+    """
+    Retourne (stream_url, headers_str) ; headers_str est au format 'Key: Val\\r\\n...' pour FFmpeg -headers.
+    """
     loop = asyncio.get_running_loop()
+
     def _extract():
-        with yt_dlp.YoutubeDL(_YTDL_OPTS) as ydl:
+        opts = dict(_YTDL_OPTS)
+        # Client Android = liens HLS/DASH plus stables pour FFmpeg
+        opts.update({
+            "extractor_args": {"youtube": {"player_client": ["android"]}},
+        })
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(youtube_url, download=False)
-            # Si livestream : url directe ; sinon meilleur format audio
+
+            # URL du stream
             if "url" in info:
-                return info["url"]
-            if "entries" in info and info["entries"]:
+                stream_url = info["url"]
+            elif "entries" in info and info["entries"]:
                 ie = info["entries"][0]
-                return ie.get("url") or ie.get("webpage_url")
-            return info.get("webpage_url")
+                stream_url = ie.get("url") or ie.get("webpage_url") or youtube_url
+            else:
+                stream_url = info.get("webpage_url") or youtube_url
+
+            # En-têtes HTTP fournis par l’extractor (si présents)
+            hdrs = info.get("http_headers") or {}
+
+            # Toujours un User-Agent plausible (au cas où)
+            hdrs.setdefault(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+
+            # FFmpeg attend des lignes séparées par \r\n
+            header_str = "".join(f"{k}: {v}\r\n" for k, v in hdrs.items())
+            return stream_url, header_str
+
     return await loop.run_in_executor(None, _extract)
+
 
 async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
     ch = guild.get_channel(RADIO_VC_ID)
@@ -543,6 +567,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         logging.error(f"[radio] Connexion au vocal échouée: {e}")
         return None
 
+# ─ REPLACE _play_once ─
 async def _play_once(guild: discord.Guild) -> None:
     """Joue une 'session' (une URL FFmpeg); si ça coupe, la boucle supérieure relancera."""
     vc = await _connect_voice(guild)
@@ -551,12 +576,32 @@ async def _play_once(guild: discord.Guild) -> None:
         return
 
     try:
-        url = await _ytdlp_get_best_audio_url(RADIO_YT_URL)
+        base_url = RADIO_YT_URL
+        headers_str = ""
+        url = base_url
+
+        # Si c'est YouTube → récupérer l’URL de stream + headers via yt-dlp
+        if "youtube.com" in base_url or "youtu.be" in base_url:
+            try:
+                # nouvelle signature (url, headers_str)
+                url, headers_str = await _ytdlp_get_best_audio_url(base_url)
+            except TypeError:
+                # compat: ancienne signature qui retournait seulement l’URL
+                url = await _ytdlp_get_best_audio_url(base_url)
+                headers_str = ""
+
+        # Construire les before_options (reconnect + headers si présents)
+        before = _FF_BEFORE
+        if headers_str:
+            # sécuriser les guillemets pour la ligne de commande
+            safe_headers = headers_str.replace('"', r'\"')
+            before = f'{before} -headers "{safe_headers}"'
+
         source = discord.FFmpegOpusAudio(
             source=url,
             executable=FFMPEG_PATH,
-            before_options=_FF_BEFORE,
-            options="-vn"  # on laisse FFmpeg encoder en Opus, pas besoin d'options supplémentaires
+            before_options=before,
+            options=_FF_OPTS
         )
     except Exception as e:
         logging.error(f"[radio] Préparation source échouée: {e}")
@@ -572,6 +617,38 @@ async def _play_once(guild: discord.Guild) -> None:
             logging.info("[radio] Lecture terminée (fin/stop).")
         try:
             done.set()
+        except Exception:
+            pass
+
+    try:
+        vc.play(source, after=_after)
+        logging.info("[radio] ▶️ Lecture démarrée.")
+    except Exception as e:
+        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
+        try:
+            source.cleanup()
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+        return
+
+    try:
+        while True:
+            if done.is_set():
+                break
+            if not vc.is_connected():
+                logging.warning("[radio] VC déconnecté, on relancera.")
+                break
+            if not vc.is_playing():
+                # petite tolérance: micro-stalls réseau
+                await asyncio.sleep(2)
+                if not vc.is_playing():
+                    logging.warning("[radio] Lecture stoppée, on relancera.")
+                    break
+            await asyncio.sleep(3)
+    finally:
+        try:
+            vc.stop()
         except Exception:
             pass
 
