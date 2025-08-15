@@ -529,6 +529,16 @@ async def _ytdlp_get_best_audio_url(youtube_url: str) -> tuple[str, str]:
 
     return await loop.run_in_executor(None, _extract)
 
+async def _reset_voice_session(guild: discord.Guild):
+    """Déconnecte proprement le voice client pour repartir d'une session saine."""
+    vc = guild.voice_client
+    if vc:
+        try:
+            await vc.disconnect(force=True)
+            logging.info("[radio] Reset voice: disconnect(force=True) appliqué.")
+        except Exception as e:
+            logging.warning(f"[radio] Reset voice: échec disconnect forcé: {e}")
+    await asyncio.sleep(1.5)  # petit délai pour laisser Discord clôturer la session
 
 async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
     ch = guild.get_channel(RADIO_VC_ID)
@@ -544,28 +554,61 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
             logging.error("[radio] Permissions manquantes sur le salon: CONNECT/SPEAK requis.")
             return None
 
-        # ✅ Si déjà connecté ailleurs → move
+        # 🔒 Si déjà connecté ailleurs → move
         if ch.guild.voice_client and ch.guild.voice_client.channel != ch:
             await ch.guild.voice_client.move_to(ch, reason="Radio auto")
             vc = ch.guild.voice_client
         elif ch.guild.voice_client:
             vc = ch.guild.voice_client
         else:
-            # self_deaf=True = on n'écoute pas le salon; n'empêche pas d'émettre
-            vc = await ch.connect(reconnect=True, self_deaf=True, self_mute=False)
+            # ⚠️ reconnect=False pour éviter les boucles internes ; on gère notre retry
+            vc = await ch.connect(reconnect=False, self_deaf=True, self_mute=False)
 
-        # ✅ Au cas où le bot aurait été server-mute: on le dé-mute
+        # Bot éventuellement server-mute → dé-mute
         try:
-            if me and me.voice and me.voice.mute:
-                await me.edit(mute=False, reason="Radio: dé-mute auto du bot")
-                logging.info("[radio] Le bot était server-mute → dé-mute appliqué.")
+            if me and me.voice and (me.voice.mute or me.voice.deaf):
+                await me.edit(mute=False, deafen=False, reason="Radio: ensure unmuted")
+                logging.info("[radio] Le bot était mute/deaf → correction appliquée.")
         except Exception as e:
-            logging.warning(f"[radio] Impossible de dé-mute automatiquement le bot: {e}")
+            logging.warning(f"[radio] Impossible de forcer unmute/undeafen du bot: {e}")
+
+        # StageChannel → passer en Speaker
+        try:
+            if isinstance(ch, discord.StageChannel) and me and me.voice and me.voice.suppress:
+                await me.edit(suppress=False, reason="Radio: passer en Speaker sur Stage")
+                logging.info("[radio] StageChannel: suppression levée (Speaker).")
+        except Exception as e:
+            logging.warning(f"[radio] Stage unsuppress impossible (perms ?): {e}")
 
         return vc
+
+    except discord.errors.ConnectionClosed as e:
+        code = getattr(e, "code", None)
+        logging.warning(f"[radio] Voice ConnectionClosed (code={code}), tentative de reset…")
+        if code in (4006, 4009):  # 4006 invalid session, 4009 session timeout
+            await _reset_voice_session(guild)
+            try:
+                vc = await ch.connect(reconnect=False, self_deaf=True, self_mute=False)
+                logging.info("[radio] Reconnexion voice réussie après reset.")
+                return vc
+            except Exception as ee:
+                logging.error(f"[radio] Reconnexion après reset échouée: {ee}")
+                return None
+        else:
+            logging.error(f"[radio] Voice WS fermé (code={code}) sans recovery dédié.")
+            return None
+
     except Exception as e:
         logging.error(f"[radio] Connexion au vocal échouée: {e}")
-        return None
+        # Dernière chance: reset puis 2nd essai
+        try:
+            await _reset_voice_session(guild)
+            vc = await ch.connect(reconnect=False, self_deaf=True, self_mute=False)
+            logging.info("[radio] Connexion voice OK après reset (path générique).")
+            return vc
+        except Exception as ee:
+            logging.error(f"[radio] Connexion après reset échouée: {ee}")
+            return None
 
 # ─ REPLACE _play_once ─
 async def _play_once(guild: discord.Guild) -> None:
@@ -1553,26 +1596,26 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
-    # ─ INSERT HERE ─ [AUTO-MUTE RADIO]
-    try:
-        joined_radio = (
-            after.channel and after.channel.id == RADIO_VC_ID
-            and (not before.channel or before.channel.id != RADIO_VC_ID)
-        )
-        left_radio = (
-            before.channel and before.channel.id == RADIO_VC_ID
-            and (not after.channel or after.channel.id != RADIO_VC_ID)
-        )
+    # ─ [AUTO-MUTE RADIO]
+try:
+    joined_radio = (
+        after.channel and after.channel.id == RADIO_VC_ID
+        and (not before.channel or before.channel.id != RADIO_VC_ID)
+    )
+    left_radio = (
+        before.channel and before.channel.id == RADIO_VC_ID
+        and (not after.channel or after.channel.id != RADIO_VC_ID)
+    )
 
-        # ⛔ Ne jamais auto-mute le bot lui-même
-        is_bot_self = (member.id == bot.user.id)
+    is_bot_self = (member.id == bot.user.id)
 
-        if not is_bot_self and joined_radio:
+    if not is_bot_self and joined_radio:
+        if member.voice and member.voice.channel and member.voice.channel.id == RADIO_VC_ID:
             await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
-        elif not is_bot_self and left_radio:
-            await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
-    except Exception as e:
-        logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
+    elif not is_bot_self and left_radio:
+        await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
+except Exception as e:
+    logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
