@@ -658,7 +658,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    try:
+         try:
     source = discord.FFmpegPCMAudio(
         source=url,
         executable=FFMPEG_PATH,
