@@ -1,6 +1,5 @@
-discord.py
-python-dotenv
-Pillow
-yt-dlp
-PyNaCl
-imageio-ffmpeg
+discord.py[voice]>=2.4
+python-dotenv>=1.0
+Pillow>=10.0
+yt-dlp>=2024.7.1
+imageio-ffmpeg>=0.4
