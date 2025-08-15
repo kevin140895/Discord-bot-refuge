@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import asyncio
+import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -548,23 +549,23 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
     try:
         me = guild.me or guild.get_member(bot.user.id)
 
-        # ✅ Vérif permissions de base
+        # ✅ Permissions de base
         perms = ch.permissions_for(me) if me else None
         if not (perms and perms.connect and perms.speak):
             logging.error("[radio] Permissions manquantes sur le salon: CONNECT/SPEAK requis.")
             return None
 
-        # 🔒 Si déjà connecté ailleurs → move
+        # 🔒 Déjà connecté ailleurs → move
         if ch.guild.voice_client and ch.guild.voice_client.channel != ch:
             await ch.guild.voice_client.move_to(ch, reason="Radio auto")
             vc = ch.guild.voice_client
         elif ch.guild.voice_client:
             vc = ch.guild.voice_client
         else:
-            # ⚠️ reconnect=False pour éviter les boucles internes ; on gère notre retry
+            # ❗ Toujours sans self_deaf
             vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
 
-        # Bot éventuellement server-mute → dé-mute
+        # Enlever mute/deaf serveur si appliqués
         try:
             if me and me.voice and (me.voice.mute or me.voice.deaf):
                 await me.edit(mute=False, deafen=False, reason="Radio: ensure unmuted")
@@ -572,7 +573,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         except Exception as e:
             logging.warning(f"[radio] Impossible de forcer unmute/undeafen du bot: {e}")
 
-        # StageChannel → passer en Speaker
+        # StageChannel → passer Speaker
         try:
             if isinstance(ch, discord.StageChannel) and me and me.voice and me.voice.suppress:
                 await me.edit(suppress=False, reason="Radio: passer en Speaker sur Stage")
@@ -580,15 +581,24 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         except Exception as e:
             logging.warning(f"[radio] Stage unsuppress impossible (perms ?): {e}")
 
+        # 🧪 Log d'état audio
+        st = me.voice
+        logging.info(
+            f"[radio] Bot voice state: ch={getattr(st.channel,'id',None)} "
+            f"mute={getattr(st,'mute',None)} deaf={getattr(st,'deaf',None)} "
+            f"self_mute={getattr(st,'self_mute',None)} self_deaf={getattr(st,'self_deaf',None)} "
+            f"suppress={getattr(st,'suppress',None)}"
+        )
         return vc
 
     except discord.errors.ConnectionClosed as e:
         code = getattr(e, "code", None)
         logging.warning(f"[radio] Voice ConnectionClosed (code={code}), tentative de reset…")
-        if code in (4006, 4009):  # 4006 invalid session, 4009 session timeout
+        if code in (4006, 4009):
             await _reset_voice_session(guild)
             try:
-                vc = await ch.connect(reconnect=False, self_deaf=True, self_mute=False)
+                # ❗ garder self_deaf=False ici aussi
+                vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
                 logging.info("[radio] Reconnexion voice réussie après reset.")
                 return vc
             except Exception as ee:
@@ -603,55 +613,54 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         # Dernière chance: reset puis 2nd essai
         try:
             await _reset_voice_session(guild)
-            vc = await ch.connect(reconnect=False, self_deaf=True, self_mute=False)
+            # ❗ garder self_deaf=False ici aussi
+            vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
             logging.info("[radio] Connexion voice OK après reset (path générique).")
             return vc
         except Exception as ee:
             logging.error(f"[radio] Connexion après reset échouée: {ee}")
             return None
-
+            
 # ─ REPLACE _play_once ─
 async def _play_once(guild: discord.Guild) -> None:
-    """Joue une 'session' (une URL FFmpeg); si ça coupe, la boucle supérieure relancera."""
     vc = await _connect_voice(guild)
     if not vc:
         await asyncio.sleep(5)
         return
 
+    # Stop dur de tout flux en cours
+    try:
+        if vc.is_playing() or vc.is_paused():
+            vc.stop()
+            await asyncio.sleep(0.2)
+    except Exception:
+        pass
+
     try:
         base_url = RADIO_YT_URL
-        is_youtube = ("youtube.com" in base_url) or ("youtu.be" in base_url)
+        url = base_url
+        before = _FF_BEFORE
 
-        if is_youtube:
-            # YouTube → récup URL + headers via yt-dlp et encode en Opus côté FFmpeg
+        # Si YouTube : récup url + headers via yt-dlp, mais on sort en PCM quand même
+        if "youtube.com" in base_url or "youtu.be" in base_url:
             headers_str = ""
             try:
                 url, headers_str = await _ytdlp_get_best_audio_url(base_url)
             except TypeError:
                 url = await _ytdlp_get_best_audio_url(base_url)
                 headers_str = ""
-
-            before = _FF_BEFORE
             if headers_str:
                 safe_headers = headers_str.replace('"', r'\"')
                 before = f'{before} -headers "{safe_headers}"'
 
-            source = discord.FFmpegOpusAudio(
-                source=url,
-                executable=FFMPEG_PATH,
-                before_options=before,
-                options=_FF_OPTS
-            )
-        else:
-            # Flux direct (MP3, Icecast…) → sortir en PCM 48 kHz (très stable)
-            url = base_url
-            before = _FF_BEFORE
-            source = discord.FFmpegPCMAudio(
-                source=url,
-                executable=FFMPEG_PATH,
-                before_options=before,
-                options="-vn -f s16le -ac 2 -ar 48000"
-            )
+        # ⚠️ Sortie PCM 48kHz stéréo (très stable) + on capture le stderr FFmpeg
+        source = discord.FFmpegPCMAudio(
+            source=url,
+            executable=FFMPEG_PATH,
+            before_options=before,
+            options=None,  # laisse discord.py mettre -f s16le -ar 48000 -ac 2
+            stderr=subprocess.PIPE
+        )
     except Exception as e:
         logging.error(f"[radio] Préparation source échouée: {e}")
         await asyncio.sleep(5)
@@ -666,6 +675,47 @@ async def _play_once(guild: discord.Guild) -> None:
             logging.info("[radio] Lecture terminée (fin/stop).")
         try:
             done.set()
+        except Exception:
+            pass
+
+    try:
+        vc.play(source, after=_after)
+        logging.info("[radio] ▶️ Lecture démarrée.")
+    except Exception as e:
+        # Si play échoue, tente de lire le stderr FFmpeg pour comprendre
+        try:
+            proc = getattr(source, "_process", None)
+            if proc and proc.stderr:
+                err_txt = proc.stderr.read().decode(errors="ignore")
+                if err_txt:
+                    logging.error(f"[radio] FFmpeg stderr:\n{err_txt}")
+        except Exception:
+            pass
+        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
+        try:
+            source.cleanup()
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+        return
+
+    # Boucle de vie du flux
+    try:
+        while True:
+            if done.is_set():
+                break
+            if not vc.is_connected():
+                logging.warning("[radio] VC déconnecté, on relancera.")
+                break
+            if not vc.is_playing():
+                await asyncio.sleep(2)
+                if not vc.is_playing():
+                    logging.warning("[radio] Lecture stoppée, on relancera.")
+                    break
+            await asyncio.sleep(3)
+    finally:
+        try:
+            vc.stop()
         except Exception:
             pass
 
