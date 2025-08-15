@@ -629,7 +629,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    # Stop tout flux en cours
+    # Stop flux existant
     try:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
@@ -637,18 +637,20 @@ async def _play_once(guild: discord.Guild) -> None:
     except Exception:
         pass
 
-    # 🔊 Flux direct (Icecast/MP3) — pas de yt-dlp
-    url = RADIO_YT_URL  # ton lien Hotmix
-    # Headers utiles pour certains serveurs (UA + ICY metadata)
+    url = RADIO_YT_URL
     headers_direct = (
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
         "Icy-MetaData: 1\r\n"
         "Accept: */*\r\n"
     )
-    # -headers ... + timeouts raisonnables + non-seekable (live)
-    before = f'{_FF_BEFORE} -headers "{headers_direct}" -rw_timeout 15000000 -seekable 0'
+    before = f'{_FF_BEFORE} -headers "{headers_direct}" -rw_timeout 15000000 -seekable 0 -buffer_size 512k'
 
-        # ⚙️ Sortie PCM 48 kHz stéréo (super stable côté Discord)
+    # Vérification FFmpeg binaire
+    if not FFMPEG_PATH or not os.path.isfile(FFMPEG_PATH):
+        logging.error(f"[radio] FFmpeg introuvable ou invalide à ce chemin : {FFMPEG_PATH}")
+        await asyncio.sleep(5)
+        return
+
     try:
         source = discord.FFmpegPCMAudio(
             source=url,
@@ -657,11 +659,7 @@ async def _play_once(guild: discord.Guild) -> None:
             options="-vn -f s16le -ac 2 -ar 48000",
         )
     except Exception as e:
-        logging.error(f"[radio] Préparation source échouée: {e}")
-        await asyncio.sleep(5)
-        return
-    except Exception as e:
-        logging.error(f"[radio] Préparation source échouée: {e}")
+        logging.error(f"[radio] Préparation source FFmpeg échouée: {e}")
         await asyncio.sleep(5)
         return
 
@@ -671,16 +669,15 @@ async def _play_once(guild: discord.Guild) -> None:
         if err:
             logging.warning(f"[radio] Lecture terminée avec erreur: {err}")
         else:
-            logging.info("[radio] Lecture terminée (fin/stop).")
+            logging.info("[radio] Lecture terminée (fin ou arrêt).")
         try:
             done.set()
         except Exception:
             pass
 
-    # ▶️ Démarrer la lecture
     try:
         vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée (flux direct).")
+        logging.info("[radio] ▶️ Lecture démarrée.")
     except Exception as e:
         logging.error(f"[radio] Impossible de lancer la lecture: {e}")
         try:
@@ -690,20 +687,17 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-
-
-    # Boucle de vie
     try:
         while True:
             if done.is_set():
                 break
             if not vc.is_connected():
-                logging.warning("[radio] VC déconnecté, on relancera.")
+                logging.warning("[radio] VC déconnecté — tentative de relance prévue.")
                 break
             if not vc.is_playing():
                 await asyncio.sleep(2)
                 if not vc.is_playing():
-                    logging.warning("[radio] Lecture stoppée, on relancera.")
+                    logging.warning("[radio] Flux stoppé sans raison détectée.")
                     break
             await asyncio.sleep(3)
     finally:
