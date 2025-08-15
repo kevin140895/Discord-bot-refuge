@@ -59,7 +59,7 @@ PLATFORM_ROLE_IDS = {
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
-RADIO_YT_URL: str = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
+RADIO_YT_URL: str   = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
 
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
@@ -629,7 +629,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    # Stop flux existant
+    # Arrêter tout flux en cours
     try:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
@@ -637,17 +637,25 @@ async def _play_once(guild: discord.Guild) -> None:
     except Exception:
         pass
 
-    url = RADIO_YT_URL
+    # Flux direct HotmixRadio (MP3)
+    url = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
+
+    # Headers obligatoires pour accéder au flux
     headers_direct = (
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
         "Icy-MetaData: 1\r\n"
         "Accept: */*\r\n"
     )
-    before = f'{_FF_BEFORE} -headers "{headers_direct}" -rw_timeout 15000000 -seekable 0 -buffer_size 512k'
 
-    # Vérification FFmpeg binaire
+    # Options FFmpeg robustes
+    before = (
+    f'{_FF_BEFORE} '
+    '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+    f'-headers "{headers_direct}" '
+    '-rw_timeout 15000000 -seekable 0 -buffer_size 512k'
+)
     if not FFMPEG_PATH or not os.path.isfile(FFMPEG_PATH):
-        logging.error(f"[radio] FFmpeg introuvable ou invalide à ce chemin : {FFMPEG_PATH}")
+        logging.error(f"[radio] FFmpeg introuvable à : {FFMPEG_PATH}")
         await asyncio.sleep(5)
         return
 
@@ -669,7 +677,7 @@ async def _play_once(guild: discord.Guild) -> None:
         if err:
             logging.warning(f"[radio] Lecture terminée avec erreur: {err}")
         else:
-            logging.info("[radio] Lecture terminée (fin ou arrêt).")
+            logging.info("[radio] Lecture terminée (fin ou arrêt normal).")
         try:
             done.set()
         except Exception:
@@ -677,7 +685,7 @@ async def _play_once(guild: discord.Guild) -> None:
 
     try:
         vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée.")
+        logging.info("[radio] ▶️ Lecture démarrée (Hotmix Hip-Hop).")
     except Exception as e:
         logging.error(f"[radio] Impossible de lancer la lecture: {e}")
         try:
@@ -687,17 +695,18 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
+    # Surveillance du flux (tant que c’est actif)
     try:
         while True:
             if done.is_set():
                 break
             if not vc.is_connected():
-                logging.warning("[radio] VC déconnecté — tentative de relance prévue.")
+                logging.warning("[radio] VC déconnecté — relance prévue.")
                 break
             if not vc.is_playing():
                 await asyncio.sleep(2)
                 if not vc.is_playing():
-                    logging.warning("[radio] Flux stoppé sans raison détectée.")
+                    logging.warning("[radio] Flux stoppé — relance prévue.")
                     break
             await asyncio.sleep(3)
     finally:
