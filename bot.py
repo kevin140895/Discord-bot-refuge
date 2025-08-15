@@ -645,6 +645,36 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
             logging.error(f"[radio] Connexion après reset échouée: {ee}")
             return None
 
+def _ff_headers() -> str:
+    return (
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
+        "Icy-MetaData: 1\r\n"
+        "Accept: */*\r\n"
+    )
+
+def _before_opts() -> str:
+    return (
+        "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+        "-protocol_whitelist file,http,https,tcp,tls,crypto,pipe "
+        f'-headers "{_ff_headers()}"'
+    )
+
+def _wire_ffmpeg_stderr_to_log(source):
+    proc = getattr(source, "_process", None) or getattr(source, "process", None)
+    if not proc or not getattr(proc, "stderr", None):
+        return
+    import threading
+    def _reader():
+        try:
+            for line in iter(proc.stderr.readline, b""):
+                try:
+                    logging.debug("[ffmpeg] " + line.decode("utf-8", "ignore").rstrip())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    threading.Thread(target=_reader, daemon=True).start()
+
 # ─play_once ─
 async def _play_once(guild: discord.Guild) -> None:
     vc = await _connect_voice(guild)
