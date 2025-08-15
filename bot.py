@@ -102,10 +102,8 @@ ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
 
-# FFmpeg: path + override système
-FFMPEG_PATH = os.getenv("FFMPEG_PATH") or get_ffmpeg_exe()
-if os.getenv("FORCE_SYSTEM_FFMPEG") == "1" and Path("/usr/bin/ffmpeg").exists():
-    FFMPEG_PATH = "/usr/bin/ffmpeg"
+# FFmpeg: privilégier le binaire système si présent
+FFMPEG_PATH = "/usr/bin/ffmpeg" if Path("/usr/bin/ffmpeg").exists() else get_ffmpeg_exe()
 logging.info(f"[voice] Using FFmpeg at: {FFMPEG_PATH}")
 
 # ─ Vérif/lib chargement Opus (log au démarrage) ─
