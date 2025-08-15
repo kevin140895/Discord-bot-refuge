@@ -622,6 +622,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
             return None
             
 # ─ REPLACE _play_once ─
+# ─ REPLACE _play_once ─
 async def _play_once(guild: discord.Guild) -> None:
     vc = await _connect_voice(guild)
     if not vc:
@@ -653,13 +654,13 @@ async def _play_once(guild: discord.Guild) -> None:
                 safe_headers = headers_str.replace('"', r'\"')
                 before = f'{before} -headers "{safe_headers}"'
 
-        # ⚠️ Sortie PCM 48kHz stéréo (très stable) + on capture le stderr FFmpeg
+        # Sortie PCM 48 kHz stéréo (très stable) + capture stderr FFmpeg
         source = discord.FFmpegPCMAudio(
             source=url,
             executable=FFMPEG_PATH,
             before_options=before,
-            options=None,  # laisse discord.py mettre -f s16le -ar 48000 -ac 2
-            stderr=subprocess.PIPE
+            options=None,  # discord.py fournit -f s16le -ar 48000 -ac 2
+            stderr=subprocess.PIPE,
         )
     except Exception as e:
         logging.error(f"[radio] Préparation source échouée: {e}")
@@ -675,6 +676,62 @@ async def _play_once(guild: discord.Guild) -> None:
             logging.info("[radio] Lecture terminée (fin/stop).")
         try:
             done.set()
+        except Exception:
+            pass
+
+    try:
+        vc.play(source, after=_after)
+        logging.info("[radio] ▶️ Lecture démarrée.")
+    except Exception as e:
+        # Si play échoue, tente de lire le stderr FFmpeg pour comprendre
+        try:
+            proc = getattr(source, "_process", None)
+            if proc and proc.stderr:
+                err_txt = proc.stderr.read().decode(errors="ignore")
+                if err_txt:
+                    logging.error(f"[radio] FFmpeg stderr:\n{err_txt}")
+        except Exception:
+            pass
+        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
+        try:
+            source.cleanup()
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+        return
+
+    # Boucle de vie du flux
+    try:
+        while True:
+            if done.is_set():
+                break
+            if not vc.is_connected():
+                logging.warning("[radio] VC déconnecté, on relancera.")
+                break
+            if not vc.is_playing():
+                await asyncio.sleep(2)
+                if not vc.is_playing():
+                    logging.warning("[radio] Lecture stoppée, on relancera.")
+                    break
+            await asyncio.sleep(3)
+    finally:
+        # Stop & cleanup FFmpeg proprement
+        try:
+            vc.stop()
+        except Exception:
+            pass
+        try:
+            proc = getattr(source, "_process", None)
+            if proc and proc.poll() is None:
+                proc.kill()
+                try:
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            source.cleanup()
         except Exception:
             pass
 
