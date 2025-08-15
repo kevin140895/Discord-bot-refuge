@@ -622,6 +622,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
             logging.error(f"[radio] Connexion après reset échouée: {ee}")
             return None
 
+# ─play_once ─
 # ─ REPLACE _play_once ─
 async def _play_once(guild: discord.Guild) -> None:
     vc = await _connect_voice(guild)
@@ -629,7 +630,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    # Arrêter tout flux en cours
+    # Stop tout flux en cours
     try:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
@@ -637,44 +638,83 @@ async def _play_once(guild: discord.Guild) -> None:
     except Exception:
         pass
 
-    # Flux direct HotmixRadio (MP3)
-    url = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
+    # 🔊 Flux direct (Icecast/MP3) — pas de yt-dlp
+    stream_url = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
 
-    # Headers obligatoires pour accéder au flux
-    headers_direct = (
+    # Headers indispensables pour FFmpeg (User-Agent + Icy-MetaData)
+    headers = (
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
         "Icy-MetaData: 1\r\n"
         "Accept: */*\r\n"
     )
 
-    # Options FFmpeg robustes
-    before = (
-    '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
-    '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n'
-    'Icy-MetaData: 1\r\nAccept: */*\r\n"'
-)
+    # Vérif FFmpeg
     if not FFMPEG_PATH or not os.path.isfile(FFMPEG_PATH):
         logging.error(f"[radio] FFmpeg introuvable à : {FFMPEG_PATH}")
         await asyncio.sleep(5)
         return
 
-         try:
-    source = discord.FFmpegPCMAudio(
-        source=url,
-        executable=FFMPEG_PATH,
-        before_options=(
-            '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
-            '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n'
-            'Icy-MetaData: 1\r\nAccept: */*\r\n"'
-        ),
-        options="-vn -loglevel error"
-    )
-except Exception as e:
-    logging.error(f"[radio] Préparation source FFmpeg échouée: {e}")
-    await asyncio.sleep(5)
-    return
+    # Préparation de la source audio (⚠️ bien indenté)
+    try:
+        source = discord.FFmpegPCMAudio(
+            source=stream_url,
+            executable=FFMPEG_PATH,
+            before_options=(
+                '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+                f'-headers "{headers}"'
+            ),
+            options='-vn -loglevel error'
+        )
+    except Exception as e:
+        logging.error(f"[radio] Préparation source FFmpeg échouée: {e}")
+        await asyncio.sleep(5)
+        return
 
-done = asyncio.Event()
+    done = asyncio.Event()
+
+    def _after(err: Exception | None):
+        if err:
+            logging.warning(f"[radio] Lecture terminée avec erreur: {err}")
+        else:
+            logging.info("[radio] Lecture terminée (fin ou arrêt normal).")
+        try:
+            done.set()
+        except Exception:
+            pass
+
+    try:
+        vc.play(source, after=_after)
+        logging.info("[radio] ▶️ Lecture démarrée (Hotmix Hip-Hop).")
+    except Exception as e:
+        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
+        try:
+            source.cleanup()
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+        return
+
+    # Surveillance du flux tant que ça joue
+    try:
+        while not done.is_set():
+            if not vc.is_connected():
+                logging.warning("[radio] VC déconnecté — relance prévue.")
+                break
+            if not vc.is_playing():
+                await asyncio.sleep(2)
+                if not vc.is_playing():
+                    logging.warning("[radio] Flux stoppé — relance prévue.")
+                    break
+            await asyncio.sleep(3)
+    finally:
+        try:
+            vc.stop()
+        except Exception:
+            pass
+        try:
+            source.cleanup()
+        except Exception:
+            pass
 
     def _after(err: Exception | None):
         if err:
