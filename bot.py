@@ -115,19 +115,18 @@ FFMPEG_PATH = get_ffmpeg_exe()  # binaire FFmpeg fourni par imageio-ffmpeg
 # ─ Vérif/lib chargement Opus (log au démarrage) ─
 try:
     import discord.opus as _opus
+    tried = []
     if not _opus.is_loaded():
         for _name in ("libopus.so.0", "libopus.so", "opus"):
             try:
                 _opus.load_opus(_name)
+                tried.append((_name, "OK"))
                 break
-            except Exception:
-                pass
-    logging.info(f"[voice] Opus loaded: {_opus.is_loaded()}")
+            except Exception as e:
+                tried.append((_name, f"ERR: {e!r}"))
+    logging.info(f"[voice] Opus loaded: {_opus.is_loaded()} (tries={tried})")
 except Exception as e:
     logging.warning(f"[voice] Opus check failed: {e}")
-
-_radio_task: asyncio.Task | None = None
-_radio_lock = asyncio.Lock()
 
 # ─────────────────────── TOKEN ──────────────────────────────
 TOKEN = (
@@ -677,7 +676,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    # Préparation de la source audio (⚠️ bien indenté)
+    # Préparation de la source audio
     try:
         source = discord.FFmpegPCMAudio(
             source=stream_url,
@@ -708,8 +707,9 @@ async def _play_once(guild: discord.Guild) -> None:
     try:
         vc.play(source, after=_after)
         logging.info("[radio] ▶️ Lecture démarrée (Hotmix Hip-Hop).")
-    except Exception as e:
-        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
+    except Exception:
+        # ✅ BONUS: stacktrace complète
+        logging.exception("[radio] Impossible de lancer la lecture")
         try:
             source.cleanup()
         except Exception:
@@ -720,52 +720,6 @@ async def _play_once(guild: discord.Guild) -> None:
     # Surveillance du flux tant que ça joue
     try:
         while not done.is_set():
-            if not vc.is_connected():
-                logging.warning("[radio] VC déconnecté — relance prévue.")
-                break
-            if not vc.is_playing():
-                await asyncio.sleep(2)
-                if not vc.is_playing():
-                    logging.warning("[radio] Flux stoppé — relance prévue.")
-                    break
-            await asyncio.sleep(3)
-    finally:
-        try:
-            vc.stop()
-        except Exception:
-            pass
-        try:
-            source.cleanup()
-        except Exception:
-            pass
-
-    def _after(err: Exception | None):
-        if err:
-            logging.warning(f"[radio] Lecture terminée avec erreur: {err}")
-        else:
-            logging.info("[radio] Lecture terminée (fin ou arrêt normal).")
-        try:
-            done.set()
-        except Exception:
-            pass
-
-    try:
-        vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée (Hotmix Hip-Hop).")
-    except Exception as e:
-        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
-        try:
-            source.cleanup()
-        except Exception:
-            pass
-        await asyncio.sleep(5)
-        return
-
-    # Surveillance du flux (tant que c’est actif)
-    try:
-        while True:
-            if done.is_set():
-                break
             if not vc.is_connected():
                 logging.warning("[radio] VC déconnecté — relance prévue.")
                 break
