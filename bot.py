@@ -1477,7 +1477,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
     # ─ INSERT HERE ─ [AUTO-MUTE RADIO]
-     try:
+    try:
         joined_radio = (
             after.channel and after.channel.id == RADIO_VC_ID
             and (not before.channel or before.channel.id != RADIO_VC_ID)
@@ -1493,19 +1493,9 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         if not is_bot_self and joined_radio:
             await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
         elif not is_bot_self and left_radio:
-            # Sécurité: on retire le mute quand on quitte le canal radio
             await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
     except Exception as e:
         logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
-
-        if joined_radio:
-            await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
-        elif left_radio:
-            # Sécurité: on retire le mute quand on quitte le canal radio
-            await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
-    except Exception as e:
-        logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
-
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
