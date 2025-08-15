@@ -697,35 +697,37 @@ async def _play_once(guild: discord.Guild) -> None:
 
     source = None
 
-    # ✅ 1) Tentative en Opus natif (pas d’encoder Python -> pas d’Opus côté Python)
+# ✅ Opus natif SANS PROBE (plus stable, évite ffprobe)
+try:
+    source = discord.FFmpegOpusAudio(
+        RADIO_STREAM_URL,
+        executable=FFMPEG_PATH,
+        bitrate=128,  # kbps
+        before_options=_before_opts(),
+        options="-loglevel error",
+        stderr=subprocess.PIPE,
+    )
+    logging.info("[radio] Source FFmpegOpusAudio prête (opus natif sans probe).")
+except Exception as e:
+    logging.warning(f"[radio] OpusAudio direct failed ({e}) → fallback PCM")
+    source = None
+
+# 🔁 Fallback PCM si besoin (nécessite libopus côté Python)
+if source is None:
     try:
-        source = await discord.FFmpegOpusAudio.from_probe(
+        source = discord.FFmpegPCMAudio(
             RADIO_STREAM_URL,
             executable=FFMPEG_PATH,
             before_options=_before_opts(),
-            options="-loglevel error",
+            options="-vn -loglevel error",
             stderr=subprocess.PIPE,
         )
-        logging.info("[radio] Source FFmpegOpusAudio prête (opus natif).")
-    except Exception as e:
-        logging.warning(f"[radio] OpusAudio failed ({e}) → fallback PCM")
-        source = None
+        logging.info("[radio] Source FFmpegPCMAudio prête (PCM).")
+    except Exception:
+        logging.exception("[radio] Préparation source échouée")
+        await asyncio.sleep(5)
+        return
 
-    # 🔁 2) Fallback PCM si l’Opus natif échoue (nécessite libopus côté Python)
-    if source is None:
-        try:
-            source = discord.FFmpegPCMAudio(
-                RADIO_STREAM_URL,
-                executable=FFMPEG_PATH,
-                before_options=_before_opts(),
-                options="-vn -loglevel error",
-                stderr=subprocess.PIPE,
-            )
-            logging.info("[radio] Source FFmpegPCMAudio prête (PCM).")
-        except Exception as e:
-            logging.exception("[radio] Préparation source échouée")
-            await asyncio.sleep(5)
-            return
 
     # Brancher logs FFmpeg
     _wire_ffmpeg_stderr_to_log(source)
