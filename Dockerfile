@@ -1,19 +1,23 @@
-# 1. Choisir une image Python officielle
+# Utilise une image Python légère
 FROM python:3.11-slim
 
-# 2. Installer les bibliothèques système nécessaires
+# Installation des dépendances système nécessaires pour ffmpeg, opus, Pillow, etc.
 RUN apt-get update && \
-    apt-get install -y libopus0 ffmpeg && \
-    apt-get clean
+    apt-get install -y \
+    libopus0 \
+    ffmpeg \
+    libjpeg-dev \
+    zlib1g-dev \
+    && apt-get clean
 
-# 3. Créer un dossier pour ton application
+# Répertoire de travail dans le conteneur
 WORKDIR /app
 
-# 4. Copier tout le code de ton projet dans l’image
-COPY . /app
+# Copie tous les fichiers du projet
+COPY . .
 
-# 5. Installer les dépendances Python
+# Installation des dépendances Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 6. Démarrer le bot
+# Lancement du bot
 CMD ["python", "bot.py"]
