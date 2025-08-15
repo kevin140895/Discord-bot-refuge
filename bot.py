@@ -116,6 +116,7 @@ try:
                 _opus.load_opus(_name)
                 tried.append((_name, "OK"))
                 break
+
             except Exception as e:
                 tried.append((_name, f"ERR: {e!r}"))
     logging.info(f"[voice] Opus loaded: {_opus.is_loaded()} (tries={tried})")
@@ -141,8 +142,8 @@ if not TOKEN:
 class PlayerTypeView(discord.ui.View):
     """
     Boutons de rôles :
-      - Plateformes (PC/Consoles/Mobile) : exclusifs entre eux
-      - Notifications : toggle indépendant (coexiste avec n'importe quelle plateforme)
+        - Plateformes (PC/Consoles/Mobile) : exclusifs entre eux
+        - Notifications : toggle indépendant (coexiste avec n'importe quelle plateforme)
     """
     def __init__(self):
         super().__init__(timeout=None)  # Vue persistante
@@ -169,9 +170,9 @@ class PlayerTypeView(discord.ui.View):
     async def _set_platform_role(self, interaction: discord.Interaction, role_id: int, label: str):
         """
         Règle de gestion (nouvelle) :
-          - Si le membre a DÉJÀ cette plateforme -> ne rien faire (pas de toggle off).
-          - Sinon -> ajouter cette plateforme et retirer automatiquement les AUTRES plateformes.
-          - Le rôle 🔔 Notifications n’est JAMAIS touché ici.
+        - Si le membre a DÉJÀ cette plateforme -> ne rien faire (pas de toggle off).
+        - Sinon -> ajouter cette plateforme et retirer automatiquement les AUTRES plateformes.
+        - Le rôle 🔔 Notifications n’est JAMAIS touché ici.
         """
         guild = interaction.guild
         if not guild:
@@ -636,7 +637,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         try:
             await _reset_voice_session(guild)
             # ❗ garder self_deaf=False ici aussi
-             vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
+            vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
             logging.info("[radio] Connexion voice OK après reset (path générique).")
             return vc
         except Exception as ee:
@@ -706,9 +707,7 @@ async def _play_once(guild: discord.Guild) -> None:
 
     # ---------- Création de la source ----------
     source = None
-@@ -713,56 +723,73 @@ async def _play_once(guild: discord.Guild) -> None:
-        source = None
-
+    
     # 🔁 Fallback PCM si besoin
     if source is None:
         try:
@@ -841,7 +840,7 @@ async def grant_level_roles(member: discord.Member, new_level: int) -> int | Non
     if REMOVE_LOWER_TIER_ROLES:
         try:
             lower_roles = [member.guild.get_role(LEVEL_ROLE_REWARDS[l])
-                           for l in LEVEL_ROLE_REWARDS.keys() if l < best_lvl]
+                            for l in LEVEL_ROLE_REWARDS.keys() if l < best_lvl]
             lower_roles = [r for r in lower_roles if r and r in member.roles]
             if lower_roles:
                 await member.remove_roles(*lower_roles, reason="Nouveau palier atteint")
@@ -1224,21 +1223,21 @@ async def daily_summary_loop():
                 embed.add_field(
                     name="💬 Top Messages",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {msgs} msgs"
-                                     for i, (uid, msgs, _, _) in enumerate(top_msg)]),
+                                    for i, (uid, msgs, _, _) in enumerate(top_msg)]),
                     inline=False
                 )
             if top_vc:
                 embed.add_field(
                     name="🎙️ Top Vocal (min)",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {vmin} min"
-                                     for i, (uid, _, vmin, _) in enumerate(top_vc)]),
+                                    for i, (uid, _, vmin, _) in enumerate(top_vc)]),
                     inline=False
                 )
             if top_mvp:
                 embed.add_field(
                     name="🏆 MVP (messages + minutes)",
                     value="\n".join([f"**{i+1}.** {u_name(uid)} — {score} pts"
-                                     for i, (uid, msgs, vmin, score) in enumerate(top_mvp)]),
+                                    for i, (uid, msgs, vmin, score) in enumerate(top_mvp)]),
                     inline=False
                 )
 
@@ -1252,8 +1251,8 @@ async def daily_summary_loop():
                         await ch.send(content=content, embed=embed)
                     else:
                         await ch.send(content="@everyone — Voici les joueurs les plus actifs d'hier !",
-                                      embed=embed,
-                                      allowed_mentions=discord.AllowedMentions(everyone=True))
+                                    embed=embed,
+                                    allowed_mentions=discord.AllowedMentions(everyone=True))
                 except Exception as e:
                     logging.error(f"Envoi résumé quotidien échoué (guild {guild.id}): {e}")
 
@@ -1333,21 +1332,21 @@ async def weekly_summary_loop():
                 embed.add_field(
                     name="💬 Top Messages",
                     value="\n".join([f"**{medal(i)}** {u_name(uid)} — {msgs} msgs"
-                                     for i, (uid, msgs, _, _) in enumerate(top_msg)]),
+                                    for i, (uid, msgs, _, _) in enumerate(top_msg)]),
                     inline=False
                 )
             if top_vc:
                 embed.add_field(
                     name="🎙️ Top Vocal",
                     value="\n".join([f"**{medal(i)}** {u_name(uid)} — {vmin} min"
-                                     for i, (uid, _, vmin, _) in enumerate(top_vc)]),
+                                    for i, (uid, _, vmin, _) in enumerate(top_vc)]),
                     inline=False
                 )
             if top_mvp:
                 embed.add_field(
                     name="🏆 MVP (msgs + min)",
                     value="\n".join([f"**{medal(i)}** {u_name(uid)} — {score} pts"
-                                     for i, (uid, _, __, score) in enumerate(top_mvp)]),
+                                    for i, (uid, _, __, score) in enumerate(top_mvp)]),
                     inline=False
                 )
 
@@ -1355,8 +1354,8 @@ async def weekly_summary_loop():
             if isinstance(ch, discord.TextChannel):
                 try:
                     await ch.send(content="@everyone — Podium de la semaine !",
-                                  embed=embed,
-                                  allowed_mentions=discord.AllowedMentions(everyone=True))
+                                    embed=embed,
+                                    allowed_mentions=discord.AllowedMentions(everyone=True))
                 except Exception as e:
                     logging.error(f"Envoi résumé hebdo échoué (guild {guild.id}): {e}")
 
