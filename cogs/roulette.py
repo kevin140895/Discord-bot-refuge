@@ -14,6 +14,13 @@ from storage.roulette_store import RouletteStore
 
 PARIS_TZ = "Europe/Paris"
 
+# — Annonces ouverture/fermeture —
+ANNOUNCE_CHANNEL_ID: int = 1400552164979507263   # salon pour les annonces auto
+NOTIF_ROLE_ID: int       = 1404882154370109450   # rôle @notification à ping
+
+# — Nom “officiel” du rôle gagnant (affichage) —
+WINNER_ROLE_NAME = "🏆 Gagnant Roulette"
+
 # ✅ Tes IDs
 ROLE_ID: int = 1405170057792979025          # Rôle temporaire pour le jackpot 500 XP
 CHANNEL_ID: int = 1405170020748755034       # Salon où poster la roulette
@@ -122,7 +129,10 @@ class RouletteView(discord.ui.View):
         else:
             msg += "\n💎 **Jackpot !**"
             if role_given and expires_at_txt:
-                msg += f"\n🎖️ Tu reçois le rôle temporaire pendant **24h** (jusqu’au **{expires_at_txt}**)."
+                msg += (
+                    f"\n🎖️ Tu reçois le rôle **{WINNER_ROLE_NAME}** pendant **24h** "
+                    f"(jusqu’au **{expires_at_txt}**)."
+                )
 
         # Annonce level-up si besoin (si ton main expose bot.announce_level_up)
         try:
@@ -133,6 +143,7 @@ class RouletteView(discord.ui.View):
             logging.error("[Roulette] announce_level_up échouée: %s", e)
 
         await interaction.response.send_message(msg, ephemeral=True)
+
 
 
 class RouletteCog(commands.Cog):
@@ -147,6 +158,8 @@ class RouletteCog(commands.Cog):
 
         # État initial du bouton selon l’heure
         self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
+        # État déjà annoncé (pour ne pas spammer au démarrage)
+        self._last_announced_state = self.current_view_enabled
 
     # ——— UI helpers ———
     def _build_view(self) -> RouletteView:
@@ -164,7 +177,8 @@ class RouletteCog(commands.Cog):
             description=(
                 f"{desc_state}\n\n"
                 "Clique pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
-                "✨ **Le rôle 24h est attribué uniquement si tu gagnes 500 XP.**\n"
+                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant **24h** "
+                "uniquement si tu gagnes **500 XP**.\n"
                 "🗓️ **Une seule tentative par jour.**"
             ),
             color=0x2ECC71 if self.current_view_enabled else 0xED4245
@@ -226,13 +240,41 @@ class RouletteCog(commands.Cog):
     async def boundary_watch_loop(self):
         """
         Surveille la fenêtre horaire : si on franchit 10:00/22:00,
-        (dés)active le bouton et met à jour le message.
+        (dés)active le bouton, met à jour le message et annonce l'état.
         """
         try:
             enabled_now = is_open_now(PARIS_TZ, 10, 22)
-            if enabled_now != self.current_view_enabled:
+
+            # Changement d'état ?
+            if enabled_now != self._last_announced_state:
+                # 1) mettre à jour l'état interne et la view
                 self.current_view_enabled = enabled_now
                 await self._refresh_poster_message()
+
+                # 2) annonce dans le salon ANNOUNCE_CHANNEL_ID (+ ping rôle)
+                ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+                if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                    try:
+                        if enabled_now:
+                            txt = (
+                                f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant ! "
+                                "Tu peux tenter ta chance jusqu’à **22:00**."
+                            )
+                        else:
+                            txt = (
+                                f"<@&{NOTIF_ROLE_ID}> ⛔ La **roulette ferme** maintenant. "
+                                "Rendez-vous demain à **10:00** pour rejouer."
+                            )
+                        await ch.send(
+                            content=txt,
+                            allowed_mentions=discord.AllowedMentions(roles=True)
+                        )
+                    except Exception as e:
+                        logging.error("[Roulette] annonce ouverture/fermeture échouée: %s", e)
+
+                # 3) mémoriser l'état annoncé
+                self._last_announced_state = enabled_now
+
         except Exception as e:
             logging.error("[Roulette] boundary_watch_loop erreur: %s", e)
 
