@@ -101,16 +101,12 @@ ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 # ─────────────────────── ETATS RUNTIME ──────────────────────
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
-# ─ INSERT HERE ─ [ETATS MUSIQUE]
+
+# FFmpeg: path + override système
 FFMPEG_PATH = os.getenv("FFMPEG_PATH") or get_ffmpeg_exe()
 if os.getenv("FORCE_SYSTEM_FFMPEG") == "1" and Path("/usr/bin/ffmpeg").exists():
     FFMPEG_PATH = "/usr/bin/ffmpeg"
 logging.info(f"[voice] Using FFmpeg at: {FFMPEG_PATH}")
-# ─────────────────────── ETATS RUNTIME ──────────────────────
-voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
-TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
-# ─ INSERT HERE ─ [ETATS MUSIQUE]
-FFMPEG_PATH = get_ffmpeg_exe()  # binaire FFmpeg fourni par imageio-ffmpeg
 
 # ─ Vérif/lib chargement Opus (log au démarrage) ─
 try:
@@ -127,6 +123,11 @@ try:
     logging.info(f"[voice] Opus loaded: {_opus.is_loaded()} (tries={tried})")
 except Exception as e:
     logging.warning(f"[voice] Opus check failed: {e}")
+
+# Tâches radio
+_radio_task: asyncio.Task | None = None
+_radio_lock = asyncio.Lock()
+
 
 # ─────────────────────── TOKEN ──────────────────────────────
 TOKEN = (
