@@ -370,14 +370,38 @@ def _save_perma_msg_id(mid: int):
     Path(PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
 
 def _is_vc_permanent_message(msg: discord.Message) -> bool:
-    """Reconnaît le message permanent VC soit par contenu (legacy), soit par footer d'embed (nouveau)."""
+    """Reconnaît le message permanent VC :
+       - legacy: contenu contient [VC_BUTTONS_PERMANENT]
+       - nouveau: présence des boutons create_vc_* (custom_id)
+    """
     if msg.author != bot.user:
         return False
+
+    # Legacy: ancien contenu avec le marqueur en clair
     if PERMA_MESSAGE_MARK in (msg.content or ""):
         return True
+
+    # Nouveau: détecter les boutons spécifiques
+    try:
+        if msg.components:
+            for row in msg.components:
+                for comp in getattr(row, "children", []) or []:
+                    cid = getattr(comp, "custom_id", "") or ""
+                    if cid in {
+                        "create_vc_pc",
+                        "create_vc_consoles",
+                        "create_vc_crossplay",
+                        "create_vc_chat",
+                    }:
+                        return True
+    except Exception:
+        pass
+
+    # Détection par description de l'embed (fallback)
     for e in msg.embeds or []:
-        if e.footer and e.footer.text == PERMA_MESSAGE_MARK:
+        if (e.description or "").startswith("👋 **Crée ton salon vocal temporaire**"):
             return True
+
     return False
 # ─────────────────────── HELPERS ────────────────────────────
 def get_level(xp: int) -> int:
@@ -1140,15 +1164,15 @@ async def ensure_vc_buttons_message():
 
     view = VCButtonView()
 
-    # Texte visible par les membres (sans le marqueur)
-    display_text = (
-        "👋 **Crée ton salon vocal temporaire** :\n"
-        f"1) Rejoins le **vocal lobby** (<#{LOBBY_VC_ID}>)\n"
-        "2) Clique sur un bouton ci-dessous — tu seras **déplacé automatiquement** dans le salon créé.\n"
-        "ℹ️ Le salon est **supprimé quand il est vide**."
-    )
-    embed = discord.Embed(description=display_text, color=0x5865F2)
-    embed.set_footer(text=PERMA_MESSAGE_MARK)  # ← marqueur invisible
+# Texte visible par les membres (sans le marqueur)
+display_text = (
+    "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
+    "• 💻 PC\n"
+    "• 🎮 Consoles\n"
+    "• 📱 Mobile\n"
+    "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
+)
+embed = discord.Embed(description=display_text, color=0x00C896)
 
     # 1) Essayer avec l'ID mémorisé
     remembered_id = _load_perma_msg_id()
