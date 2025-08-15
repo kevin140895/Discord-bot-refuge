@@ -13,6 +13,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+import yt_dlp
+from imageio_ffmpeg import get_ffmpeg_exe
+
 
 # ─────────────────────── ENV & LOGGING ─────────────────────
 load_dotenv(override=True)
@@ -53,6 +56,9 @@ PLATFORM_ROLE_IDS = {
 }
 TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
 LOBBY_VC_ID = 1405630965803520221
+RADIO_VC_ID: int = 1405695147114758245
+RADIO_YT_URL: str = "https://www.youtube.com/watch?v=86XzuPmMriw"
+
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
 # Limite par catégorie (par défaut: pas de limite si non présent dans ce dict)
@@ -93,6 +99,10 @@ ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 # ─────────────────────── ETATS RUNTIME ──────────────────────
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
+# ─ INSERT HERE ─ [ETATS MUSIQUE]
+FFMPEG_PATH = get_ffmpeg_exe()  # binaire FFmpeg fourni par imageio-ffmpeg
+_radio_task: asyncio.Task | None = None
+_radio_lock = asyncio.Lock()
 
 # ─────────────────────── TOKEN ──────────────────────────────
 TOKEN = (
@@ -442,6 +452,154 @@ async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presenc
             ch.id, base, game or "None", target, members_count
         )
     _rename_state[ch.id] = (ch.name, members_count, game)
+
+# ─ INSERT HERE ─ [HELPERS MUTE]
+async def _force_mute(member: discord.Member, mute: bool, reason: str) -> bool:
+    """Mute/unmute serveur, avec logs et gestion d'erreurs."""
+    guild = member.guild
+    me = guild.me or guild.get_member(bot.user.id)
+    if not me or not me.guild_permissions.mute_members:
+        logging.error("[mute] Permission manquante: le bot n'a pas 'Mute Members'.")
+        return False
+    try:
+        await member.edit(mute=mute, reason=reason)
+        logging.info(f"[mute] {'Muted' if mute else 'Unmuted'} {member} — {reason}")
+        return True
+    except discord.Forbidden:
+        logging.error(f"[mute] Forbidden: impossible de {'mute' if mute else 'unmute'} {member}.")
+    except Exception as e:
+        logging.error(f"[mute] Erreur mute/unmute {member}: {e}")
+    return False
+
+# ─ INSERT HERE ─ [HELPERS MUSIQUE]
+
+_YTDL_OPTS = {
+    "format": "bestaudio/best",
+    "quiet": True,
+    "noplaylist": True,
+    "extract_flat": False,
+    "no_warnings": True,
+    "geo_bypass": True,
+    "cachedir": False,
+}
+
+# FFmpeg: options robustes pour stream (reconnexion automatique, buffer raisonnable)
+_FF_BEFORE = (
+    "-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 "
+    "-reconnect_at_eof 1 -nostdin"
+)
+_FF_OPTS = "-vn -bufsize 1M -avioflags +directio"
+
+async def _ytdlp_get_best_audio_url(youtube_url: str) -> str:
+    loop = asyncio.get_running_loop()
+    def _extract():
+        with yt_dlp.YoutubeDL(_YTDL_OPTS) as ydl:
+            info = ydl.extract_info(youtube_url, download=False)
+            # Si livestream : url directe ; sinon meilleur format audio
+            if "url" in info:
+                return info["url"]
+            if "entries" in info and info["entries"]:
+                ie = info["entries"][0]
+                return ie.get("url") or ie.get("webpage_url")
+            return info.get("webpage_url")
+    return await loop.run_in_executor(None, _extract)
+
+async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
+    ch = guild.get_channel(RADIO_VC_ID)
+    if not isinstance(ch, discord.VoiceChannel):
+        logging.error(f"[radio] Salon vocal introuvable: {RADIO_VC_ID}")
+        return None
+    try:
+        if ch.guild.voice_client and ch.guild.voice_client.channel != ch:
+            await ch.guild.voice_client.move_to(ch, reason="Radio auto")
+            return ch.guild.voice_client
+        if ch.guild.voice_client:
+            return ch.guild.voice_client
+        vc = await ch.connect(reconnect=True)
+        return vc
+    except Exception as e:
+        logging.error(f"[radio] Connexion au vocal échouée: {e}")
+        return None
+
+async def _play_once(guild: discord.Guild) -> None:
+    """Joue une 'session' (une URL FFmpeg); si ça coupe, la boucle supérieure relancera."""
+    vc = await _connect_voice(guild)
+    if not vc:
+        await asyncio.sleep(5)
+        return
+
+    try:
+        url = await _ytdlp_get_best_audio_url(RADIO_YT_URL)
+        source = discord.FFmpegOpusAudio(
+            source=url,
+            executable=FFMPEG_PATH,
+            before_options=_FF_BEFORE,
+            options="-vn"  # on laisse FFmpeg encoder en Opus, pas besoin d'options supplémentaires
+        )
+    except Exception as e:
+        logging.error(f"[radio] Préparation source échouée: {e}")
+        await asyncio.sleep(5)
+        return
+
+    done = asyncio.Event()
+
+    def _after(err: Exception | None):
+        if err:
+            logging.warning(f"[radio] Lecture terminée avec erreur: {err}")
+        else:
+            logging.info("[radio] Lecture terminée (fin/stop).")
+        try:
+            done.set()
+        except Exception:
+            pass
+
+    try:
+        vc.play(source, after=_after)
+        logging.info("[radio] ▶️ Lecture démarrée.")
+    except Exception as e:
+        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
+        try:
+            source.cleanup()
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+        return
+
+    # Attendre la fin (ou un kick/déco)
+    try:
+        while True:
+            if done.is_set():
+                break
+            if not vc.is_connected():
+                logging.warning("[radio] VC déconnecté, on relancera.")
+                break
+            if not vc.is_playing():
+                # Petite tolérance: parfois is_playing False pendant un bref stall réseau
+                await asyncio.sleep(2)
+                if not vc.is_playing():
+                    logging.warning("[radio] Lecture stoppée, on relancera.")
+                    break
+            await asyncio.sleep(3)
+    finally:
+        # Nettoyage: discord.py s'en charge en général, mais au cas où:
+        try:
+            vc.stop()
+        except Exception:
+            pass
+
+async def _radio_loop():
+    """Boucle infinie: assure connexion + relance quand nécessaire (H24)."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            # Tourne sur la 1ère guilde du bot (si plusieurs guilds et même radio, on peut adapter)
+            for guild in bot.guilds:
+                async with _radio_lock:
+                    await _play_once(guild)
+        except Exception as e:
+            logging.error(f"[radio] Exception non gérée dans la boucle: {e}")
+        # petite pause pour éviter le spam en cas d'échec en boucle
+        await asyncio.sleep(2)
 
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
 async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
@@ -1174,6 +1332,12 @@ async def on_ready():
     except Exception as e:
         logging.debug(f"presence failed: {e}")
 
+    # ─ DÉMARRAGE RADIO ─
+    global _radio_task
+    if _radio_task is None or _radio_task.done():
+        _radio_task = asyncio.create_task(_radio_loop())
+        logging.info("[radio] Boucle radio initialisée.")
+
     logging.info(f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)")
 
 @bot.event
@@ -1276,14 +1440,39 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user["level"] = get_level(int(user["xp"]))
                     incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
         voice_times[uid] = now_utc
-
+        
     # ── Suppression des salons temporaires vides
-    if before.channel and before.channel.id in TEMP_VC_IDS and not before.channel.members:
+    if (
+        before.channel
+        and before.channel.id in TEMP_VC_IDS
+        and before.channel.id != RADIO_VC_ID  # ⛔ ne jamais supprimer le salon radio
+        and not before.channel.members
+    ):
         try:
             await before.channel.delete(reason="Salon temporaire vide")
             TEMP_VC_IDS.discard(before.channel.id)
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
+
+    # ─ INSERT HERE ─ [AUTO-MUTE RADIO]
+    try:
+        joined_radio = (
+            after.channel and after.channel.id == RADIO_VC_ID
+            and (not before.channel or before.channel.id != RADIO_VC_ID)
+        )
+        left_radio = (
+            before.channel and before.channel.id == RADIO_VC_ID
+            and (not after.channel or after.channel.id != RADIO_VC_ID)
+        )
+
+        if joined_radio:
+            await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
+        elif left_radio:
+            # Sécurité: on retire le mute quand on quitte le canal radio
+            await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
+    except Exception as e:
+        logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
+
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
