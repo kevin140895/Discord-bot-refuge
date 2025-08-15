@@ -3,6 +3,9 @@ import re
 import json
 import logging
 import shlex
+import discord
+import asyncio
+import os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
