@@ -703,6 +703,20 @@ async def _play_once(guild: discord.Guild) -> None:
         except Exception:
             pass
 
+# ───────────────── RADIO: boucle principale ─────────────────
+async def _radio_loop():
+    """Assure la lecture H24: (re)connecte et relance si besoin."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            for guild in bot.guilds:
+                async with _radio_lock:
+                    await _play_once(guild)
+        except Exception as e:
+            logging.error(f"[radio] Exception non gérée dans la boucle: {e}")
+        # petite pause pour éviter les boucles agressives en cas d'échec
+        await asyncio.sleep(2)
+
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
 async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
     """Donne le rôle correspondant au plus HAUT palier atteint. Retourne l'ID du rôle donné (ou None)."""
