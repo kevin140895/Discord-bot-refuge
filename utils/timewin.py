@@ -1,14 +1,34 @@
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-def is_open_now(tz: str = "Europe/Paris", start_h: int = 10, end_h: int = 22) -> bool:
+
+def is_open_now(
+    tz: str = "Europe/Paris",
+    start_h: int = 10,
+    end_h: int = 22,
+    now: datetime | None = None,
+) -> bool:
+    """Retourne ``True`` si l'heure locale (``tz``) est entre ``start_h`` inclus et
+    ``end_h`` exclus.
+
+    Le calcul gère correctement les fenêtres qui traversent minuit. Un
+    paramètre ``now`` optionnel est exposé principalement pour faciliter les
+    tests unitaires.
     """
-    Retourne True si l'heure locale (tz) est entre start_h:00 inclus et end_h:00 exclus.
-    """
-    now = datetime.now(ZoneInfo(tz))
+    if now is None:
+        now = datetime.now(ZoneInfo(tz))
+    else:
+        # S'assurer que l'info timezone est présente, sinon la rajouter
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=ZoneInfo(tz))
+
     start = now.replace(hour=start_h, minute=0, second=0, microsecond=0)
     end = now.replace(hour=end_h, minute=0, second=0, microsecond=0)
-    return start <= now < end
+
+    if start_h < end_h:
+        return start <= now < end
+    # Fenêtre qui englobe minuit : ouvert si on est après start OU avant end
+    return now >= start or now < end
 
 def next_boundary_dt(now: datetime | None = None, tz: str = "Europe/Paris",
                      start_h: int = 10, end_h: int = 22) -> datetime:
