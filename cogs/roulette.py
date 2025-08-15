@@ -22,7 +22,7 @@ NOTIF_ROLE_ID: int       = 1404882154370109450   # rôle @notification à ping
 WINNER_ROLE_NAME = "🏆 Gagnant Roulette"
 
 # ✅ Tes IDs
-ROLE_ID: int = 1405170057792979025          # Rôle temporaire pour le jackpot 500 XP
+ROLE_ID: int = 1405170057792979025          # Rôle temporaire attribué quand on gagne 500 XP (durée 24h)
 CHANNEL_ID: int = 1405170020748755034       # Salon où poster la roulette
 
 # Tirage pondéré
@@ -31,6 +31,7 @@ WEIGHTS = [40, 40, 18, 2]  # total 100
 
 def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
 
 class RouletteView(discord.ui.View):
     """Vue persistante avec le bouton 🎰 Roulette."""
@@ -145,7 +146,6 @@ class RouletteView(discord.ui.View):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
-
 class RouletteCog(commands.Cog):
     """Roulette : horaires, tirage, XP, rôle 24h, persistance quotidienne, commandes d’admin."""
 
@@ -158,7 +158,7 @@ class RouletteCog(commands.Cog):
 
         # État initial du bouton selon l’heure
         self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
-        # État déjà annoncé (pour ne pas spammer au démarrage)
+        # État déjà annoncé (pour éviter le spam au redémarrage)
         self._last_announced_state = self.current_view_enabled
 
     # ——— UI helpers ———
