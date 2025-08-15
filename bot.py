@@ -392,7 +392,9 @@ _rename_state: dict[int, tuple[str, int, str | None]] = {}  # ch_id -> (name, me
 
 # ── REMPLACE ta fonction par ceci ───────────────────────────
 async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presences: bool = False):
-    """Renomme le salon selon le jeu majoritaire (ActivityType.playing)."""
+    # ⛔ Ne jamais renommer le salon radio
+    if getattr(ch, "id", None) == RADIO_VC_ID:
+        return
     if not AUTO_RENAME_ENABLED or not isinstance(ch, discord.VoiceChannel):
         return
 
@@ -510,12 +512,32 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         logging.error(f"[radio] Salon vocal introuvable: {RADIO_VC_ID}")
         return None
     try:
+        me = guild.me or guild.get_member(bot.user.id)
+
+        # ✅ Vérif permissions de base
+        perms = ch.permissions_for(me) if me else None
+        if not (perms and perms.connect and perms.speak):
+            logging.error("[radio] Permissions manquantes sur le salon: CONNECT/SPEAK requis.")
+            return None
+
+        # ✅ Si déjà connecté ailleurs → move
         if ch.guild.voice_client and ch.guild.voice_client.channel != ch:
             await ch.guild.voice_client.move_to(ch, reason="Radio auto")
-            return ch.guild.voice_client
-        if ch.guild.voice_client:
-            return ch.guild.voice_client
-        vc = await ch.connect(reconnect=True)
+            vc = ch.guild.voice_client
+        elif ch.guild.voice_client:
+            vc = ch.guild.voice_client
+        else:
+            # self_deaf=True = on n'écoute pas le salon; n'empêche pas d'émettre
+            vc = await ch.connect(reconnect=True, self_deaf=True, self_mute=False)
+
+        # ✅ Au cas où le bot aurait été server-mute: on le dé-mute
+        try:
+            if me and me.voice and me.voice.mute:
+                await me.edit(mute=False, reason="Radio: dé-mute auto du bot")
+                logging.info("[radio] Le bot était server-mute → dé-mute appliqué.")
+        except Exception as e:
+            logging.warning(f"[radio] Impossible de dé-mute automatiquement le bot: {e}")
+
         return vc
     except Exception as e:
         logging.error(f"[radio] Connexion au vocal échouée: {e}")
@@ -1455,7 +1477,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
     # ─ INSERT HERE ─ [AUTO-MUTE RADIO]
-    try:
+     try:
         joined_radio = (
             after.channel and after.channel.id == RADIO_VC_ID
             and (not before.channel or before.channel.id != RADIO_VC_ID)
@@ -1464,6 +1486,17 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             before.channel and before.channel.id == RADIO_VC_ID
             and (not after.channel or after.channel.id != RADIO_VC_ID)
         )
+
+        # ⛔ Ne jamais auto-mute le bot lui-même
+        is_bot_self = (member.id == bot.user.id)
+
+        if not is_bot_self and joined_radio:
+            await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
+        elif not is_bot_self and left_radio:
+            # Sécurité: on retire le mute quand on quitte le canal radio
+            await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
+    except Exception as e:
+        logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
 
         if joined_radio:
             await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
