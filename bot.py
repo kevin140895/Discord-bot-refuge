@@ -102,10 +102,10 @@ ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
 # ─ INSERT HERE ─ [ETATS MUSIQUE]
-FFMPEG_PATH = get_ffmpeg_exe()  # binaire FFmpeg fourni par imageio-ffmpeg
-_radio_task: asyncio.Task | None = None
-_radio_lock = asyncio.Lock()
-
+FFMPEG_PATH = os.getenv("FFMPEG_PATH") or get_ffmpeg_exe()
+if os.getenv("FORCE_SYSTEM_FFMPEG") == "1" and Path("/usr/bin/ffmpeg").exists():
+    FFMPEG_PATH = "/usr/bin/ffmpeg"
+logging.info(f"[voice] Using FFmpeg at: {FFMPEG_PATH}")
 # ─────────────────────── ETATS RUNTIME ──────────────────────
 voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
@@ -645,14 +645,13 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
             return None
 
 # ─play_once ─
-# ─ REPLACE _play_once ─
 async def _play_once(guild: discord.Guild) -> None:
     vc = await _connect_voice(guild)
     if not vc:
         await asyncio.sleep(5)
         return
 
-    # Stop tout flux en cours
+    # Stop éventuel
     try:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
@@ -660,45 +659,59 @@ async def _play_once(guild: discord.Guild) -> None:
     except Exception:
         pass
 
-    # 🔊 Flux direct (Icecast/MP3) — pas de yt-dlp
-    stream_url = "https://streaming.hotmixradio.fr/hotmix-hiphop-us-en-mp3"
-
-    # Headers indispensables pour FFmpeg (User-Agent + Icy-MetaData)
-    headers = (
-        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
-        "Icy-MetaData: 1\r\n"
-        "Accept: */*\r\n"
-    )
-
-    # Vérif FFmpeg
     if not FFMPEG_PATH or not os.path.isfile(FFMPEG_PATH):
         logging.error(f"[radio] FFmpeg introuvable à : {FFMPEG_PATH}")
         await asyncio.sleep(5)
         return
 
-    # Préparation de la source audio
+    source = None
+
+    # ✅ 1) Tentative en Opus natif (pas d’encoder Python -> pas d’Opus côté Python)
     try:
-        source = discord.FFmpegPCMAudio(
-            source=stream_url,
+        source = await discord.FFmpegOpusAudio.from_probe(
+            RADIO_STREAM_URL,
             executable=FFMPEG_PATH,
-            before_options=(
-                '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
-                f'-headers "{headers}"'
-            ),
-            options='-vn -loglevel error'
+            before_options=_before_opts(),
+            options="-loglevel error",
+            stderr=subprocess.PIPE,
         )
+        logging.info("[radio] Source FFmpegOpusAudio prête (opus natif).")
     except Exception as e:
-        logging.error(f"[radio] Préparation source FFmpeg échouée: {e}")
-        await asyncio.sleep(5)
-        return
+        logging.warning(f"[radio] OpusAudio failed ({e}) → fallback PCM")
+        source = None
+
+    # 🔁 2) Fallback PCM si l’Opus natif échoue (nécessite libopus côté Python)
+    if source is None:
+        try:
+            source = discord.FFmpegPCMAudio(
+                RADIO_STREAM_URL,
+                executable=FFMPEG_PATH,
+                before_options=_before_opts(),
+                options="-vn -loglevel error",
+                stderr=subprocess.PIPE,
+            )
+            logging.info("[radio] Source FFmpegPCMAudio prête (PCM).")
+        except Exception as e:
+            logging.exception("[radio] Préparation source échouée")
+            await asyncio.sleep(5)
+            return
+
+    # Brancher logs FFmpeg
+    _wire_ffmpeg_stderr_to_log(source)
 
     done = asyncio.Event()
 
     def _after(err: Exception | None):
+        rc = None
+        try:
+            proc = getattr(source, "_process", None) or getattr(source, "process", None)
+            rc = getattr(proc, "returncode", None)
+        except Exception:
+            pass
         if err:
-            logging.warning(f"[radio] Lecture terminée avec erreur: {err}")
+            logging.warning(f"[radio] after: err={err} rc={rc}")
         else:
-            logging.info("[radio] Lecture terminée (fin ou arrêt normal).")
+            logging.info(f"[radio] after: rc={rc}")
         try:
             done.set()
         except Exception:
@@ -706,9 +719,9 @@ async def _play_once(guild: discord.Guild) -> None:
 
     try:
         vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée (Hotmix Hip-Hop).")
+        logging.info("[radio] ▶️ Lecture démarrée.")
     except Exception:
-        # ✅ BONUS: stacktrace complète
+        # BONUS: stacktrace complète
         logging.exception("[radio] Impossible de lancer la lecture")
         try:
             source.cleanup()
@@ -717,7 +730,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    # Surveillance du flux tant que ça joue
+    # Surveillance
     try:
         while not done.is_set():
             if not vc.is_connected():
@@ -738,7 +751,6 @@ async def _play_once(guild: discord.Guild) -> None:
             source.cleanup()
         except Exception:
             pass
-
 # ───────────────── RADIO: boucle principale ─────────────────
 async def _radio_loop():
     """Assure la lecture H24: (re)connecte et relance si besoin."""
