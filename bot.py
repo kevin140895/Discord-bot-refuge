@@ -2,8 +2,6 @@ import os
 import re
 import json
 import logging
-import asyncio
-import subprocess
 import shlex
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -721,7 +719,6 @@ async def _play_once(guild: discord.Guild) -> None:
                 executable=FFMPEG_PATH,
                 before_options=_before_opts(),
                 options="-vn -loglevel error",
-                stderr=subprocess.PIPE,
             )
             logging.info("[radio] Source FFmpegPCMAudio prête (PCM).")
         except Exception:
