@@ -1,0 +1,6 @@
+[phases.setup]
+# Solution simple via apt (supporté par Nixpacks/Railway)
+aptPkgs = ['libopus0']
+
+# (Option pour stabiliser FFmpeg si besoin)
+# aptPkgs = ['libopus0', 'ffmpeg']
