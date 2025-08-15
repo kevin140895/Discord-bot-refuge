@@ -4,6 +4,7 @@ import json
 import logging
 import asyncio
 import subprocess
+import shlex
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -620,8 +621,7 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         except Exception as ee:
             logging.error(f"[radio] Connexion après reset échouée: {ee}")
             return None
-            
-# ─ REPLACE _play_once ─
+
 # ─ REPLACE _play_once ─
 async def _play_once(guild: discord.Guild) -> None:
     vc = await _connect_voice(guild)
@@ -629,7 +629,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    # Stop dur de tout flux en cours
+    # Stop tout flux en cours
     try:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
@@ -637,30 +637,17 @@ async def _play_once(guild: discord.Guild) -> None:
     except Exception:
         pass
 
+    # 🔊 Flux direct (Icecast/MP3) — pas de yt-dlp
+    url = RADIO_YT_URL  # ton lien Hotmix
+    before = _FF_BEFORE  # -reconnect ...
+
+    # ⚙️ On laisse FFmpeg encoder en Opus → compatible même si discord.opus n’est pas chargé
     try:
-        base_url = RADIO_YT_URL
-        url = base_url
-        before = _FF_BEFORE
-
-        # Si YouTube : récup url + headers via yt-dlp, mais on sort en PCM quand même
-        if "youtube.com" in base_url or "youtu.be" in base_url:
-            headers_str = ""
-            try:
-                url, headers_str = await _ytdlp_get_best_audio_url(base_url)
-            except TypeError:
-                url = await _ytdlp_get_best_audio_url(base_url)
-                headers_str = ""
-            if headers_str:
-                safe_headers = headers_str.replace('"', r'\"')
-                before = f'{before} -headers "{safe_headers}"'
-
-        # Sortie PCM 48 kHz stéréo (très stable) + capture stderr FFmpeg
-        source = discord.FFmpegPCMAudio(
+        source = discord.FFmpegOpusAudio(
             source=url,
             executable=FFMPEG_PATH,
             before_options=before,
-            options=None,  # discord.py fournit -f s16le -ar 48000 -ac 2
-            stderr=subprocess.PIPE,
+            options="-loglevel error"
         )
     except Exception as e:
         logging.error(f"[radio] Préparation source échouée: {e}")
@@ -679,19 +666,11 @@ async def _play_once(guild: discord.Guild) -> None:
         except Exception:
             pass
 
+    # ▶️ Démarrer la lecture
     try:
         vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée.")
+        logging.info("[radio] ▶️ Lecture démarrée (flux direct).")
     except Exception as e:
-        # Si play échoue, tente de lire le stderr FFmpeg pour comprendre
-        try:
-            proc = getattr(source, "_process", None)
-            if proc and proc.stderr:
-                err_txt = proc.stderr.read().decode(errors="ignore")
-                if err_txt:
-                    logging.error(f"[radio] FFmpeg stderr:\n{err_txt}")
-        except Exception:
-            pass
         logging.error(f"[radio] Impossible de lancer la lecture: {e}")
         try:
             source.cleanup()
@@ -700,63 +679,7 @@ async def _play_once(guild: discord.Guild) -> None:
         await asyncio.sleep(5)
         return
 
-    # Boucle de vie du flux
-    try:
-        while True:
-            if done.is_set():
-                break
-            if not vc.is_connected():
-                logging.warning("[radio] VC déconnecté, on relancera.")
-                break
-            if not vc.is_playing():
-                await asyncio.sleep(2)
-                if not vc.is_playing():
-                    logging.warning("[radio] Lecture stoppée, on relancera.")
-                    break
-            await asyncio.sleep(3)
-    finally:
-        # Stop & cleanup FFmpeg proprement
-        try:
-            vc.stop()
-        except Exception:
-            pass
-        try:
-            proc = getattr(source, "_process", None)
-            if proc and proc.poll() is None:
-                proc.kill()
-                try:
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        try:
-            source.cleanup()
-        except Exception:
-            pass
-
-    try:
-        vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée.")
-    except Exception as e:
-        # Si play échoue, tente de lire le stderr FFmpeg pour comprendre
-        try:
-            proc = getattr(source, "_process", None)
-            if proc and proc.stderr:
-                err_txt = proc.stderr.read().decode(errors="ignore")
-                if err_txt:
-                    logging.error(f"[radio] FFmpeg stderr:\n{err_txt}")
-        except Exception:
-            pass
-        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
-        try:
-            source.cleanup()
-        except Exception:
-            pass
-        await asyncio.sleep(5)
-        return
-
-    # Boucle de vie du flux
+    # Boucle de vie
     try:
         while True:
             if done.is_set():
@@ -775,51 +698,10 @@ async def _play_once(guild: discord.Guild) -> None:
             vc.stop()
         except Exception:
             pass
-
-    try:
-        vc.play(source, after=_after)
-        logging.info("[radio] ▶️ Lecture démarrée.")
-    except Exception as e:
-        logging.error(f"[radio] Impossible de lancer la lecture: {e}")
         try:
             source.cleanup()
         except Exception:
             pass
-        await asyncio.sleep(5)
-        return
-
-    try:
-        while True:
-            if done.is_set():
-                break
-            if not vc.is_connected():
-                logging.warning("[radio] VC déconnecté, on relancera.")
-                break
-            if not vc.is_playing():
-                await asyncio.sleep(2)
-                if not vc.is_playing():
-                    logging.warning("[radio] Lecture stoppée, on relancera.")
-                    break
-            await asyncio.sleep(3)
-    finally:
-        try:
-            vc.stop()
-        except Exception:
-            pass
-
-async def _radio_loop():
-    """Boucle infinie: assure connexion + relance quand nécessaire (H24)."""
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            # Tourne sur la 1ère guilde du bot (si plusieurs guildes, on boucle)
-            for guild in bot.guilds:
-                async with _radio_lock:
-                    await _play_once(guild)
-        except Exception as e:
-            logging.error(f"[radio] Exception non gérée dans la boucle: {e}")
-        # petite pause pour éviter le spam en cas d'échec en boucle
-        await asyncio.sleep(2)
 
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
 async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
