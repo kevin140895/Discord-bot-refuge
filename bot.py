@@ -639,15 +639,22 @@ async def _play_once(guild: discord.Guild) -> None:
 
     # 🔊 Flux direct (Icecast/MP3) — pas de yt-dlp
     url = RADIO_YT_URL  # ton lien Hotmix
-    before = _FF_BEFORE  # -reconnect ...
+    # Headers utiles pour certains serveurs (UA + ICY metadata)
+    headers_direct = (
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
+        "Icy-MetaData: 1\r\n"
+        "Accept: */*\r\n"
+    )
+    # -headers ... + timeouts raisonnables + non-seekable (live)
+    before = f'{_FF_BEFORE} -headers "{headers_direct}" -rw_timeout 15000000 -seekable 0'
 
-    # ⚙️ On laisse FFmpeg encoder en Opus → compatible même si discord.opus n’est pas chargé
+    # ⚙️ Sortie PCM 48 kHz stéréo (super stable côté Discord)
     try:
-        source = discord.FFmpegOpusAudio(
+        source = discord.FFmpegPCMAudio(
             source=url,
             executable=FFMPEG_PATH,
             before_options=before,
-            options="-loglevel error"
+            options="-vn -f s16le -ac 2 -ar 48000",
         )
     except Exception as e:
         logging.error(f"[radio] Préparation source échouée: {e}")
