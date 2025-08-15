@@ -56,6 +56,19 @@ class RouletteStore:
     def write_poster(self, data: Dict[str, Any]) -> None:
         _safe_write_json(self.poster_path, data)
 
+    # --- STATE MESSAGE (annonce "ouverte/fermée") ---
+def get_state_message(self) -> dict | None:
+    return self._data.get("state_msg")
+
+def set_state_message(self, *, channel_id: str, message_id: str) -> None:
+    self._data["state_msg"] = {"channel_id": channel_id, "message_id": message_id}
+    self._flush()
+
+def clear_state_message(self) -> None:
+    if "state_msg" in self._data:
+        self._data.pop("state_msg", None)
+        self._flush()
+
     # ——— high-level helpers ———
     # Limite : 1 tirage par jour (Europe/Paris)
     def get_last_claim_date(self, user_id: str) -> Optional[str]:
