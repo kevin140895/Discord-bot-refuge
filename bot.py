@@ -690,44 +690,45 @@ async def _play_once(guild: discord.Guild) -> None:
     except Exception:
         pass
 
+    # Vérif FFmpeg
     if not FFMPEG_PATH or not os.path.isfile(FFMPEG_PATH):
         logging.error(f"[radio] FFmpeg introuvable à : {FFMPEG_PATH}")
         await asyncio.sleep(5)
         return
 
+    # ---------- Création de la source ----------
     source = None
 
-# ✅ Opus natif SANS PROBE (plus stable, évite ffprobe)
-try:
-    source = discord.FFmpegOpusAudio(
-        RADIO_STREAM_URL,
-        executable=FFMPEG_PATH,
-        bitrate=128,  # kbps
-        before_options=_before_opts(),
-        options="-loglevel error",
-        stderr=subprocess.PIPE,
-    )
-    logging.info("[radio] Source FFmpegOpusAudio prête (opus natif sans probe).")
-except Exception as e:
-    logging.warning(f"[radio] OpusAudio direct failed ({e}) → fallback PCM")
-    source = None
-
-# 🔁 Fallback PCM si besoin (nécessite libopus côté Python)
-if source is None:
+    # ✅ Opus natif SANS PROBE (évite ffprobe)
     try:
-        source = discord.FFmpegPCMAudio(
+        source = discord.FFmpegOpusAudio(
             RADIO_STREAM_URL,
             executable=FFMPEG_PATH,
+            bitrate=128,  # kbps
             before_options=_before_opts(),
-            options="-vn -loglevel error",
+            options="-loglevel error",
             stderr=subprocess.PIPE,
         )
-        logging.info("[radio] Source FFmpegPCMAudio prête (PCM).")
-    except Exception:
-        logging.exception("[radio] Préparation source échouée")
-        await asyncio.sleep(5)
-        return
+        logging.info("[radio] Source FFmpegOpusAudio prête (opus natif sans probe).")
+    except Exception as e:
+        logging.warning(f"[radio] OpusAudio direct failed ({e}) → fallback PCM")
+        source = None
 
+    # 🔁 Fallback PCM si besoin
+    if source is None:
+        try:
+            source = discord.FFmpegPCMAudio(
+                RADIO_STREAM_URL,
+                executable=FFMPEG_PATH,
+                before_options=_before_opts(),
+                options="-vn -loglevel error",
+                stderr=subprocess.PIPE,
+            )
+            logging.info("[radio] Source FFmpegPCMAudio prête (PCM).")
+        except Exception:
+            logging.exception("[radio] Préparation source échouée")
+            await asyncio.sleep(5)
+            return
 
     # Brancher logs FFmpeg
     _wire_ffmpeg_stderr_to_log(source)
@@ -742,19 +743,19 @@ if source is None:
         except Exception:
             pass
         if err:
-            logging.warning(f"[radio] after: err={err} rc={rc}")
+            logging.warning(f"[radio] Lecture terminée avec erreur: {err} (rc={rc})")
         else:
-            logging.info(f"[radio] after: rc={rc}")
+            logging.info(f"[radio] Lecture terminée (rc={rc})")
         try:
             done.set()
         except Exception:
             pass
 
+    # Lancer la lecture
     try:
         vc.play(source, after=_after)
         logging.info("[radio] ▶️ Lecture démarrée.")
     except Exception:
-        # BONUS: stacktrace complète
         logging.exception("[radio] Impossible de lancer la lecture")
         try:
             source.cleanup()
@@ -784,6 +785,7 @@ if source is None:
             source.cleanup()
         except Exception:
             pass
+
 # ───────────────── RADIO: boucle principale ─────────────────
 async def _radio_loop():
     """Assure la lecture H24: (re)connecte et relance si besoin."""
