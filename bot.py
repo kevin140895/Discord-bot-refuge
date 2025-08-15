@@ -1541,7 +1541,7 @@ async def on_member_join(member: discord.Member):
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     uid = str(member.id)
 
-    # ── Auto-rename: ancien et nouveau salon
+    # ── Auto-rename: ancien et nouveau salon (no-op si AUTO_RENAME_ENABLED=False)
     if before.channel and isinstance(before.channel, discord.VoiceChannel):
         await maybe_rename_channel_by_game(before.channel, wait_presences=True)
     if after.channel and isinstance(after.channel, discord.VoiceChannel):
@@ -1582,12 +1582,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user["level"] = get_level(int(user["xp"]))
                     incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
         voice_times[uid] = now_utc
-        
-    # ── Suppression des salons temporaires vides
+
+    # ── Suppression des salons temporaires vides (⚠️ jamais le salon radio)
     if (
         before.channel
         and before.channel.id in TEMP_VC_IDS
-        and before.channel.id != RADIO_VC_ID  # ⛔ ne jamais supprimer le salon radio
+        and before.channel.id != RADIO_VC_ID
         and not before.channel.members
     ):
         try:
@@ -1596,26 +1596,28 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
-    # ─ [AUTO-MUTE RADIO]
-try:
-    joined_radio = (
-        after.channel and after.channel.id == RADIO_VC_ID
-        and (not before.channel or before.channel.id != RADIO_VC_ID)
-    )
-    left_radio = (
-        before.channel and before.channel.id == RADIO_VC_ID
-        and (not after.channel or after.channel.id != RADIO_VC_ID)
-    )
+    # ── Auto-mute/unmute sur le canal radio
+    try:
+        joined_radio = (
+            after.channel and after.channel.id == RADIO_VC_ID
+            and (not before.channel or before.channel.id != RADIO_VC_ID)
+        )
+        left_radio = (
+            before.channel and before.channel.id == RADIO_VC_ID
+            and (not after.channel or after.channel.id != RADIO_VC_ID)
+        )
 
-    is_bot_self = (member.id == bot.user.id)
+        # Ne jamais auto-mute le bot lui-même
+        is_bot_self = (member.id == bot.user.id)
 
-    if not is_bot_self and joined_radio:
-        if member.voice and member.voice.channel and member.voice.channel.id == RADIO_VC_ID:
-            await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
-    elif not is_bot_self and left_radio:
-        await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
-except Exception as e:
-    logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
+        if not is_bot_self and joined_radio:
+            # Évite l'erreur 40032 si la personne a déjà quitté entre-temps
+            if member.voice and member.voice.channel and member.voice.channel.id == RADIO_VC_ID:
+                await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
+        elif not is_bot_self and left_radio:
+            await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
+    except Exception as e:
+        logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
