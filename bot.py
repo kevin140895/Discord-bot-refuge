@@ -1,27 +1,25 @@
-import re
+import asyncio
 import json
 import logging
-import shlex
-import discord
-import asyncio
 import os
-from pathlib import Path
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
-from discord.ui import View
-from discord import PermissionOverwrite
 
 import discord
-from discord import app_commands
+from discord import PermissionOverwrite, app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
-import yt_dlp
 from imageio_ffmpeg import get_ffmpeg_exe
+import yt_dlp
 
 
 # ─────────────────────── ENV & LOGGING ─────────────────────
 load_dotenv(override=True)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logging.getLogger().setLevel(logging.DEBUG)
 
 # ─────────────────────── INTENTS / BOT ─────────────────────
@@ -32,22 +30,22 @@ intents.message_content = True
 intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 # ── XP CONFIG ───────────────────────────────────────────────
-MSG_XP = 8               # XP par message texte
-VOICE_XP_PER_MIN = 3     # XP par minute en vocal
+MSG_XP = 8  # XP par message texte
+VOICE_XP_PER_MIN = 3  # XP par minute en vocal
 # Formule de niveau: seuil (niveau n -> n+1) = (n+1)^2 * 100 XP
 REMOVE_LOWER_TIER_ROLES = True
 
 # ── Récompenses par niveau (requis par grant_level_roles)
 LEVEL_ROLE_REWARDS = {
-    5:  1403510226354700430,  # Bronze
+    5: 1403510226354700430,  # Bronze
     10: 1403510368340410550,  # Argent
     20: 1403510466818605118,  # Or
 }
 
 # ── Rôles plateformes + notifications
-ROLE_PC       = 1400560541529018408
-ROLE_CONSOLE  = 1400560660710162492
-ROLE_MOBILE   = 1404791652085928008
+ROLE_PC = 1400560541529018408
+ROLE_CONSOLE = 1400560660710162492
+ROLE_MOBILE = 1404791652085928008
 ROLE_NOTIFICATION = 1404882154370109450
 
 # (facultatif, pratique si tu veux itérer)
@@ -56,7 +54,7 @@ PLATFORM_ROLE_IDS = {
     "Consoles": ROLE_CONSOLE,
     "Mobile": ROLE_MOBILE,
 }
-TEMP_VC_CATEGORY    = 1400559884117999687  # ID catégorie vocale temporaire
+TEMP_VC_CATEGORY = 1400559884117999687  # ID catégorie vocale temporaire
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
 RADIO_STREAM_URL = "http://stream.laut.fm/englishrap"
@@ -77,11 +75,11 @@ AUTO_RENAME_FORMAT = "{base} • {game}"
 AUTO_RENAME_COOLDOWN_SEC = 45
 
 # ─────────────────────── CONFIG ─────────────────────────────
-LEVEL_UP_CHANNEL    = 1402419913716531352
-CHANNEL_ROLES       = 1400560866478395512
-CHANNEL_WELCOME     = 1400550333796716574
-LOBBY_TEXT_CHANNEL  = 1402258805533970472
-TIKTOK_ANNOUNCE_CH  = 1400552164979507263
+LEVEL_UP_CHANNEL = 1402419913716531352
+CHANNEL_ROLES = 1400560866478395512
+CHANNEL_WELCOME = 1400550333796716574
+LOBBY_TEXT_CHANNEL = 1402258805533970472
+TIKTOK_ANNOUNCE_CH = 1400552164979507263
 ACTIVITY_SUMMARY_CH = 1400552164979507263
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
@@ -98,6 +96,7 @@ VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?: (\d+))?$", re.I)
 PERMA_MESSAGE_MARK = "[VC_BUTTONS_PERMANENT]"
 ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 
+
 def _is_roles_permanent_message(msg: discord.Message) -> bool:
     """Reconnaît le message permanent Rôles soit par contenu (legacy), soit par footer d'embed (nouveau)."""
     if msg.author != bot.user:
@@ -109,17 +108,23 @@ def _is_roles_permanent_message(msg: discord.Message) -> bool:
             return True
     return False
 
+
 # ─────────────────────── ETATS RUNTIME ──────────────────────
-voice_times: dict[str, datetime] = {}   # user_id -> datetime d'entrée (naïf UTC)
-TEMP_VC_IDS: set[int] = set()          # ids des salons vocaux temporaires
+voice_times: dict[str, datetime] = (
+    {}
+)  # user_id -> datetime d'entrée (naïf UTC)
+TEMP_VC_IDS: set[int] = set()  # ids des salons vocaux temporaires
 
 # FFmpeg: privilégier le binaire système si présent
-FFMPEG_PATH = "/usr/bin/ffmpeg" if Path("/usr/bin/ffmpeg").exists() else get_ffmpeg_exe()
+FFMPEG_PATH = (
+    "/usr/bin/ffmpeg" if Path("/usr/bin/ffmpeg").exists() else get_ffmpeg_exe()
+)
 logging.info(f"[voice] Using FFmpeg at: {FFMPEG_PATH}")
 
 # ─ Vérif/lib chargement Opus (log au démarrage) ─
 try:
     import discord.opus as _opus
+
     tried = []
     if not _opus.is_loaded():
         for _name in ("libopus.so.0", "libopus.so", "opus"):
@@ -146,14 +151,19 @@ _radio_lock = asyncio.Lock()
 
 # ─────────────────────── TOKEN ──────────────────────────────
 TOKEN = (
-    os.getenv("DISCORD_TOKEN")
-    or os.getenv("TOKEN")
-    or os.getenv("BOT_TOKEN")
+    os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN") or os.getenv("BOT_TOKEN")
 )
 if not TOKEN:
     seen = [k for k in os.environ.keys() if "TOKEN" in k or "DISCORD" in k]
-    logging.error("Aucun token trouvé. Clés visibles: %s", ", ".join(sorted(seen)) or "aucune")
-    raise RuntimeError("DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables")
+    logging.error(
+        "Aucun token trouvé. Clés visibles: %s",
+        ", ".join(sorted(seen)) or "aucune",
+    )
+    raise RuntimeError(
+        "DISCORD_TOKEN manquant. Ajoute la variable dans Railway > Service > Variables"
+    )
+
+
 # ─────────────────────── ROLE ─────────────────────
 class PlayerTypeView(discord.ui.View):
     """
@@ -161,29 +171,56 @@ class PlayerTypeView(discord.ui.View):
         - Plateformes (PC/Consoles/Mobile) : exclusifs entre eux
         - Notifications : toggle indépendant (coexiste avec n'importe quelle plateforme)
     """
+
     def __init__(self):
         super().__init__(timeout=None)  # Vue persistante
 
     # ── Plateformes (exclusives) ─────────────────────────────────────────
-    @discord.ui.button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="role_pc")
-    async def btn_pc(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="💻 PC", style=discord.ButtonStyle.primary, custom_id="role_pc"
+    )
+    async def btn_pc(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self._set_platform_role(interaction, ROLE_PC, "PC")
 
-    @discord.ui.button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="role_console")
-    async def btn_console(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="🎮 Consoles",
+        style=discord.ButtonStyle.primary,
+        custom_id="role_console",
+    )
+    async def btn_console(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self._set_platform_role(interaction, ROLE_CONSOLE, "Consoles")
 
-    @discord.ui.button(label="📱 Mobile", style=discord.ButtonStyle.primary, custom_id="role_mobile")
-    async def btn_mobile(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="📱 Mobile",
+        style=discord.ButtonStyle.primary,
+        custom_id="role_mobile",
+    )
+    async def btn_mobile(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self._set_platform_role(interaction, ROLE_MOBILE, "Mobile")
 
     # ── Notifications (toggle indépendant) ───────────────────────────────
-    @discord.ui.button(label="🔔 Notifications", style=discord.ButtonStyle.secondary, custom_id="role_notify")
-    async def btn_notify(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._toggle_role(interaction, ROLE_NOTIFICATION, "Notifications")
+    @discord.ui.button(
+        label="🔔 Notifications",
+        style=discord.ButtonStyle.secondary,
+        custom_id="role_notify",
+    )
+    async def btn_notify(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await self._toggle_role(
+            interaction, ROLE_NOTIFICATION, "Notifications"
+        )
 
     # ── Helpers ──────────────────────────────────────────────────────────
-    async def _set_platform_role(self, interaction: discord.Interaction, role_id: int, label: str):
+    async def _set_platform_role(
+        self, interaction: discord.Interaction, role_id: int, label: str
+    ):
         """
         Règle de gestion (nouvelle) :
         - Si le membre a DÉJÀ cette plateforme -> ne rien faire (pas de toggle off).
@@ -192,77 +229,113 @@ class PlayerTypeView(discord.ui.View):
         """
         guild = interaction.guild
         if not guild:
-            return await interaction.response.send_message("❌ Action impossible en message privé.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Action impossible en message privé.", ephemeral=True
+            )
 
         role = guild.get_role(role_id)
         if not role:
-            return await interaction.response.send_message(f"❌ Rôle introuvable ({label}).", ephemeral=True)
+            return await interaction.response.send_message(
+                f"❌ Rôle introuvable ({label}).", ephemeral=True
+            )
 
         member = interaction.user
         try:
             # a) S'il a déjà cette plateforme -> NO-OP (aucun retrait)
             if role in member.roles:
                 return await interaction.response.send_message(
-                    f"✅ Tu es déjà sur **{label}** (aucun changement).", ephemeral=True
+                    f"✅ Tu es déjà sur **{label}** (aucun changement).",
+                    ephemeral=True,
                 )
 
             # b) Sinon -> ajouter cette plateforme et retirer les autres plateformes
-            other_platform_ids = {ROLE_PC, ROLE_CONSOLE, ROLE_MOBILE} - {role_id}
-            other_platform_roles = [guild.get_role(rid) for rid in other_platform_ids]
-            remove_list = [r for r in other_platform_roles if r and r in member.roles]
+            other_platform_ids = {ROLE_PC, ROLE_CONSOLE, ROLE_MOBILE} - {
+                role_id
+            }
+            other_platform_roles = [
+                guild.get_role(rid) for rid in other_platform_ids
+            ]
+            remove_list = [
+                r for r in other_platform_roles if r and r in member.roles
+            ]
 
             if remove_list:
-                await member.remove_roles(*remove_list, reason=f"Changement de plateforme -> {label}")
+                await member.remove_roles(
+                    *remove_list, reason=f"Changement de plateforme -> {label}"
+                )
 
-            await member.add_roles(role, reason=f"Ajout rôle plateforme {label}")
+            await member.add_roles(
+                role, reason=f"Ajout rôle plateforme {label}"
+            )
 
-            removed_txt = f" (retiré: {', '.join(f'**{r.name}**' for r in remove_list)})" if remove_list else ""
+            removed_txt = (
+                f" (retiré: {', '.join(f'**{r.name}**' for r in remove_list)})"
+                if remove_list
+                else ""
+            )
             await interaction.response.send_message(
                 f"✅ Plateforme mise à jour : **{label}**{removed_txt}.\n"
                 f"🔔 *Le rôle Notifications est conservé.*",
-                ephemeral=True
+                ephemeral=True,
             )
 
         except Exception as e:
             logging.error(f"Erreur set_platform {label}: {e}")
-            await interaction.response.send_message("❌ Impossible de modifier tes rôles.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Impossible de modifier tes rôles.", ephemeral=True
+            )
 
-    async def _toggle_role(self, interaction: discord.Interaction, role_id: int, label: str):
+    async def _toggle_role(
+        self, interaction: discord.Interaction, role_id: int, label: str
+    ):
         """
         Toggle simple (utilisé pour 🔔 Notifications) : ajoute/retire UNIQUEMENT ce rôle.
         """
         guild = interaction.guild
         if not guild:
-            return await interaction.response.send_message("❌ Action impossible en message privé.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Action impossible en message privé.", ephemeral=True
+            )
 
         role = guild.get_role(role_id)
         if not role:
-            return await interaction.response.send_message(f"❌ Rôle introuvable ({label}).", ephemeral=True)
+            return await interaction.response.send_message(
+                f"❌ Rôle introuvable ({label}).", ephemeral=True
+            )
 
         member = interaction.user
         try:
             if role in member.roles:
                 await member.remove_roles(role, reason=f"Retrait rôle {label}")
-                await interaction.response.send_message(f"🔕 Rôle **{label}** retiré.", ephemeral=True)
+                await interaction.response.send_message(
+                    f"🔕 Rôle **{label}** retiré.", ephemeral=True
+                )
             else:
                 await member.add_roles(role, reason=f"Ajout rôle {label}")
-                await interaction.response.send_message(f"🔔 Rôle **{label}** ajouté.", ephemeral=True)
+                await interaction.response.send_message(
+                    f"🔔 Rôle **{label}** ajouté.", ephemeral=True
+                )
         except Exception as e:
             logging.error(f"Erreur toggle rôle {label}: {e}")
-            await interaction.response.send_message("❌ Impossible de modifier tes rôles.", ephemeral=True)
-
+            await interaction.response.send_message(
+                "❌ Impossible de modifier tes rôles.", ephemeral=True
+            )
 
 
 # ─────────────────────── PERSISTANCE (VOLUME) ─────────────────────
 # Monte un volume Railway sur /app/data (Settings → Attach Volume → mount path: /app/data)
-DATA_DIR = os.getenv("DATA_DIR", "/app/data")  # tu peux aussi définir DATA_DIR=/app/data dans les variables Railway
+DATA_DIR = os.getenv(
+    "DATA_DIR", "/app/data"
+)  # tu peux aussi définir DATA_DIR=/app/data dans les variables Railway
 
 XP_FILE = f"{DATA_DIR}/data.json"
 BACKUP_FILE = f"{DATA_DIR}/backup.json"
 DAILY_STATS_FILE = f"{DATA_DIR}/daily_stats.json"
 
+
 def ensure_data_dir():
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+
 
 def _safe_read_json(path: str) -> dict:
     p = Path(path)
@@ -273,22 +346,30 @@ def _safe_read_json(path: str) -> dict:
     except json.JSONDecodeError:
         return {}
 
+
 def save_json(path: str, data: dict):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+    Path(path).write_text(
+        json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
+    )
+
 
 def load_json(path: str) -> dict:
     return _safe_read_json(path)
 
+
 def load_daily_stats() -> dict:
     return load_json(DAILY_STATS_FILE)
+
 
 def save_daily_stats(d: dict):
     save_json(DAILY_STATS_FILE, d)
 
+
 # --- XP cache en mémoire (moins d'I/O, thread-safe via lock) ---
 XP_CACHE: dict[str, dict] = {}
 XP_LOCK = asyncio.Lock()
+
 
 def _disk_load_xp() -> dict:
     ensure_data_dir()
@@ -300,7 +381,9 @@ def _disk_load_xp() -> dict:
             if backup_path.exists():
                 data = _safe_read_json(BACKUP_FILE)
                 save_json(XP_FILE, data)
-                logging.info("📦 XP restauré depuis backup.json (fichier principal manquant).")
+                logging.info(
+                    "📦 XP restauré depuis backup.json (fichier principal manquant)."
+                )
                 return data
             # sinon on init un fichier vide
             save_json(XP_FILE, {})
@@ -309,7 +392,9 @@ def _disk_load_xp() -> dict:
         # lecture normale
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        logging.warning("⚠️ data.json corrompu, tentative de restauration depuis backup.json…")
+        logging.warning(
+            "⚠️ data.json corrompu, tentative de restauration depuis backup.json…"
+        )
         if backup_path.exists():
             try:
                 data = json.loads(backup_path.read_text(encoding="utf-8"))
@@ -322,25 +407,33 @@ def _disk_load_xp() -> dict:
             logging.error("❌ Aucun backup disponible.")
         return {}
 
+
 def _disk_save_xp(data: dict):
     ensure_data_dir()
     # on écrit d'abord le principal…
     save_json(XP_FILE, data)
     # …puis on met à jour le backup (copie 1:1)
     try:
-        Path(BACKUP_FILE).write_text(Path(XP_FILE).read_text(encoding="utf-8"), encoding="utf-8")
+        Path(BACKUP_FILE).write_text(
+            Path(XP_FILE).read_text(encoding="utf-8"), encoding="utf-8"
+        )
     except Exception as e:
         logging.error(f"❌ Écriture backup échouée: {e}")
+
 
 async def xp_bootstrap_cache():
     global XP_CACHE
     XP_CACHE = _disk_load_xp()
     logging.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
+
 async def xp_flush_cache_to_disk():
     async with XP_LOCK:
         _disk_save_xp(XP_CACHE)
-        logging.info("💾 XP flush vers disque (%d utilisateurs).", len(XP_CACHE))
+        logging.info(
+            "💾 XP flush vers disque (%d utilisateurs).", len(XP_CACHE)
+        )
+
 
 # (optionnel) tu peux remplacer ta tâche auto_backup_xp par une version plus fréquente
 async def auto_backup_xp(interval_seconds: int = 600):  # toutes les 10 min
@@ -353,8 +446,11 @@ async def auto_backup_xp(interval_seconds: int = 600):  # toutes les 10 min
             logging.error(f"❌ Erreur sauvegarde périodique: {e}")
         await asyncio.sleep(interval_seconds)
 
+
 # ── PERSISTANCE DU MESSAGE PERMANENT VC ────────────────────
 PERMA_MSG_FILE = f"{DATA_DIR}/vc_buttons_msg.json"
+ROLES_PERMA_MSG_FILE = f"{DATA_DIR}/roles_buttons_msg.json"
+
 
 def _load_perma_msg_id() -> int | None:
     d = _safe_read_json(PERMA_MSG_FILE)
@@ -365,18 +461,37 @@ def _load_perma_msg_id() -> int | None:
         return int(mid)
     return None
 
+
+def _load_roles_perma_msg_id() -> int | None:
+    d = _safe_read_json(ROLES_PERMA_MSG_FILE)
+    mid = d.get("message_id")
+    if isinstance(mid, int):
+        return mid
+    if isinstance(mid, str) and mid.isdigit():
+        return int(mid)
+    return None
+
+
 def _save_roles_perma_msg_id(mid: int):
     ensure_data_dir()
-    Path(ROLES_PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
+    Path(ROLES_PERMA_MSG_FILE).write_text(
+        json.dumps({"message_id": mid}, indent=2),
+        encoding="utf-8",
+    )
+
 
 def _save_perma_msg_id(mid: int):
     ensure_data_dir()
-    Path(PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
+    Path(PERMA_MSG_FILE).write_text(
+        json.dumps({"message_id": mid}, indent=2),
+        encoding="utf-8",
+    )
+
 
 def _is_vc_permanent_message(msg: discord.Message) -> bool:
     """Reconnaît le message permanent VC :
-       - legacy: contenu contient [VC_BUTTONS_PERMANENT]
-       - nouveau: présence des boutons create_vc_* (custom_id)
+    - legacy: contenu contient [VC_BUTTONS_PERMANENT]
+    - nouveau: présence des boutons create_vc_* (custom_id)
     """
     if msg.author != bot.user:
         return False
@@ -403,16 +518,21 @@ def _is_vc_permanent_message(msg: discord.Message) -> bool:
 
     # Détection par description de l'embed (fallback)
     for e in msg.embeds or []:
-        if (e.description or "").startswith("👋 **Crée ton salon vocal temporaire**"):
+        if (e.description or "").startswith(
+            "👋 **Crée ton salon vocal temporaire**"
+        ):
             return True
 
     return False
+
+
 # ─────────────────────── HELPERS ────────────────────────────
 def get_level(xp: int) -> int:
     level = 0
     while xp >= (level + 1) ** 2 * 100:
         level += 1
     return level
+
 
 async def safe_respond(inter: discord.Interaction, content=None, **kwargs):
     try:
@@ -423,21 +543,31 @@ async def safe_respond(inter: discord.Interaction, content=None, **kwargs):
     except Exception as e:
         logging.error(f"Réponse interaction échouée: {e}")
 
-async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed: int):
+
+async def generate_rank_card(
+    user: discord.User, level: int, xp: int, xp_needed: int
+):
     from PIL import Image, ImageDraw
     import io
+
     img = Image.new("RGB", (460, 140), color=(30, 41, 59))
     draw = ImageDraw.Draw(img)
     draw.text((16, 14), f"{user.name} — Niveau {level}", fill=(255, 255, 255))
     draw.text((16, 52), f"XP: {xp} / {xp_needed}", fill=(220, 220, 220))
     bar_x, bar_y, bar_w, bar_h = 16, 90, 428, 22
-    draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], fill=(71, 85, 105))
+    draw.rectangle(
+        [bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], fill=(71, 85, 105)
+    )
     ratio = max(0.0, min(1.0, xp / max(1, xp_needed)))
-    draw.rectangle([bar_x, bar_y, bar_x + int(bar_w * ratio), bar_y + bar_h], fill=(34, 197, 94))
+    draw.rectangle(
+        [bar_x, bar_y, bar_x + int(bar_w * ratio), bar_y + bar_h],
+        fill=(34, 197, 94),
+    )
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
+
 
 def _base_name_from_channel(ch: discord.VoiceChannel) -> str:
     """Extrait le 'base' depuis le nom (PC/Crossplay/Consoles/Chat [n])."""
@@ -447,17 +577,22 @@ def _base_name_from_channel(ch: discord.VoiceChannel) -> str:
         return ch.name.split("•", 1)[0].strip()
     return m.group(1)
 
+
 def _target_name(base: str, game: str | None) -> str:
     if AUTO_RENAME_ENABLED and game:
         name = AUTO_RENAME_FORMAT.format(base=base, game=game.strip())
         return name[:100]  # hard cap Discord
     return base
 
+
 def _count_temp_vc_in_category(cat: discord.CategoryChannel) -> int:
     return sum(1 for ch in cat.voice_channels if ch.id in TEMP_VC_IDS)
 
+
 # Anti-spam renommage
 _last_rename_at: dict[int, float] = {}  # channel_id -> timestamp
+
+
 def _can_rename(ch_id: int) -> bool:
     ts = _last_rename_at.get(ch_id, 0)
     now = asyncio.get_event_loop().time()
@@ -466,11 +601,17 @@ def _can_rename(ch_id: int) -> bool:
     _last_rename_at[ch_id] = now
     return True
 
+
 # ── AJOUTE EN HAUT (près des autres états) ─────────────────
-_rename_state: dict[int, tuple[str, int, str | None]] = {}  # ch_id -> (name, members, game)
+_rename_state: dict[int, tuple[str, int, str | None]] = (
+    {}
+)  # ch_id -> (name, members, game)
+
 
 # ── REMPLACE ta fonction par ceci ───────────────────────────
-async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presences: bool = False):
+async def maybe_rename_channel_by_game(
+    ch: discord.VoiceChannel, *, wait_presences: bool = False
+):
     # ⛔ Ne jamais renommer le salon radio
     if getattr(ch, "id", None) == RADIO_VC_ID:
         return
@@ -487,7 +628,9 @@ async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presenc
     if not ch.members:
         if ch.name != base and _can_rename(ch.id):
             try:
-                await ch.edit(name=base, reason="Auto-rename: salon vide, reset base")
+                await ch.edit(
+                    name=base, reason="Auto-rename: salon vide, reset base"
+                )
                 logging.debug(f"[auto-rename] reset -> {base} (ch={ch.id})")
             except Exception as e:
                 logging.debug(f"[auto-rename] reset failed: {e}")
@@ -519,20 +662,33 @@ async def maybe_rename_channel_by_game(ch: discord.VoiceChannel, *, wait_presenc
     members_count = len(ch.members)
 
     prev = _rename_state.get(ch.id)
-    changed = (prev is None or prev[0] != ch.name or prev[1] != members_count or prev[2] != game)
+    changed = (
+        prev is None
+        or prev[0] != ch.name
+        or prev[1] != members_count
+        or prev[2] != game
+    )
 
     if target != ch.name and _can_rename(ch.id):
         try:
-            await ch.edit(name=target, reason=f"Auto-rename: jeu détecté = {game or 'aucun'}")
+            await ch.edit(
+                name=target,
+                reason=f"Auto-rename: jeu détecté = {game or 'aucun'}",
+            )
         except Exception as e:
             logging.debug(f"[auto-rename] rename failed: {e}")
 
     if changed:
         logging.debug(
             "[auto-rename] ch=%s base='%s' game='%s' target='%s' members=%d",
-            ch.id, base, game or "None", target, members_count
+            ch.id,
+            base,
+            game or "None",
+            target,
+            members_count,
         )
     _rename_state[ch.id] = (ch.name, members_count, game)
+
 
 # ─ INSERT HERE ─ [HELPERS MUTE]
 async def _force_mute(member: discord.Member, mute: bool, reason: str) -> bool:
@@ -540,17 +696,24 @@ async def _force_mute(member: discord.Member, mute: bool, reason: str) -> bool:
     guild = member.guild
     me = guild.me or guild.get_member(bot.user.id)
     if not me or not me.guild_permissions.mute_members:
-        logging.error("[mute] Permission manquante: le bot n'a pas 'Mute Members'.")
+        logging.error(
+            "[mute] Permission manquante: le bot n'a pas 'Mute Members'."
+        )
         return False
     try:
         await member.edit(mute=mute, reason=reason)
-        logging.info(f"[mute] {'Muted' if mute else 'Unmuted'} {member} — {reason}")
+        logging.info(
+            f"[mute] {'Muted' if mute else 'Unmuted'} {member} — {reason}"
+        )
         return True
     except discord.Forbidden:
-        logging.error(f"[mute] Forbidden: impossible de {'mute' if mute else 'unmute'} {member}.")
+        logging.error(
+            f"[mute] Forbidden: impossible de {'mute' if mute else 'unmute'} {member}."
+        )
     except Exception as e:
         logging.error(f"[mute] Erreur mute/unmute {member}: {e}")
     return False
+
 
 # ─ INSERT HERE ─ [HELPERS MUSIQUE]
 
@@ -565,8 +728,11 @@ _YTDL_OPTS = {
 }
 
 # FFmpeg: options robustes pour stream (reconnexion automatique, buffer raisonnable)
-_FF_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
+_FF_BEFORE = (
+    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
+)
 _FF_OPTS = "-vn -loglevel error"
+
 
 async def _ytdlp_get_best_audio_url(youtube_url: str) -> tuple[str, str]:
     """
@@ -577,9 +743,11 @@ async def _ytdlp_get_best_audio_url(youtube_url: str) -> tuple[str, str]:
     def _extract():
         opts = dict(_YTDL_OPTS)
         # Client Android = liens HLS/DASH plus stables pour FFmpeg
-        opts.update({
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
-        })
+        opts.update(
+            {
+                "extractor_args": {"youtube": {"player_client": ["android"]}},
+            }
+        )
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(youtube_url, download=False)
 
@@ -588,7 +756,9 @@ async def _ytdlp_get_best_audio_url(youtube_url: str) -> tuple[str, str]:
                 stream_url = info["url"]
             elif "entries" in info and info["entries"]:
                 ie = info["entries"][0]
-                stream_url = ie.get("url") or ie.get("webpage_url") or youtube_url
+                stream_url = (
+                    ie.get("url") or ie.get("webpage_url") or youtube_url
+                )
             else:
                 stream_url = info.get("webpage_url") or youtube_url
 
@@ -599,7 +769,7 @@ async def _ytdlp_get_best_audio_url(youtube_url: str) -> tuple[str, str]:
             hdrs.setdefault(
                 "User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
 
             # FFmpeg attend des lignes séparées par \r\n
@@ -608,16 +778,24 @@ async def _ytdlp_get_best_audio_url(youtube_url: str) -> tuple[str, str]:
 
     return await loop.run_in_executor(None, _extract)
 
+
 async def _reset_voice_session(guild: discord.Guild):
     """Déconnecte proprement le voice client pour repartir d'une session saine."""
     vc = guild.voice_client
     if vc:
         try:
             await vc.disconnect(force=True)
-            logging.info("[radio] Reset voice: disconnect(force=True) appliqué.")
+            logging.info(
+                "[radio] Reset voice: disconnect(force=True) appliqué."
+            )
         except Exception as e:
-            logging.warning(f"[radio] Reset voice: échec disconnect forcé: {e}")
-    await asyncio.sleep(1.5)  # petit délai pour laisser Discord clôturer la session
+            logging.warning(
+                f"[radio] Reset voice: échec disconnect forcé: {e}"
+            )
+    await asyncio.sleep(
+        1.5
+    )  # petit délai pour laisser Discord clôturer la session
+
 
 async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
     ch = guild.get_channel(RADIO_VC_ID)
@@ -630,7 +808,9 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         # ✅ Permissions de base
         perms = ch.permissions_for(me) if me else None
         if not (perms and perms.connect and perms.speak):
-            logging.error("[radio] Permissions manquantes sur le salon: CONNECT/SPEAK requis.")
+            logging.error(
+                "[radio] Permissions manquantes sur le salon: CONNECT/SPEAK requis."
+            )
             return None
 
         # 🔒 Déjà connecté ailleurs → move
@@ -641,23 +821,42 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
             vc = ch.guild.voice_client
         else:
             # ❗ Toujours sans self_deaf
-            vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
+            vc = await ch.connect(
+                reconnect=False, self_deaf=False, self_mute=False
+            )
 
         # Enlever mute/deaf serveur si appliqués
         try:
             if me and me.voice and (me.voice.mute or me.voice.deaf):
-                await me.edit(mute=False, deafen=False, reason="Radio: ensure unmuted")
-                logging.info("[radio] Le bot était mute/deaf → correction appliquée.")
+                await me.edit(
+                    mute=False, deafen=False, reason="Radio: ensure unmuted"
+                )
+                logging.info(
+                    "[radio] Le bot était mute/deaf → correction appliquée."
+                )
         except Exception as e:
-            logging.warning(f"[radio] Impossible de forcer unmute/undeafen du bot: {e}")
+            logging.warning(
+                f"[radio] Impossible de forcer unmute/undeafen du bot: {e}"
+            )
 
         # StageChannel → passer Speaker
         try:
-            if isinstance(ch, discord.StageChannel) and me and me.voice and me.voice.suppress:
-                await me.edit(suppress=False, reason="Radio: passer en Speaker sur Stage")
-                logging.info("[radio] StageChannel: suppression levée (Speaker).")
+            if (
+                isinstance(ch, discord.StageChannel)
+                and me
+                and me.voice
+                and me.voice.suppress
+            ):
+                await me.edit(
+                    suppress=False, reason="Radio: passer en Speaker sur Stage"
+                )
+                logging.info(
+                    "[radio] StageChannel: suppression levée (Speaker)."
+                )
         except Exception as e:
-            logging.warning(f"[radio] Stage unsuppress impossible (perms ?): {e}")
+            logging.warning(
+                f"[radio] Stage unsuppress impossible (perms ?): {e}"
+            )
 
         # 🧪 Log d'état audio
         st = me.voice
@@ -671,19 +870,25 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
 
     except discord.errors.ConnectionClosed as e:
         code = getattr(e, "code", None)
-        logging.warning(f"[radio] Voice ConnectionClosed (code={code}), tentative de reset…")
+        logging.warning(
+            f"[radio] Voice ConnectionClosed (code={code}), tentative de reset…"
+        )
         if code in (4006, 4009):
             await _reset_voice_session(guild)
             try:
                 # ❗ garder self_deaf=False ici aussi
-                vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
+                vc = await ch.connect(
+                    reconnect=False, self_deaf=False, self_mute=False
+                )
                 logging.info("[radio] Reconnexion voice réussie après reset.")
                 return vc
             except Exception as ee:
                 logging.error(f"[radio] Reconnexion après reset échouée: {ee}")
                 return None
         else:
-            logging.error(f"[radio] Voice WS fermé (code={code}) sans recovery dédié.")
+            logging.error(
+                f"[radio] Voice WS fermé (code={code}) sans recovery dédié."
+            )
             return None
 
     except Exception as e:
@@ -692,12 +897,17 @@ async def _connect_voice(guild: discord.Guild) -> discord.VoiceClient | None:
         try:
             await _reset_voice_session(guild)
             # ❗ garder self_deaf=False ici aussi
-            vc = await ch.connect(reconnect=False, self_deaf=False, self_mute=False)
-            logging.info("[radio] Connexion voice OK après reset (path générique).")
+            vc = await ch.connect(
+                reconnect=False, self_deaf=False, self_mute=False
+            )
+            logging.info(
+                "[radio] Connexion voice OK après reset (path générique)."
+            )
             return vc
         except Exception as ee:
             logging.error(f"[radio] Connexion après reset échouée: {ee}")
             return None
+
 
 def _ff_headers() -> str:
     return (
@@ -706,6 +916,7 @@ def _ff_headers() -> str:
         "Accept: */*\r\n"
     )
 
+
 def _before_opts() -> str:
     return (
         "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
@@ -713,8 +924,11 @@ def _before_opts() -> str:
         f'-headers "{_ff_headers()}"'
     )
 
+
 def _wire_ffmpeg_stderr_to_log(source):
-    proc = getattr(source, "_process", None) or getattr(source, "process", None)
+    proc = getattr(source, "_process", None) or getattr(
+        source, "process", None
+    )
     if not proc or not getattr(proc, "stderr", None):
         return
     import threading, collections
@@ -739,6 +953,7 @@ def _wire_ffmpeg_stderr_to_log(source):
 
     threading.Thread(target=_reader, daemon=True).start()
 
+
 # ─play_once ─
 async def _play_once(guild: discord.Guild) -> None:
     vc = await _connect_voice(guild)
@@ -762,7 +977,7 @@ async def _play_once(guild: discord.Guild) -> None:
 
     # ---------- Création de la source ----------
     source = None
-    
+
     # 🔁 Fallback PCM si besoin
     if source is None:
         try:
@@ -787,7 +1002,9 @@ async def _play_once(guild: discord.Guild) -> None:
         rc = None
         proc = None
         try:
-            proc = getattr(source, "_process", None) or getattr(source, "process", None)
+            proc = getattr(source, "_process", None) or getattr(
+                source, "process", None
+            )
             if proc:
                 try:
                     proc.wait()
@@ -802,13 +1019,21 @@ async def _play_once(guild: discord.Guild) -> None:
             logging.error(f"[radio] FFmpeg exited with signal {-rc} (rc={rc})")
             tail = getattr(proc, "_stderr_tail", None)
             if tail:
-                logging.error("[radio] FFmpeg stderr tail:\n" + "\n".join(tail))
+                logging.error(
+                    "[radio] FFmpeg stderr tail:\n" + "\n".join(tail)
+                )
             try:
-                bot.loop.call_soon_threadsafe(bot.loop.create_task, _play_once(guild))
+                bot.loop.call_soon_threadsafe(
+                    bot.loop.create_task, _play_once(guild)
+                )
             except Exception:
-                logging.exception("[radio] Failed to schedule retry after crash")
+                logging.exception(
+                    "[radio] Failed to schedule retry after crash"
+                )
         elif err:
-            logging.warning(f"[radio] Lecture terminée avec erreur: {err} (rc={rc})")
+            logging.warning(
+                f"[radio] Lecture terminée avec erreur: {err} (rc={rc})"
+            )
         else:
             logging.info(f"[radio] Lecture terminée (rc={rc})")
         try:
@@ -851,6 +1076,7 @@ async def _play_once(guild: discord.Guild) -> None:
         except Exception:
             pass
 
+
 # ───────────────── RADIO: boucle principale ─────────────────
 async def _radio_loop():
     """Assure la lecture H24: (re)connecte et relance si besoin."""
@@ -865,8 +1091,11 @@ async def _radio_loop():
         # petite pause pour éviter les boucles agressives en cas d'échec
         await asyncio.sleep(2)
 
+
 # ── RÉCOMPENSES NIVEAU ─────────────────────────────────────
-async def grant_level_roles(member: discord.Member, new_level: int) -> int | None:
+async def grant_level_roles(
+    member: discord.Member, new_level: int
+) -> int | None:
     """Donne le rôle correspondant au plus HAUT palier atteint. Retourne l'ID du rôle donné (ou None)."""
     if not LEVEL_ROLE_REWARDS:
         return None
@@ -885,26 +1114,44 @@ async def grant_level_roles(member: discord.Member, new_level: int) -> int | Non
     # Ajoute le rôle si nécessaire
     try:
         if role not in member.roles:
-            await member.add_roles(role, reason=f"Palier atteint: niveau {new_level}")
+            await member.add_roles(
+                role, reason=f"Palier atteint: niveau {new_level}"
+            )
     except Exception as e:
-        logging.error(f"Impossible d'ajouter le rôle {role_id} à {member}: {e}")
+        logging.error(
+            f"Impossible d'ajouter le rôle {role_id} à {member}: {e}"
+        )
         return None
 
     # Optionnel: retirer les anciens paliers
     if REMOVE_LOWER_TIER_ROLES:
         try:
-            lower_roles = [member.guild.get_role(LEVEL_ROLE_REWARDS[l])
-                            for l in LEVEL_ROLE_REWARDS.keys() if l < best_lvl]
+            lower_roles = [
+                member.guild.get_role(LEVEL_ROLE_REWARDS[l])
+                for l in LEVEL_ROLE_REWARDS.keys()
+                if l < best_lvl
+            ]
             lower_roles = [r for r in lower_roles if r and r in member.roles]
             if lower_roles:
-                await member.remove_roles(*lower_roles, reason="Nouveau palier atteint")
+                await member.remove_roles(
+                    *lower_roles, reason="Nouveau palier atteint"
+                )
         except Exception as e:
-            logging.error(f"Impossible de retirer les anciens rôles à {member}: {e}")
+            logging.error(
+                f"Impossible de retirer les anciens rôles à {member}: {e}"
+            )
 
     return role_id
 
+
 # ── ANNONCE LEVEL-UP (NOUVEAU STYLE, SANS IMAGE) ───────────
-async def announce_level_up(guild: discord.Guild, member: discord.Member, old_level: int, new_level: int, xp: int):
+async def announce_level_up(
+    guild: discord.Guild,
+    member: discord.Member,
+    old_level: int,
+    new_level: int,
+    xp: int,
+):
     """Annonce un level-up dans le salon niveaux: propre, sans image de carte, avec rôle auto."""
     channel = guild.get_channel(LEVEL_UP_CHANNEL)
     if not isinstance(channel, discord.TextChannel):
@@ -933,7 +1180,7 @@ async def announce_level_up(guild: discord.Guild, member: discord.Member, old_le
             f"**XP :** {xp} / {xp_needed}  •  **Reste :** {remaining} XP"
         ),
         color=0x33D17A,
-        timestamp=datetime.now(PARIS_TZ)
+        timestamp=datetime.now(PARIS_TZ),
     )
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text="GG 🎉")
@@ -942,6 +1189,7 @@ async def announce_level_up(guild: discord.Guild, member: discord.Member, old_le
         await channel.send(content=f"🎉 {member.mention}", embed=embed)
     except Exception as e:
         logging.error(f"Annonce level-up échouée: {e}")
+
 
 def next_vc_name(guild: discord.Guild, base: str) -> str:
     nums = []
@@ -953,14 +1201,20 @@ def next_vc_name(guild: discord.Guild, base: str) -> str:
     n = (max(nums) + 1) if nums else 1
     return base if n == 1 else f"{base} {n}"
 
-def incr_daily_stat(guild_id: int, user_id: int, *, msg_inc: int = 0, voice_min_inc: int = 0):
+
+def incr_daily_stat(
+    guild_id: int, user_id: int, *, msg_inc: int = 0, voice_min_inc: int = 0
+):
     stats = load_daily_stats()
     g = str(guild_id)
     date_key = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
-    stats.setdefault(g, {}).setdefault(date_key, {}).setdefault(str(user_id), {"msg": 0, "voice_min": 0})
+    stats.setdefault(g, {}).setdefault(date_key, {}).setdefault(
+        str(user_id), {"msg": 0, "voice_min": 0}
+    )
     stats[g][date_key][str(user_id)]["msg"] += msg_inc
     stats[g][date_key][str(user_id)]["voice_min"] += voice_min_inc
     save_daily_stats(stats)
+
 
 # ─────────────────────── XP PUBLIC API (pour cogs) ───────────────────────
 async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
@@ -988,15 +1242,25 @@ async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
         if new_level > old_level:
             user["level"] = new_level
         return old_level, new_level, int(user["xp"])
-        
+
+
 # ─────────────────────── COMMANDES SLASH ──────────────────
-@bot.tree.command(name="type_joueur", description="Choisir PC, Console ou Mobile")
+@bot.tree.command(
+    name="type_joueur", description="Choisir PC, Console ou Mobile"
+)
 @app_commands.checks.has_permissions(manage_guild=True)
 async def type_joueur(interaction: discord.Interaction):
-    await safe_respond(interaction, f"Les boutons ont été postés dans <#{CHANNEL_ROLES}> 😉", ephemeral=True)
+    await safe_respond(
+        interaction,
+        f"Les boutons ont été postés dans <#{CHANNEL_ROLES}> 😉",
+        ephemeral=True,
+    )
     channel = interaction.guild.get_channel(CHANNEL_ROLES)
     if channel:
-        await channel.send("Quel type de joueur es-tu ?", view=PlayerTypeView())
+        await channel.send(
+            "Quel type de joueur es-tu ?", view=PlayerTypeView()
+        )
+
 
 @bot.tree.command(name="sondage", description="Créer un sondage Oui/Non")
 @app_commands.describe(question="La question à poser")
@@ -1008,22 +1272,30 @@ async def sondage(interaction: discord.Interaction, question: str):
     await msg.add_reaction("❌")
     await safe_respond(interaction, "Sondage créé ✔️", ephemeral=True)
 
-@bot.tree.command(name="lien", description="Affiche le lien pour rejoindre le serveur Discord")
+
+@bot.tree.command(
+    name="lien",
+    description="Affiche le lien pour rejoindre le serveur Discord",
+)
 async def lien(interaction: discord.Interaction):
     await safe_respond(
         interaction,
         "🔗 Voici le lien pour rejoindre notre serveur :\nhttps://discord.com/invite/lerefuge57",
-        ephemeral=False
+        ephemeral=False,
     )
 
+
 # 🧪 MESSAGE D'ESSAI DANS LE SALON NIVEAUX (owner-only)
-@bot.tree.command(name="test_niveau", description="Tester l'annonce de level-up (réservé au propriétaire)")
+@bot.tree.command(
+    name="test_niveau",
+    description="Tester l'annonce de level-up (réservé au propriétaire)",
+)
 @app_commands.describe(
     niveau="(Optionnel) Test simple: nouveau niveau à simuler",
     membre="(Optionnel) Membre ciblé (par défaut: toi)",
     ancien_niveau="(Optionnel) Ancien niveau (défaut 4)",
     nouveau_niveau="(Optionnel) Nouveau niveau (défaut 5)",
-    xp="(Optionnel) XP actuel; par défaut = seuil du nouveau niveau"
+    xp="(Optionnel) XP actuel; par défaut = seuil du nouveau niveau",
 )
 async def test_niveau(
     interaction: discord.Interaction,
@@ -1031,11 +1303,13 @@ async def test_niveau(
     membre: discord.Member | None = None,
     ancien_niveau: app_commands.Range[int, 0, 999] = 4,
     nouveau_niveau: app_commands.Range[int, 1, 1000] = 5,
-    xp: app_commands.Range[int, 0, 10_000_000] | None = None
+    xp: app_commands.Range[int, 0, 10_000_000] | None = None,
 ):
     # Restriction propriétaire (utiliser OWNER_ID)
     if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("❌ Commande réservée au propriétaire.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Commande réservée au propriétaire.", ephemeral=True
+        )
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -1043,30 +1317,44 @@ async def test_niveau(
     # Mode simple: /test_niveau niveau:12
     if niveau is not None:
         if niveau <= 0:
-            await interaction.followup.send("❌ Le niveau doit être > 0.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ Le niveau doit être > 0.", ephemeral=True
+            )
             return
         member = interaction.user
         old_lvl = max(0, niveau - 1)
         new_lvl = niveau
-        xp_val = xp if xp is not None else (new_lvl ** 2 * 100)
+        xp_val = xp if xp is not None else (new_lvl**2 * 100)
     else:
         # Mode avancé: membre/anciens/nouveaux/xp
         member = membre or interaction.user
         if nouveau_niveau <= ancien_niveau:
-            await interaction.followup.send("❌ Le nouveau niveau doit être supérieur à l'ancien.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ Le nouveau niveau doit être supérieur à l'ancien.",
+                ephemeral=True,
+            )
             return
         old_lvl = ancien_niveau
         new_lvl = nouveau_niveau
-        xp_val = xp if xp is not None else (new_lvl ** 2 * 100)
+        xp_val = xp if xp is not None else (new_lvl**2 * 100)
 
     try:
-        await announce_level_up(interaction.guild, member, old_lvl, new_lvl, xp_val)
-        await interaction.followup.send("✅ Message d'essai envoyé dans le salon niveaux.", ephemeral=True)
+        await announce_level_up(
+            interaction.guild, member, old_lvl, new_lvl, xp_val
+        )
+        await interaction.followup.send(
+            "✅ Message d'essai envoyé dans le salon niveaux.", ephemeral=True
+        )
     except Exception as e:
         logging.error(f"/test_niveau échec: {e}")
-        await interaction.followup.send("❌ Impossible d'envoyer le message d'essai.", ephemeral=True)
+        await interaction.followup.send(
+            "❌ Impossible d'envoyer le message d'essai.", ephemeral=True
+        )
 
-@bot.tree.command(name="rang", description="Affiche ton niveau avec une carte graphique")
+
+@bot.tree.command(
+    name="rang", description="Affiche ton niveau avec une carte graphique"
+)
 async def rang(interaction: discord.Interaction):
     # Defer pour le spinner (et éviter timeout)
     try:
@@ -1078,7 +1366,10 @@ async def rang(interaction: discord.Interaction):
     async with XP_LOCK:
         data = XP_CACHE.get(user_id)
         if not data:
-            await interaction.followup.send("Tu n'as pas encore de niveau... Commence à discuter !", ephemeral=True)
+            await interaction.followup.send(
+                "Tu n'as pas encore de niveau... Commence à discuter !",
+                ephemeral=True,
+            )
             return
         level = int(data.get("level", 0))
         xp = int(data.get("xp", 0))
@@ -1092,71 +1383,122 @@ async def rang(interaction: discord.Interaction):
         except discord.Forbidden:
             pass
         except discord.HTTPException as e:
-            logging.warning(f"/rang: envoi ephemeral échoué, fallback public. Raison: {e}")
+            logging.warning(
+                f"/rang: envoi ephemeral échoué, fallback public. Raison: {e}"
+            )
             await interaction.channel.send(
                 content=f"{interaction.user.mention} voici ta carte de niveau :",
-                file=file
+                file=file,
             )
             await interaction.followup.send(
                 "Je n'ai pas pu l'envoyer en privé, je l'ai postée dans le salon.",
-                ephemeral=True
+                ephemeral=True,
             )
     except ImportError as e:
         logging.exception(f"/rang: ImportError (Pillow manquante ?) {e}")
-        await interaction.followup.send("❌ Erreur interne: dépendance manquante (Pillow).", ephemeral=True)
+        await interaction.followup.send(
+            "❌ Erreur interne: dépendance manquante (Pillow).", ephemeral=True
+        )
     except Exception as e:
         logging.exception(f"/rang: exception inattendue: {e}")
-        await interaction.followup.send("❌ Une erreur est survenue pendant la génération de la carte.", ephemeral=True)
+        await interaction.followup.send(
+            "❌ Une erreur est survenue pendant la génération de la carte.",
+            ephemeral=True,
+        )
 
-@bot.tree.command(name="vocaux", description="Publier (ou ré-attacher) les boutons pour créer des salons vocaux")
+
+@bot.tree.command(
+    name="vocaux",
+    description="Publier (ou ré-attacher) les boutons pour créer des salons vocaux",
+)
 @app_commands.checks.has_permissions(manage_guild=True)
 async def vocaux(interaction: discord.Interaction):
-    await safe_respond(interaction, "⏳ Je (ré)publie les boutons dans le salon lobby…", ephemeral=True)
+    await safe_respond(
+        interaction,
+        "⏳ Je (ré)publie les boutons dans le salon lobby…",
+        ephemeral=True,
+    )
     await ensure_vc_buttons_message()
-    await interaction.followup.send("📌 Boutons OK dans le salon prévu.", ephemeral=True)
+    await interaction.followup.send(
+        "📌 Boutons OK dans le salon prévu.", ephemeral=True
+    )
 
-@bot.tree.command(name="purge", description="Supprime N messages récents de ce salon (réservé à Kevin)")
+
+@bot.tree.command(
+    name="purge",
+    description="Supprime N messages récents de ce salon (réservé à Kevin)",
+)
 @app_commands.describe(nb="Nombre de messages à supprimer (1-100)")
-async def purge(interaction: discord.Interaction, nb: app_commands.Range[int, 1, 100]):
+async def purge(
+    interaction: discord.Interaction, nb: app_commands.Range[int, 1, 100]
+):
     try:
         await interaction.response.defer(thinking=True, ephemeral=True)
     except Exception:
         pass
 
     if interaction.user.id != OWNER_ID:
-        await interaction.followup.send("❌ Commande réservée au propriétaire.", ephemeral=True); return
+        await interaction.followup.send(
+            "❌ Commande réservée au propriétaire.", ephemeral=True
+        )
+        return
     if interaction.guild is None:
-        await interaction.followup.send("❌ Utilisable uniquement sur un serveur.", ephemeral=True); return
+        await interaction.followup.send(
+            "❌ Utilisable uniquement sur un serveur.", ephemeral=True
+        )
+        return
     ch = interaction.channel
     if ch is None:
-        await interaction.followup.send("❌ Salon introuvable.", ephemeral=True); return
+        await interaction.followup.send(
+            "❌ Salon introuvable.", ephemeral=True
+        )
+        return
 
-    me = (interaction.guild.me or interaction.guild.get_member(bot.user.id))
+    me = interaction.guild.me or interaction.guild.get_member(bot.user.id)
     if not me:
-        await interaction.followup.send("❌ Impossible de vérifier mes permissions.", ephemeral=True); return
+        await interaction.followup.send(
+            "❌ Impossible de vérifier mes permissions.", ephemeral=True
+        )
+        return
     perms = ch.permissions_for(me)
 
     if not perms.manage_messages or not perms.read_message_history:
-        await interaction.followup.send("❌ Il me manque les permissions **Gérer les messages** et/ou **Lire l’historique**.", ephemeral=True); return
+        await interaction.followup.send(
+            "❌ Il me manque les permissions **Gérer les messages** et/ou **Lire l’historique**.",
+            ephemeral=True,
+        )
+        return
     try:
         if isinstance(ch, discord.TextChannel):
-            deleted = await ch.purge(limit=nb, check=lambda m: not m.pinned, bulk=True)
-            await interaction.followup.send(f"🧹 {len(deleted)} messages supprimés.", ephemeral=True); return
+            deleted = await ch.purge(
+                limit=nb, check=lambda m: not m.pinned, bulk=True
+            )
+            await interaction.followup.send(
+                f"🧹 {len(deleted)} messages supprimés.", ephemeral=True
+            )
+            return
     except Exception as e:
         logging.warning(f"Purge bulk échouée, fallback lent. Raison: {e}")
 
     count = 0
     try:
         async for msg in ch.history(limit=nb):
-            if msg.pinned: continue
+            if msg.pinned:
+                continue
             try:
-                await msg.delete(); count += 1
+                await msg.delete()
+                count += 1
             except Exception as ee:
                 logging.error(f"Suppression d'un message échouée: {ee}")
-        await interaction.followup.send(f"🧹 {count} messages supprimés (mode lent).", ephemeral=True)
+        await interaction.followup.send(
+            f"🧹 {count} messages supprimés (mode lent).", ephemeral=True
+        )
     except Exception as ee:
         logging.error(f"Erreur lors de la purge lente: {ee}")
-        await interaction.followup.send("❌ Impossible de supprimer les messages.", ephemeral=True)
+        await interaction.followup.send(
+            "❌ Impossible de supprimer les messages.", ephemeral=True
+        )
+
 
 # ─────────────────────── TÂCHES DE FOND ────────────────────
 async def ensure_vc_buttons_message():
@@ -1168,6 +1510,7 @@ async def ensure_vc_buttons_message():
 
     view = VCButtonView()
 
+
 # Texte visible par les membres (sans le marqueur)
 display_text = (
     "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
@@ -1178,6 +1521,7 @@ display_text = (
 )
 embed = discord.Embed(description=display_text, color=0x00C896)
 embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)
+
 
 # ─────────────────────── TÂCHES DE FOND ────────────────────
 async def ensure_vc_buttons_message():
@@ -1212,7 +1556,9 @@ async def ensure_vc_buttons_message():
             logging.info("🔁 Message permanent (ID mémorisé) réattaché.")
             return
         except Exception:
-            logging.debug("Message mémorisé introuvable — on va rechercher/reposter.")
+            logging.debug(
+                "Message mémorisé introuvable — on va rechercher/reposter."
+            )
 
     # 2) Chercher un message existant marqué (footer OU contenu legacy)
     found = None
@@ -1259,7 +1605,9 @@ async def daily_summary_loop():
         # dormir jusqu'au prochain minuit (heure locale Paris)
         now = datetime.now(PARIS_TZ)
         tomorrow = now + timedelta(days=1)
-        next_midnight = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+        next_midnight = tomorrow.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         await asyncio.sleep(max(1, (next_midnight - now).total_seconds()))
 
         # après le réveil, on recalcule "aujourd'hui" et on cible "hier"
@@ -1286,9 +1634,9 @@ async def daily_summary_loop():
                 score = msgs + vmin
                 items.append((uid, msgs, vmin, score))
 
-            top_msg  = sorted(items, key=lambda x: x[1], reverse=True)[:5]
-            top_vc   = sorted(items, key=lambda x: x[2], reverse=True)[:5]
-            top_mvp  = sorted(items, key=lambda x: x[3], reverse=True)[:5]
+            top_msg = sorted(items, key=lambda x: x[1], reverse=True)[:5]
+            top_vc = sorted(items, key=lambda x: x[2], reverse=True)[:5]
+            top_mvp = sorted(items, key=lambda x: x[3], reverse=True)[:5]
 
             total_msgs = sum(x[1] for x in items)
             total_vmin = sum(x[2] for x in items)
@@ -1296,28 +1644,42 @@ async def daily_summary_loop():
             embed = discord.Embed(
                 title=f"📈 Résumé du jour — {day_key}",
                 description=f"**Total** : {total_msgs} messages • {total_vmin} min en vocal",
-                color=0x00C896
+                color=0x00C896,
             )
             if top_msg:
                 embed.add_field(
                     name="💬 Top Messages",
-                    value="\n".join([f"**{i+1}.** {u_name(uid)} — {msgs} msgs"
-                                    for i, (uid, msgs, _, _) in enumerate(top_msg)]),
-                    inline=False
+                    value="\n".join(
+                        [
+                            f"**{i+1}.** {u_name(uid)} — {msgs} msgs"
+                            for i, (uid, msgs, _, _) in enumerate(top_msg)
+                        ]
+                    ),
+                    inline=False,
                 )
             if top_vc:
                 embed.add_field(
                     name="🎙️ Top Vocal (min)",
-                    value="\n".join([f"**{i+1}.** {u_name(uid)} — {vmin} min"
-                                    for i, (uid, _, vmin, _) in enumerate(top_vc)]),
-                    inline=False
+                    value="\n".join(
+                        [
+                            f"**{i+1}.** {u_name(uid)} — {vmin} min"
+                            for i, (uid, _, vmin, _) in enumerate(top_vc)
+                        ]
+                    ),
+                    inline=False,
                 )
             if top_mvp:
                 embed.add_field(
                     name="🏆 MVP (messages + minutes)",
-                    value="\n".join([f"**{i+1}.** {u_name(uid)} — {score} pts"
-                                    for i, (uid, msgs, vmin, score) in enumerate(top_mvp)]),
-                    inline=False
+                    value="\n".join(
+                        [
+                            f"**{i+1}.** {u_name(uid)} — {score} pts"
+                            for i, (uid, msgs, vmin, score) in enumerate(
+                                top_mvp
+                            )
+                        ]
+                    ),
+                    inline=False,
                 )
 
             ch = guild.get_channel(ACTIVITY_SUMMARY_CH)
@@ -1325,15 +1687,23 @@ async def daily_summary_loop():
                 try:
                     me = guild.me or guild.get_member(bot.user.id)
                     if not ch.permissions_for(me).mention_everyone:
-                        await ch.send("⚠️ Je n'ai pas la permission de mentionner @everyone ici.")
+                        await ch.send(
+                            "⚠️ Je n'ai pas la permission de mentionner @everyone ici."
+                        )
                         content = "Voici les joueurs les plus actifs d'hier !"
                         await ch.send(content=content, embed=embed)
                     else:
-                        await ch.send(content="@everyone — Voici les joueurs les plus actifs d'hier !",
-                                    embed=embed,
-                                    allowed_mentions=discord.AllowedMentions(everyone=True))
+                        await ch.send(
+                            content="@everyone — Voici les joueurs les plus actifs d'hier !",
+                            embed=embed,
+                            allowed_mentions=discord.AllowedMentions(
+                                everyone=True
+                            ),
+                        )
                 except Exception as e:
-                    logging.error(f"Envoi résumé quotidien échoué (guild {guild.id}): {e}")
+                    logging.error(
+                        f"Envoi résumé quotidien échoué (guild {guild.id}): {e}"
+                    )
 
         # nettoyage des stats > 14 jours
         try:
@@ -1348,6 +1718,7 @@ async def daily_summary_loop():
         except Exception as e:
             logging.error(f"Purge stats anciennes échouée: {e}")
 
+
 async def weekly_summary_loop():
     """Chaque lundi 00:05 (Europe/Paris), poste le résumé hebdo (semaine précédente lun→dim)."""
     await bot.wait_until_ready()
@@ -1358,13 +1729,17 @@ async def weekly_summary_loop():
         days_ahead = (7 - now.weekday()) % 7  # 0=lundi
         if days_ahead == 0 and (now.hour, now.minute) >= (0, 5):
             days_ahead = 7
-        next_run = (now + timedelta(days=days_ahead)).replace(hour=0, minute=5, second=0, microsecond=0)
+        next_run = (now + timedelta(days=days_ahead)).replace(
+            hour=0, minute=5, second=0, microsecond=0
+        )
         await asyncio.sleep(max(1, (next_run - now).total_seconds()))
 
         # après le réveil : calcul de la semaine précédente (lundi→dimanche)
-        today = datetime.now(PARIS_TZ).date()            # on est lundi (date du "run")
-        last_sunday = today - timedelta(days=today.weekday() + 1)   # hier (dimanche)
-        last_monday = last_sunday - timedelta(days=6)               # lundi précédent
+        today = datetime.now(PARIS_TZ).date()  # on est lundi (date du "run")
+        last_sunday = today - timedelta(
+            days=today.weekday() + 1
+        )  # hier (dimanche)
+        last_monday = last_sunday - timedelta(days=6)  # lundi précédent
 
         stats = load_daily_stats()
 
@@ -1390,9 +1765,12 @@ async def weekly_summary_loop():
                 m = guild.get_member(int(uid))
                 return m.display_name if m else f"User {uid}"
 
-            table = [(uid, v["msg"], v["voice_min"], v["msg"] + v["voice_min"]) for uid, v in items.items()]
+            table = [
+                (uid, v["msg"], v["voice_min"], v["msg"] + v["voice_min"])
+                for uid, v in items.items()
+            ]
             top_msg = sorted(table, key=lambda x: x[1], reverse=True)[:5]
-            top_vc  = sorted(table, key=lambda x: x[2], reverse=True)[:5]
+            top_vc = sorted(table, key=lambda x: x[2], reverse=True)[:5]
             top_mvp = sorted(table, key=lambda x: x[3], reverse=True)[:5]
 
             total_msgs = sum(x[1] for x in table)
@@ -1402,41 +1780,65 @@ async def weekly_summary_loop():
             embed = discord.Embed(
                 title=f"🏁 Résumé hebdo — {period_text}",
                 description=f"**Totaux** : {total_msgs} messages • {total_vmin} min en vocal",
-                color=0x5865F2
+                color=0x5865F2,
             )
 
-            def medal(i): return "🥇" if i==0 else ("🥈" if i==1 else ("🥉" if i==2 else f"{i+1}."))
+            def medal(i):
+                return (
+                    "🥇"
+                    if i == 0
+                    else ("🥈" if i == 1 else ("🥉" if i == 2 else f"{i+1}."))
+                )
 
             if top_msg:
                 embed.add_field(
                     name="💬 Top Messages",
-                    value="\n".join([f"**{medal(i)}** {u_name(uid)} — {msgs} msgs"
-                                    for i, (uid, msgs, _, _) in enumerate(top_msg)]),
-                    inline=False
+                    value="\n".join(
+                        [
+                            f"**{medal(i)}** {u_name(uid)} — {msgs} msgs"
+                            for i, (uid, msgs, _, _) in enumerate(top_msg)
+                        ]
+                    ),
+                    inline=False,
                 )
             if top_vc:
                 embed.add_field(
                     name="🎙️ Top Vocal",
-                    value="\n".join([f"**{medal(i)}** {u_name(uid)} — {vmin} min"
-                                    for i, (uid, _, vmin, _) in enumerate(top_vc)]),
-                    inline=False
+                    value="\n".join(
+                        [
+                            f"**{medal(i)}** {u_name(uid)} — {vmin} min"
+                            for i, (uid, _, vmin, _) in enumerate(top_vc)
+                        ]
+                    ),
+                    inline=False,
                 )
             if top_mvp:
                 embed.add_field(
                     name="🏆 MVP (msgs + min)",
-                    value="\n".join([f"**{medal(i)}** {u_name(uid)} — {score} pts"
-                                    for i, (uid, _, __, score) in enumerate(top_mvp)]),
-                    inline=False
+                    value="\n".join(
+                        [
+                            f"**{medal(i)}** {u_name(uid)} — {score} pts"
+                            for i, (uid, _, __, score) in enumerate(top_mvp)
+                        ]
+                    ),
+                    inline=False,
                 )
 
             ch = guild.get_channel(ACTIVITY_SUMMARY_CH)
             if isinstance(ch, discord.TextChannel):
                 try:
-                    await ch.send(content="@everyone — Podium de la semaine !",
-                                    embed=embed,
-                                    allowed_mentions=discord.AllowedMentions(everyone=True))
+                    await ch.send(
+                        content="@everyone — Podium de la semaine !",
+                        embed=embed,
+                        allowed_mentions=discord.AllowedMentions(
+                            everyone=True
+                        ),
+                    )
                 except Exception as e:
-                    logging.error(f"Envoi résumé hebdo échoué (guild {guild.id}): {e}")
+                    logging.error(
+                        f"Envoi résumé hebdo échoué (guild {guild.id}): {e}"
+                    )
+
 
 async def auto_rename_poll():
     await bot.wait_until_ready()
@@ -1450,6 +1852,7 @@ async def auto_rename_poll():
             logging.debug(f"auto_rename_poll error: {e}")
         await asyncio.sleep(20)  # toutes les 20s
 
+
 async def vc_buttons_watchdog(interval_seconds: int = 120):
     """Vérifie périodiquement que le message permanent existe et est à jour."""
     await bot.wait_until_ready()
@@ -1462,76 +1865,101 @@ async def vc_buttons_watchdog(interval_seconds: int = 120):
 
 
 # ─────────────────────── VIEWS ─────────────────────────────
-class LiveTikTokView(View):
+class LiveTikTokView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔴 Annoncer le live TikTok", style=discord.ButtonStyle.danger, custom_id="announce_live")
-    async def announce_live(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="🔴 Annoncer le live TikTok",
+        style=discord.ButtonStyle.danger,
+        custom_id="announce_live",
+    )
+    async def announce_live(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         channel = bot.get_channel(TIKTOK_ANNOUNCE_CH)
         if not channel:
-            await safe_respond(interaction, "❌ Salon cible introuvable.", ephemeral=True)
+            await safe_respond(
+                interaction, "❌ Salon cible introuvable.", ephemeral=True
+            )
             return
         guild = interaction.guild
         me = guild.me or guild.get_member(bot.user.id)
         if not channel.permissions_for(me).mention_everyone:
-            await safe_respond(interaction, "❌ Je n'ai pas la permission de mentionner @everyone dans ce salon.", ephemeral=True)
+            await safe_respond(
+                interaction,
+                "❌ Je n'ai pas la permission de mentionner @everyone dans ce salon.",
+                ephemeral=True,
+            )
             return
         await channel.send(
             "@everyone 🚨 Kevin est en LIVE sur TikTok !\n🔴 Rejoins maintenant : https://www.tiktok.com/@kevinlerefuge",
-            allowed_mentions=discord.AllowedMentions(everyone=True)
+            allowed_mentions=discord.AllowedMentions(everyone=True),
         )
         await safe_respond(interaction, "✅ Annonce envoyée !", ephemeral=True)
 
-class VCButtonView(View):
+
+class VCButtonView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     async def create_vc(self, interaction: discord.Interaction, profile: str):
         guild = interaction.guild
         if guild is None:
-            return await interaction.response.send_message("❌ Action impossible en DM.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Action impossible en DM.", ephemeral=True
+            )
 
         member = interaction.user
 
         # Vérif présence dans le lobby
         if not member.voice or not member.voice.channel:
             return await interaction.response.send_message(
-                "⛔ Rejoins d’abord le **vocal lobby** puis reclique sur un bouton.", ephemeral=True
+                "⛔ Rejoins d’abord le **vocal lobby** puis reclique sur un bouton.",
+                ephemeral=True,
             )
         if member.voice.channel.id != LOBBY_VC_ID:
             return await interaction.response.send_message(
                 "⛔ Tu dois être **dans le vocal lobby** pour choisir le type (PC/Consoles/Crossplay/Chat).",
-                ephemeral=True
+                ephemeral=True,
             )
 
         # Vérif permissions du bot
         me = guild.me or guild.get_member(bot.user.id)
         if not (me and me.guild_permissions.move_members):
             return await interaction.response.send_message(
-                "⛔ Il me manque la permission **Déplacer des membres**.", ephemeral=True
+                "⛔ Il me manque la permission **Déplacer des membres**.",
+                ephemeral=True,
             )
 
         # Vérif catégorie
         category = guild.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
-            return await interaction.response.send_message("❌ Catégorie vocale temporaire introuvable.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Catégorie vocale temporaire introuvable.", ephemeral=True
+            )
 
         perms_cat = category.permissions_for(me)
-        if not (perms_cat.manage_channels and perms_cat.view_channel and perms_cat.connect):
+        if not (
+            perms_cat.manage_channels
+            and perms_cat.view_channel
+            and perms_cat.connect
+        ):
             return await interaction.response.send_message(
                 "⛔ Permissions manquantes sur la catégorie (**Gérer les salons / Voir / Se connecter**).",
-                ephemeral=True
+                ephemeral=True,
             )
 
         # Limite éventuelle
         limit = TEMP_VC_LIMITS.get(category.id)
         if limit is not None:
-            current = sum(1 for ch in category.voice_channels if ch.id in TEMP_VC_IDS)
+            current = sum(
+                1 for ch in category.voice_channels if ch.id in TEMP_VC_IDS
+            )
             if current >= limit:
                 return await interaction.response.send_message(
                     f"⛔ Limite atteinte : **{current}/{limit}** salons temporaires dans **{category.name}**.",
-                    ephemeral=True
+                    ephemeral=True,
                 )
 
         # Création du vocal + permission membre
@@ -1547,11 +1975,15 @@ class VCButtonView(View):
             TEMP_VC_IDS.add(vc.id)
         except Exception as e:
             logging.error(f"Erreur création VC: {e}")
-            return await interaction.response.send_message("❌ Impossible de créer le salon.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Impossible de créer le salon.", ephemeral=True
+            )
 
         # Déplacement obligatoire
         try:
-            await member.move_to(vc, reason="Choix de type depuis le lobby (move obligatoire)")
+            await member.move_to(
+                vc, reason="Choix de type depuis le lobby (move obligatoire)"
+            )
         except Exception as e:
             logging.error(f"Move failed (rollback): {e}")
             try:
@@ -1561,7 +1993,7 @@ class VCButtonView(View):
             TEMP_VC_IDS.discard(vc.id)
             return await interaction.response.send_message(
                 "❌ Je n’ai pas pu te déplacer. Vérifie que tu es bien **dans le vocal lobby** et réessaie.",
-                ephemeral=True
+                ephemeral=True,
             )
 
         # Auto-rename initial
@@ -1572,36 +2004,74 @@ class VCButtonView(View):
 
         # Confirmation
         if interaction.response.is_done():
-            await interaction.followup.send(f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True)
+            await interaction.followup.send(
+                f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True
+            )
         else:
-            await interaction.response.send_message(f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True)
+            await interaction.response.send_message(
+                f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True
+            )
 
     # Boutons
-    @discord.ui.button(label="💻 PC", style=discord.ButtonStyle.primary, custom_id="create_vc_pc")
-    async def btn_pc(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="💻 PC",
+        style=discord.ButtonStyle.primary,
+        custom_id="create_vc_pc",
+    )
+    async def btn_pc(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.create_vc(interaction, "PC")
 
-    @discord.ui.button(label="🎮 Consoles", style=discord.ButtonStyle.primary, custom_id="create_vc_consoles")
-    async def btn_consoles(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="🎮 Consoles",
+        style=discord.ButtonStyle.primary,
+        custom_id="create_vc_consoles",
+    )
+    async def btn_consoles(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.create_vc(interaction, "Consoles")
 
-    @discord.ui.button(label="🔀 Crossplay", style=discord.ButtonStyle.primary, custom_id="create_vc_crossplay")
-    async def btn_crossplay(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="🔀 Crossplay",
+        style=discord.ButtonStyle.primary,
+        custom_id="create_vc_crossplay",
+    )
+    async def btn_crossplay(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.create_vc(interaction, "Crossplay")
 
-    @discord.ui.button(label="💬 Chat", style=discord.ButtonStyle.secondary, custom_id="create_vc_chat")
-    async def btn_chat(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="💬 Chat",
+        style=discord.ButtonStyle.secondary,
+        custom_id="create_vc_chat",
+    )
+    async def btn_chat(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.create_vc(interaction, "Chat")
 
+
 # ─────────────────────── EVENTS ─────────────────────────────
-@bot.tree.command(name="roles_refresh", description="Reposter/reattacher le message des rôles (réservé au propriétaire)")
+@bot.tree.command(
+    name="roles_refresh",
+    description="Reposter/reattacher le message des rôles (réservé au propriétaire)",
+)
 async def roles_refresh(interaction: discord.Interaction):
     if interaction.user.id != 541417878314942495:
-        return await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
+        return await interaction.response.send_message(
+            "❌ Tu n'as pas la permission d'utiliser cette commande.",
+            ephemeral=True,
+        )
 
     await interaction.response.defer(ephemeral=True)
     await ensure_roles_buttons_message()
-    await interaction.followup.send("✅ Message de rôles (re)publié/reattaché.", ephemeral=True)
+    await interaction.followup.send(
+        "✅ Message de rôles (re)publié/reattaché.", ephemeral=True
+    )
+
 
 @bot.event
 async def on_ready():
@@ -1616,7 +2086,9 @@ async def on_ready():
     try:
         await bot.change_presence(
             status=discord.Status.online,
-            activity=discord.Activity(type=discord.ActivityType.playing, name=".gg/lerefuge57")
+            activity=discord.Activity(
+                type=discord.ActivityType.playing, name=".gg/lerefuge57"
+            ),
         )
     except Exception as e:
         logging.debug(f"presence failed: {e}")
@@ -1627,7 +2099,10 @@ async def on_ready():
         _radio_task = asyncio.create_task(_radio_loop())
         logging.info("[radio] Boucle radio initialisée.")
 
-    logging.info(f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)")
+    logging.info(
+        f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)"
+    )
+
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -1656,7 +2131,13 @@ async def on_message(message: discord.Message):
     # Annonce level-up (hors lock)
     if new_level > old_level:
         try:
-            await announce_level_up(message.guild, message.author, old_level, new_level, int(user["xp"]))
+            await announce_level_up(
+                message.guild,
+                message.author,
+                old_level,
+                new_level,
+                int(user["xp"]),
+            )
         except Exception as e:
             logging.error(f"Erreur envoi annonce niveau : {e}")
 
@@ -1666,6 +2147,7 @@ async def on_message(message: discord.Message):
     # Laisse la possibilité d'autres commandes prefix
     await bot.process_commands(message)
 
+
 @bot.event
 async def on_member_join(member: discord.Member):
     channel = bot.get_channel(CHANNEL_WELCOME)
@@ -1674,8 +2156,10 @@ async def on_member_join(member: discord.Member):
         return
     embed = discord.Embed(
         title="🎉 Bienvenue au Refuge !",
-        description=(f"{member.mention}, installe-toi bien !\n🕹️ Choisis ton rôle dans <#{CHANNEL_ROLES}> pour accéder à toutes les sections.\nRavi de t’avoir parmi nous 🎮"),
-        color=0x00ffcc
+        description=(
+            f"{member.mention}, installe-toi bien !\n🕹️ Choisis ton rôle dans <#{CHANNEL_ROLES}> pour accéder à toutes les sections.\nRavi de t’avoir parmi nous 🎮"
+        ),
+        color=0x00FFCC,
     )
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text=f"Membre #{len(member.guild.members)}")
@@ -1684,8 +2168,13 @@ async def on_member_join(member: discord.Member):
     except Exception as e:
         logging.error(f"Erreur envoi bienvenue : {e}")
 
+
 @bot.event
-async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+async def on_voice_state_update(
+    member: discord.Member,
+    before: discord.VoiceState,
+    after: discord.VoiceState,
+):
     uid = str(member.id)
 
     # ── Auto-rename: ancien et nouveau salon (no-op si AUTO_RENAME_ENABLED=False)
@@ -1718,7 +2207,9 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
                     user["level"] = get_level(int(user["xp"]))
-                incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
+                incr_daily_stat(
+                    member.guild.id, member.id, voice_min_inc=minutes_spent
+                )
 
     # Move de salon → clôture partielle + restart chrono
     elif before.channel and after.channel and before.channel != after.channel:
@@ -1732,7 +2223,9 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
                     user["xp"] += gained_xp
                     user["level"] = get_level(int(user["xp"]))
-                incr_daily_stat(member.guild.id, member.id, voice_min_inc=minutes_spent)
+                incr_daily_stat(
+                    member.guild.id, member.id, voice_min_inc=minutes_spent
+                )
         voice_times[uid] = now_utc
 
     # ── Suppression des salons temporaires vides (⚠️ jamais le salon radio)
@@ -1751,21 +2244,36 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     # ── Auto-mute/unmute sur le canal radio (uniquement humains)
     try:
         joined_radio = (
-            after.channel and after.channel.id == RADIO_VC_ID
+            after.channel
+            and after.channel.id == RADIO_VC_ID
             and (not before.channel or before.channel.id != RADIO_VC_ID)
         )
         left_radio = (
-            before.channel and before.channel.id == RADIO_VC_ID
+            before.channel
+            and before.channel.id == RADIO_VC_ID
             and (not after.channel or after.channel.id != RADIO_VC_ID)
         )
 
         if joined_radio:
-            if member.voice and member.voice.channel and member.voice.channel.id == RADIO_VC_ID:
-                await _force_mute(member, True, f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}")
+            if (
+                member.voice
+                and member.voice.channel
+                and member.voice.channel.id == RADIO_VC_ID
+            ):
+                await _force_mute(
+                    member,
+                    True,
+                    f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}",
+                )
         elif left_radio:
-            await _force_mute(member, False, f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}")
+            await _force_mute(
+                member,
+                False,
+                f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}",
+            )
     except Exception as e:
         logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
+
 
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
@@ -1783,7 +2291,7 @@ async def _setup_hook():
     asyncio.create_task(auto_backup_xp())
     asyncio.create_task(ensure_vc_buttons_message())
     asyncio.create_task(ensure_roles_buttons_message())
-    asyncio.create_task(daily_summary_loop())   # Résumé quotidien
+    asyncio.create_task(daily_summary_loop())  # Résumé quotidien
     asyncio.create_task(weekly_summary_loop())  # Résumé hebdo
     asyncio.create_task(auto_rename_poll())
 
@@ -1807,6 +2315,7 @@ async def _setup_hook():
         logging.info("⏰ Extension cogs.role_reminder chargée.")
     except Exception as e:
         logging.error(f"❌ Impossible de charger cogs.role_reminder: {e}")
+
 
 async def ensure_roles_buttons_message():
     """
@@ -1843,10 +2352,14 @@ async def ensure_roles_buttons_message():
                 await msg.pin(reason="Message rôles permanent")
             except Exception:
                 pass
-            logging.info("🔁 [roles] Message permanent réattaché via ID mémorisé.")
+            logging.info(
+                "🔁 [roles] Message permanent réattaché via ID mémorisé."
+            )
             return
         except Exception:
-            logging.debug("[roles] ID mémorisé introuvable — on va rechercher dans l'historique.")
+            logging.debug(
+                "[roles] ID mémorisé introuvable — on va rechercher dans l'historique."
+            )
 
     # 2) Chercher dans l'historique un message existant (footer ou legacy)
     found = None
@@ -1866,7 +2379,9 @@ async def ensure_roles_buttons_message():
             except Exception:
                 pass
             _save_roles_perma_msg_id(found.id)
-            logging.info("🔁 [roles] Message permanent réattaché (via recherche).")
+            logging.info(
+                "🔁 [roles] Message permanent réattaché (via recherche)."
+            )
             return
         except Exception as e:
             logging.error(f"[roles] Échec réattachement, on reposte: {e}")
@@ -1882,6 +2397,7 @@ async def ensure_roles_buttons_message():
         logging.info("📌 [roles] Message permanent publié (nouveau).")
     except Exception as e:
         logging.error(f"[roles] Erreur envoi message permanent: {e}")
+
 
 bot.setup_hook = _setup_hook
 
