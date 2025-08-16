@@ -24,6 +24,7 @@ WEIGHTS = [40, 40, 18, 2]
 def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
+
 class RouletteView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -111,3 +112,138 @@ class RouletteView(discord.ui.View):
             logging.error("[Roulette] announce_level_up échouée: %s", e)
 
         await interaction.response.send_message(msg, ephemeral=True)
+
+
+
+class RouletteCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.tz = ZoneInfo(PARIS_TZ)
+        self.store = RouletteStore(data_dir="/data")
+        self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
+        self._last_announced_state: Optional[bool] = None
+
+    def _poster_embed(self) -> discord.Embed:
+        if self.current_view_enabled:
+            desc_state = "✅ **Ouverte** de 10:00 à 22:00 (Europe/Paris)"
+            color = 0x2ECC71
+        else:
+            desc_state = "⛔ **Fermée** (10:00–22:00)"
+            color = 0xED4245
+        return discord.Embed(
+            title="🎰 Roulette",
+            description=(
+                f"{desc_state}\n\n"
+                "Clique pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
+                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant **24h** si tu gagnes **500 XP**.\n"
+                "🗓️ **Une seule tentative par jour.**"
+            ),
+            color=color
+        )
+
+    async def _delete_old_poster_message(self):
+        poster = self.store.get_poster()
+        if not poster:
+            return
+        ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            self.store.clear_poster()
+            return
+        try:
+            msg = await ch.fetch_message(int(poster.get("message_id", 0)))
+            await msg.delete()
+        except Exception:
+            pass
+        self.store.clear_poster()
+
+    async def _replace_poster_message(self):
+        await self._delete_old_poster_message()
+        ch = self.bot.get_channel(CHANNEL_ID)
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            logging.warning("[Roulette] Salon roulette introuvable.")
+            return
+        try:
+            if self.current_view_enabled:
+                msg = await ch.send(embed=self._poster_embed(), view=RouletteView())
+            else:
+                msg = await ch.send(embed=self._poster_embed())
+            self.store.set_poster(channel_id=str(ch.id), message_id=str(msg.id))
+            logging.info("[Roulette] Nouveau message roulette publié.")
+        except Exception as e:
+            logging.error(f"[Roulette] Échec envoi nouveau message roulette: {e}")
+
+    async def _post_state_message(self, opened: bool):
+        ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            logging.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
+            return
+        try:
+            content = None
+            allowed = None
+            if opened:
+                content = (
+                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant — "
+                    "vous pouvez jouer jusqu’à **22:00**."
+                )
+                allowed = discord.AllowedMentions(roles=True)
+            embed = discord.Embed(
+                title=f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}",
+                description=(
+                    "✅ La roulette est **ouverte** de **10:00 à 22:00** (Europe/Paris)." if opened else
+                    "⛔ La roulette est **fermée**. Rendez-vous **demain à 10:00** (Europe/Paris) !"
+                ),
+                color=0x2ECC71 if opened else 0xED4245
+            )
+            await ch.send(content=content, embed=embed, allowed_mentions=allowed)
+        except Exception as e:
+            logging.error("[Roulette] Post state message fail: %s", e)
+
+    @tasks.loop(seconds=60.0)
+    async def boundary_watch_loop(self):
+        try:
+            enabled_now = is_open_now(PARIS_TZ, 10, 22)
+            if self._last_announced_state is None or enabled_now != self._last_announced_state:
+                self.current_view_enabled = enabled_now
+                await self._replace_poster_message()
+                await self._post_state_message(enabled_now)
+                self._last_announced_state = enabled_now
+        except Exception as e:
+            logging.error("[Roulette] boundary_watch_loop erreur: %s", e)
+
+    @tasks.loop(minutes=5.0)
+    async def roulette_poster_watchdog(self):
+        try:
+            poster = self.store.get_poster()
+            if not poster:
+                await self._replace_poster_message()
+                return
+            ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
+            if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+                await self._replace_poster_message()
+                return
+            try:
+                await ch.fetch_message(int(poster.get("message_id", 0)))
+            except discord.NotFound:
+                await self._replace_poster_message()
+        except Exception as e:
+            logging.error(f"[Roulette] roulette_poster_watchdog erreur: {e}")
+
+    async def cog_load(self):
+        try:
+            self.bot.add_view(RouletteView())
+        except Exception as e:
+            logging.error("[Roulette] add_view échoué: %s", e)
+        self.boundary_watch_loop.start()
+        self.roulette_poster_watchdog.start()
+        try:
+            await self._replace_poster_message()
+            await self._post_state_message(self.current_view_enabled)
+        except Exception:
+            pass
+
+    async def cog_unload(self):
+        self.boundary_watch_loop.cancel()
+        self.roulette_poster_watchdog.cancel()
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(RouletteCog(bot))
