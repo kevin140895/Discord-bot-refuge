@@ -865,9 +865,15 @@ def _ff_headers() -> str:
 
 
 def _before_opts() -> str:
+    """FFmpeg arguments placed before the input URL.
+
+    -bufsize 64k: limit the internal buffer to reduce latency.
+    -probesize 32k: lower probe size so the stream starts faster.
+    """
     return (
         "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
         "-protocol_whitelist file,http,https,tcp,tls,crypto,pipe "
+        "-bufsize 64k -probesize 32k "
         f'-headers "{_ff_headers()}"'
     )
 
@@ -932,11 +938,16 @@ async def _play_once(guild: discord.Guild) -> None:
         pass
 
     try:
+        audio_opts = (
+            "-vn -ar 48000 -ac 2 -vbr on "
+            "-filter:a loudnorm"
+        )
+        # -filter:a loudnorm: normalise le volume audio (ajuster si besoin)
         source = discord.FFmpegOpusAudio(
             RADIO_STREAM_URL,
             bitrate=bitrate,
             before_options=_before_opts(),
-            options="-vn -ar 48000 -ac 2 -vbr on",
+            options=audio_opts,
         )
         logging.info(
             f"[radio] Source FFmpegOpusAudio prête ({bitrate} kbps)."
