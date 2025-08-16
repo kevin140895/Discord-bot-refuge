@@ -1,5 +1,5 @@
-import logging
 import discord
+import logging
 from discord.ext import commands
 
 async def ensure_channel_has_message(
