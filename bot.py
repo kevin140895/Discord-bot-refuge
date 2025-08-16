@@ -29,6 +29,7 @@ intents.voice_states = True
 intents.message_content = True
 intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+ID_SALON_COMPTEUR = 0  # ID du salon compteur de membres
 # ── XP CONFIG ───────────────────────────────────────────────
 MSG_XP = 8  # XP par message texte
 VOICE_XP_PER_MIN = 3  # XP par minute en vocal
@@ -2087,9 +2088,43 @@ async def on_ready():
         _radio_task = asyncio.create_task(_radio_loop())
         logging.info("[radio] Boucle radio initialisée.")
 
+    for g in bot.guilds:
+        await _update_member_counter(g)
+
     logging.info(
         f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)"
     )
+
+
+
+async def _update_member_counter(guild: discord.Guild) -> None:
+    """Met à jour le salon compteur de membres."""
+    if not bot.intents.members:
+        logging.warning("L'intent 'members' n'est pas activé.")
+        return
+    channel = guild.get_channel(ID_SALON_COMPTEUR)
+    if channel is None:
+        return
+    if not channel.permissions_for(guild.me).manage_channels:
+        logging.warning("Permission 'Gérer le salon' manquante pour le salon compteur.")
+        return
+    try:
+        await channel.edit(name=f"Membres : {guild.member_count}", position=0)
+        overwrites = channel.overwrites_for(guild.default_role)
+        overwrites.connect = False
+        await channel.set_permissions(guild.default_role, overwrite=overwrites)
+    except Exception as e:
+        logging.warning(f"Impossible de mettre à jour le salon compteur: {e}")
+
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    await _update_member_counter(member.guild)
+
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    await _update_member_counter(member.guild)
 
 
 @bot.event
