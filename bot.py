@@ -60,6 +60,7 @@ PLATFORM_ROLE_IDS = {
     "Mobile": ROLE_MOBILE,
 }
 TEMP_VC_CATEGORY = 1400559884117999687  # ID catégorie vocale temporaire
+TEMP_VC_TEMPLATE_NAME = "template"
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
 RADIO_MUTED_ROLE_ID = 1403510368340410550  # rôle à mute dans le canal radio
@@ -629,6 +630,33 @@ async def _rebuild_temp_vc_ids() -> None:
         if VOC_PATTERN.match(base):
             TEMP_VC_IDS.add(ch.id)
     save_temp_vc_ids(TEMP_VC_IDS)
+
+
+async def ensure_temp_vc_template(bot: commands.Bot) -> None:
+    """Garantit la présence d'un salon vocal modèle."""
+    category = bot.get_channel(TEMP_VC_CATEGORY)
+    if not isinstance(category, discord.CategoryChannel):
+        logging.warning(
+            "Catégorie vocale temporaire introuvable (%s)", TEMP_VC_CATEGORY
+        )
+        return
+    template = discord.utils.get(category.voice_channels, name=TEMP_VC_TEMPLATE_NAME)
+    if template:
+        return
+    overwrites = {
+        category.guild.default_role: PermissionOverwrite(connect=False, speak=False)
+    }
+    try:
+        await category.guild.create_voice_channel(
+            TEMP_VC_TEMPLATE_NAME,
+            category=category,
+            bitrate=96000,
+            user_limit=0,
+            overwrites=overwrites,
+            reason="Création du template de salon vocal temporaire",
+        )
+    except Exception as exc:
+        logging.warning("Impossible de créer le salon template: %s", exc)
 
 
 # Anti-spam renommage
@@ -2025,16 +2053,23 @@ class VCButtonView(discord.ui.View):
                     ephemeral=True,
                 )
 
-        # Création du vocal + permission membre
+        # Création du vocal à partir du template + permission membre
         name = next_vc_name(guild, profile)
-        overwrites = {member: PermissionOverwrite(connect=True, speak=True)}
+        template = discord.utils.get(
+            category.voice_channels, name=TEMP_VC_TEMPLATE_NAME
+        )
+        if template is None:
+            return await interaction.response.send_message(
+                "❌ Salon template introuvable.", ephemeral=True
+            )
         try:
-            vc = await guild.create_voice_channel(
+            vc = await template.clone(
                 name=name,
-                category=category,
-                overwrites=overwrites,
                 reason=f"Salon temporaire ({profile}) demandé depuis le lobby par {member}",
             )
+            if vc.category != category:
+                await vc.edit(category=category)
+            await vc.set_permissions(member, connect=True, speak=True)
             TEMP_VC_IDS.add(vc.id)
             save_temp_vc_ids(TEMP_VC_IDS)
         except Exception as e:
@@ -2164,6 +2199,7 @@ async def on_ready():
         "Premier message dans ce salon !",
     )
 
+    await ensure_temp_vc_template(bot)
     await delete_untracked_temp_vcs(bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
     await _rebuild_temp_vc_ids()
 
