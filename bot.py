@@ -13,6 +13,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from imageio_ffmpeg import get_ffmpeg_exe
 import yt_dlp
+from utils.discord_utils import ensure_channel_has_message
 
 
 # ─────────────────────── ENV & LOGGING ─────────────────────
@@ -83,6 +84,7 @@ CHANNEL_WELCOME = 1400550333796716574
 LOBBY_TEXT_CHANNEL = 1402258805533970472
 TIKTOK_ANNOUNCE_CH = 1400552164979507263
 ACTIVITY_SUMMARY_CH = 1400552164979507263
+ROULETTE_CHANNEL_ID = 1405170020748755034
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
@@ -2095,6 +2097,12 @@ async def on_ready():
         )
     except Exception as e:
         logging.debug(f"presence failed: {e}")
+
+    await ensure_channel_has_message(
+        bot,
+        ROULETTE_CHANNEL_ID,
+        "Premier message dans ce salon !",
+    )
 
     # ─ DÉMARRAGE RADIO ─
     global _radio_task
