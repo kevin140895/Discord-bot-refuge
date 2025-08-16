@@ -5,7 +5,7 @@ import asyncio
 import logging
 import random
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any
 
 import discord
@@ -46,8 +46,11 @@ REMINDER_TEMPLATE = (
 )
 
 # ─────────────────────── HELPERS ───────────────────────
+
+
 def _now_tz() -> datetime:
     return datetime.now(PARIS_TZ) if PARIS_TZ else datetime.utcnow()
+
 
 def _iso(dt: datetime) -> str:
     try:
@@ -55,8 +58,10 @@ def _iso(dt: datetime) -> str:
     except Exception:
         return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
+
 def _ensure_data_dir():
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+
 
 def _read_json(path: str) -> Dict[str, Any]:
     p = Path(path)
@@ -68,12 +73,19 @@ def _read_json(path: str) -> Dict[str, Any]:
         logging.error(f"[rolescan] JSON corrompu: {path}")
         return {}
 
+
 def _write_json(path: str, data: Dict[str, Any]):
     _ensure_data_dir()
-    Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    Path(path).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
 
 def user_without_chosen_role(member: discord.Member) -> bool:
-    """True si le membre n'a aucun rôle hors @everyone et hors IGNORED_ROLE_IDS."""
+    """True si le membre n'a aucun rôle hors @everyone
+    et hors IGNORED_ROLE_IDS."""
+
     for r in member.roles:
         if r.is_default():  # @everyone
             continue
@@ -82,9 +94,14 @@ def user_without_chosen_role(member: discord.Member) -> bool:
         return False
     return True
 
+
 # ─────────────────────── COG ───────────────────────
+
+
 class RoleReminderCog(commands.Cog):
-    """Rappels 72h pour rôles + purge des rappels à +24h, avec persistance JSON."""
+    """Rappels 72h pour rôles + purge des rappels à +24h,
+    avec persistance JSON."""
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         # {guild_id: {user_id: {message_id, channel_id, created_at}}}
@@ -95,17 +112,21 @@ class RoleReminderCog(commands.Cog):
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
     # ── State ──
+
     def _load_state(self):
         self.reminders = _read_json(ROLE_REMINDERS_FILE) or {}
         # normalisation
         for g in list(self.reminders.keys()):
             for u in list(self.reminders[g].keys()):
-                self.reminders[g][u].setdefault("channel_id", REMINDER_CHANNEL_ID)
+                self.reminders[g][u].setdefault(
+                    "channel_id", REMINDER_CHANNEL_ID
+                )
 
     def _save_state(self):
         _write_json(ROLE_REMINDERS_FILE, self.reminders)
 
     # ── Loops ──
+
     async def _scan_loop(self):
         await self.bot.wait_until_ready()
         await asyncio.sleep(5)  # laisse le cache de membres arriver
@@ -126,10 +147,18 @@ class RoleReminderCog(commands.Cog):
             await asyncio.sleep(CLEANUP_TICK_MIN * 60)
 
     # ── Core actions ──
-    async def _run_scan_once(self, *, invoked_by_cmd: bool = False, guild: discord.Guild | None = None):
+
+    async def _run_scan_once(
+        self,
+        *,
+        invoked_by_cmd: bool = False,
+        guild: discord.Guild | None = None,
+    ):
         now = _now_tz()
         guilds = [guild] if guild else list(self.bot.guilds)
-        logging.info(f"[rolescan] ▶ Début scan (invoked_by_cmd={invoked_by_cmd})")
+        logging.info(
+            f"[rolescan] ▶ Début scan (invoked_by_cmd={invoked_by_cmd})"
+        )
 
         for g in guilds:
             if not g:
@@ -137,15 +166,25 @@ class RoleReminderCog(commands.Cog):
 
             ch = g.get_channel(REMINDER_CHANNEL_ID)
             if not isinstance(ch, discord.TextChannel):
-                logging.warning(f"[rolescan] Salon {REMINDER_CHANNEL_ID} introuvable (guild {g.id})")
+                logging.warning(
+                    f"[rolescan] Salon {REMINDER_CHANNEL_ID} introuvable "
+                    f"(guild {g.id})"
+                )
                 continue
 
             me = g.me or g.get_member(self.bot.user.id)
             if not me:
                 continue
             perms = ch.permissions_for(me)
-            if not (perms.send_messages and perms.manage_messages and perms.read_message_history):
-                logging.warning(f"[rolescan] Permissions insuffisantes dans {ch.id} (guild {g.id})")
+            if not (
+                perms.send_messages
+                and perms.manage_messages
+                and perms.read_message_history
+            ):
+                logging.warning(
+                    f"[rolescan] Permissions insuffisantes dans {ch.id} "
+                    f"(guild {g.id})"
+                )
                 continue
 
             g_key = str(g.id)
@@ -162,7 +201,9 @@ class RoleReminderCog(commands.Cog):
                 rec = self.reminders[g_key].get(u_key)
                 if rec:
                     try:
-                        created_at = datetime.fromisoformat(rec.get("created_at"))
+                        created_at = datetime.fromisoformat(
+                            rec.get("created_at")
+                        )
                     except Exception:
                         created_at = now
                     age_h = (now - created_at).total_seconds() / 3600
@@ -174,11 +215,15 @@ class RoleReminderCog(commands.Cog):
                 try:
                     text = REMINDER_TEMPLATE.format(
                         mention=member.mention,
-                        role_choice_ch=ROLE_CHOICE_CHANNEL_ID
+                        role_choice_ch=ROLE_CHOICE_CHANNEL_ID,
                     )
                     msg = await ch.send(
                         text,
-                        allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False)
+                        allowed_mentions=discord.AllowedMentions(
+                            users=True,
+                            roles=False,
+                            everyone=False,
+                        ),
                     )
                     self.reminders[g_key][u_key] = {
                         "message_id": msg.id,
@@ -189,15 +234,20 @@ class RoleReminderCog(commands.Cog):
                     sent += 1
                     await asyncio.sleep(random.uniform(SLEEP_MIN, SLEEP_MAX))
                 except Exception as e:
-                    logging.error(f"[rolescan] Envoi rappel échoué pour {member}: {e}")
+                    logging.error(
+                        f"[rolescan] Envoi rappel échoué pour {member}: {e}"
+                    )
 
-            logging.info(f"[rolescan] Guild {g.id} — rappels envoyés: {sent}")
+            logging.info(
+                f"[rolescan] Guild {g.id} — rappels envoyés: {sent}"
+            )
 
         logging.info("[rolescan] ■ Fin scan")
 
     async def _run_cleanup_tick(self):
         now = _now_tz()
-        to_delete: list[tuple[discord.TextChannel, int, str, str]] = []  # (channel, msg_id, g_key, u_key)
+        # (channel, msg_id, g_key, u_key)
+        to_delete: list[tuple[discord.TextChannel, int, str, str]] = []
 
         for g in self.bot.guilds:
             g_key = str(g.id)
@@ -211,7 +261,9 @@ class RoleReminderCog(commands.Cog):
 
             for u_key, rec in list(g_map.items()):
                 try:
-                    created_at = datetime.fromisoformat(rec.get("created_at"))
+                    created_at = datetime.fromisoformat(
+                        rec.get("created_at")
+                    )
                 except Exception:
                     created_at = now
                 age_h = (now - created_at).total_seconds() / 3600
@@ -220,7 +272,8 @@ class RoleReminderCog(commands.Cog):
 
                 member = g.get_member(int(u_key))
                 if member and not user_without_chosen_role(member):
-                    # a pris un rôle → on purge l’état (message laissé tel quel si déjà supprimé)
+                    # a pris un rôle → on purge l’état
+                    # (message laissé tel quel si déjà supprimé)
                     g_map.pop(u_key, None)
                     continue
 
@@ -240,49 +293,82 @@ class RoleReminderCog(commands.Cog):
                 self._save_state()
                 await asyncio.sleep(random.uniform(SLEEP_MIN, SLEEP_MAX))
             except Exception as e:
-                logging.error(f"[rolescan] Suppression message {msg_id} échouée: {e}")
+                logging.error(
+                    f"[rolescan] Suppression message {msg_id} échouée: {e}"
+                )
 
     # ── Slash commands admin ──
-    group = app_commands.Group(name="rolescan", description="Gestion des rappels de rôles")
 
-    @group.command(name="now", description="Lancer un scan immédiat")
+    group = app_commands.Group(
+        name="rolescan",
+        description="Gestion des rappels de rôles",
+    )
+
+    @group.command(
+        name="now",
+        description="Lancer un scan immédiat",
+    )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def rolescan_now(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         await self._run_scan_once(invoked_by_cmd=True, guild=interaction.guild)
         await interaction.followup.send("✅ Scan lancé.", ephemeral=True)
 
-    @group.command(name="status", description="Voir les rappels actifs")
+    @group.command(
+        name="status",
+        description="Voir les rappels actifs",
+    )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def rolescan_status(self, interaction: discord.Interaction):
         g = interaction.guild
         g_key = str(g.id)
         g_map = self.reminders.get(g_key, {})
         if not g_map:
-            await interaction.response.send_message("Aucun rappel actif.", ephemeral=True)
+            await interaction.response.send_message(
+                "Aucun rappel actif.",
+                ephemeral=True,
+            )
             return
 
         now = _now_tz()
         lines = []
         for u_key, rec in g_map.items():
             try:
-                created_at = datetime.fromisoformat(rec.get("created_at"))
+                created_at = datetime.fromisoformat(
+                    rec.get("created_at")
+                )
             except Exception:
                 created_at = now
             age_h = (now - created_at).total_seconds() / 3600
             member = g.get_member(int(u_key))
             name = member.mention if member else f"`{u_key}`"
-            lines.append(f"- {name} • âge: {age_h:.1f}h • msg: `{rec.get('message_id')}`")
+            lines.append(
+                f"- {name} • âge: {age_h:.1f}h • msg: "
+                f"`{rec.get('message_id')}`"
+            )
 
         out = "\n".join(lines[:50])
         if len(lines) > 50:
             out += f"\n… (+{len(lines)-50} autres)"
-        await interaction.response.send_message(out or "Aucun rappel actif.", ephemeral=True)
+        await interaction.response.send_message(
+            out or "Aucun rappel actif.",
+            ephemeral=True,
+        )
 
-    @group.command(name="reset_user", description="Purger l’état d’un utilisateur (supprime son message si présent)")
+    @group.command(
+        name="reset_user",
+        description=(
+            "Purger l’état d’un utilisateur "
+            "(supprime son message si présent)"
+        ),
+    )
     @app_commands.describe(user="Utilisateur à réinitialiser")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def rolescan_reset_user(self, interaction: discord.Interaction, user: discord.Member):
+    async def rolescan_reset_user(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+    ):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         g = interaction.guild
@@ -290,7 +376,10 @@ class RoleReminderCog(commands.Cog):
         u_key = str(user.id)
         rec = self.reminders.get(g_key, {}).get(u_key)
         if not rec:
-            await interaction.followup.send("Aucun état enregistré pour cet utilisateur.", ephemeral=True)
+            await interaction.followup.send(
+                "Aucun état enregistré pour cet utilisateur.",
+                ephemeral=True,
+            )
             return
 
         ch = g.get_channel(REMINDER_CHANNEL_ID)
