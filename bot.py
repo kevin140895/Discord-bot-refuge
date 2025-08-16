@@ -2129,6 +2129,18 @@ async def on_ready():
     await delete_untracked_temp_vcs(bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
     await _rebuild_temp_vc_ids()
 
+    # Ajuste le bitrate du salon radio selon la limite du serveur
+    channel = bot.get_channel(RADIO_VC_ID)
+    if isinstance(channel, discord.VoiceChannel):
+        target = min(128000, channel.guild.bitrate_limit)
+        try:
+            await channel.edit(bitrate=target)
+            logging.info(f"[radio] bitrate réglé sur {target} bps")
+        except discord.HTTPException as e:
+            logging.warning(f"[radio] impossible de régler le bitrate : {e}")
+    else:
+        logging.warning("[radio] salon radio introuvable")
+
     # ─ DÉMARRAGE RADIO ─
     global _radio_task
     if _radio_task is None or _radio_task.done():
