@@ -1446,7 +1446,7 @@ async def auto_rename_poll():
             logging.debug(f"auto_rename_poll error: {e}")
         await asyncio.sleep(20)  # toutes les 20s
 
-async def vc_buttons_watchdog(interval_seconds: int = 300):
+async def vc_buttons_watchdog(interval_seconds: int = 120):
     """Vérifie périodiquement que le message permanent existe et est à jour."""
     await bot.wait_until_ready()
     while not bot.is_closed():
