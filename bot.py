@@ -77,6 +77,9 @@ RADIO_VC_ID: int = 1405695147114758245
 RADIO_MUTED_ROLE_ID = 1403510368340410550  # rôle à mute dans le canal radio
 RADIO_STREAM_URL = "http://stream.laut.fm/englishrap"
 XP_VIEWER_ROLE_ID = 1403510368340410550  # rôle autorisé à voir l'XP serveur
+TOP_MSG_ROLE_ID = 1406412171965104208  # Écrivain du Refuge
+TOP_VC_ROLE_ID = 1406412383878119485   # Voix du Refuge
+MVP_ROLE_ID = 1406412507433795595      # MVP du Refuge
 
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
@@ -1549,6 +1552,47 @@ async def ensure_vc_buttons_message():
         logging.error(f"Erreur envoi message permanent: {e}")
 
 
+async def update_daily_roles(
+    guild: discord.Guild, top_msg, top_vc, top_mvp
+) -> None:
+    """Met à jour les rôles quotidiens pour les gagnants."""
+    role_map = [
+        (TOP_MSG_ROLE_ID, top_msg),
+        (TOP_VC_ROLE_ID, top_vc),
+        (MVP_ROLE_ID, top_mvp),
+    ]
+
+    for role_id, ranking in role_map:
+        role = guild.get_role(role_id)
+        if not role or not ranking:
+            continue
+        winner_id = int(ranking[0][0])
+        winner = guild.get_member(winner_id)
+        if not winner:
+            continue
+
+        # Suppression du rôle pour les précédents détenteurs
+        for member in list(role.members):
+            try:
+                await member.remove_roles(role, reason="Daily role reset")
+            except discord.Forbidden:
+                # Gestion d'erreur: permissions manquantes
+                logging.warning(
+                    f"Permission manquante pour retirer {role.id} à {member.id}"
+                )
+
+        # Attribution du rôle au gagnant
+        try:
+            await winner.add_roles(
+                role, reason="Top message/vocal/MVP de la journée"
+            )
+        except discord.Forbidden:
+            # Gestion d'erreur: impossible d'attribuer
+            logging.error(
+                f"Permission manquante pour attribuer {role.id} à {winner.id}"
+            )
+
+
 async def daily_summary_loop():
     """
     Chaque minuit (Europe/Paris), poste le résumé d’activité du jour écoulé pour CHAQUE serveur.
@@ -1653,6 +1697,8 @@ async def daily_summary_loop():
                                 everyone=True
                             ),
                         )
+                    if top_msg and top_vc and top_mvp:
+                        await update_daily_roles(guild, top_msg, top_vc, top_mvp)
                 except Exception as e:
                     logging.error(
                         f"Envoi résumé quotidien échoué (guild {guild.id}): {e}"
