@@ -7,8 +7,8 @@ def is_open_now(
 ) -> bool:
     """Check if the current time falls within a daily window.
 
-    Vérifie si l'heure locale (``tz``) est comprise entre ``start_h``:00 inclus et
-    ``end_h``:00 exclus.
+    Vérifie si l'heure locale (``tz``) est comprise
+    entre ``start_h``:00 inclus et ``end_h``:00 exclus.
 
     Args:
         tz: IANA time zone name or :class:`~zoneinfo.ZoneInfo` object.
@@ -16,15 +16,18 @@ def is_open_now(
         end_h: Hour (0-23) marking the end of the window, exclusive.
 
     Returns:
-        ``True`` if the current time in ``tz`` is between ``start_h`` and ``end_h``.
+        ``True`` if the current time in ``tz`` is between
+        ``start_h`` and ``end_h``.
 
     Examples:
         >>> is_open_now("UTC", 9, 17)
         True  # when run at 10:00 UTC
 
     Notes:
-        * The window does not wrap past midnight; ``start_h`` must be < ``end_h``.
-        * A :class:`zoneinfo.ZoneInfoNotFoundError` is raised for unknown time zones.
+        * The window does not wrap past midnight; ``start_h`` must be
+          < ``end_h``.
+        * A :class:`zoneinfo.ZoneInfoNotFoundError` is raised for
+          unknown time zones.
     """
     tzinfo = ZoneInfo(tz) if isinstance(tz, str) else tz
     now = datetime.now(tzinfo)
