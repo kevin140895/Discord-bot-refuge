@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 from imageio_ffmpeg import get_ffmpeg_exe
 import yt_dlp
 from utils.discord_utils import ensure_channel_has_message
+from utils.temp_vc_cleanup import delete_untracked_temp_vcs
+from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
 
 
 # ─────────────────────── ENV & LOGGING ─────────────────────
@@ -130,7 +132,7 @@ def _is_roles_permanent_message(msg: discord.Message) -> bool:
 voice_times: dict[str, datetime] = (
     {}
 )  # user_id -> datetime d'entrée (naïf UTC)
-TEMP_VC_IDS: set[int] = set()  # ids des salons vocaux temporaires
+TEMP_VC_IDS: set[int] = set(load_temp_vc_ids())  # ids des salons vocaux temporaires
 AUTO_MUTED_USERS: set[int] = set()  # utilisateurs auto-mute dans le canal radio
 
 # FFmpeg: privilégier le binaire système si présent
@@ -611,6 +613,22 @@ def _target_name(base: str, game: str | None) -> str:
 
 def _count_temp_vc_in_category(cat: discord.CategoryChannel) -> int:
     return sum(1 for ch in cat.voice_channels if ch.id in TEMP_VC_IDS)
+
+
+async def _rebuild_temp_vc_ids() -> None:
+    """Reconstruit ``TEMP_VC_IDS`` à partir des salons présents."""
+    category = bot.get_channel(TEMP_VC_CATEGORY)
+    if not isinstance(category, discord.CategoryChannel):
+        logging.warning(
+            "Catégorie vocale temporaire introuvable (%s)", TEMP_VC_CATEGORY
+        )
+        return
+    TEMP_VC_IDS.clear()
+    for ch in category.voice_channels:
+        base = ch.name.split("•", 1)[0].strip()
+        if VOC_PATTERN.match(base):
+            TEMP_VC_IDS.add(ch.id)
+    save_temp_vc_ids(TEMP_VC_IDS)
 
 
 # Anti-spam renommage
@@ -2018,6 +2036,7 @@ class VCButtonView(discord.ui.View):
                 reason=f"Salon temporaire ({profile}) demandé depuis le lobby par {member}",
             )
             TEMP_VC_IDS.add(vc.id)
+            save_temp_vc_ids(TEMP_VC_IDS)
         except Exception as e:
             logging.error(f"Erreur création VC: {e}")
             return await interaction.response.send_message(
@@ -2036,6 +2055,7 @@ class VCButtonView(discord.ui.View):
             except Exception as de:
                 logging.error(f"Rollback delete failed: {de}")
             TEMP_VC_IDS.discard(vc.id)
+            save_temp_vc_ids(TEMP_VC_IDS)
             return await interaction.response.send_message(
                 "❌ Je n’ai pas pu te déplacer. Vérifie que tu es bien **dans le vocal lobby** et réessaie.",
                 ephemeral=True,
@@ -2143,6 +2163,9 @@ async def on_ready():
         ROULETTE_CHANNEL_ID,
         "Premier message dans ce salon !",
     )
+
+    await delete_untracked_temp_vcs(bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
+    await _rebuild_temp_vc_ids()
 
     # ─ DÉMARRAGE RADIO ─
     global _radio_task
@@ -2323,6 +2346,7 @@ async def on_voice_state_update(
         try:
             await before.channel.delete(reason="Salon temporaire vide")
             TEMP_VC_IDS.discard(before.channel.id)
+            save_temp_vc_ids(TEMP_VC_IDS)
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
