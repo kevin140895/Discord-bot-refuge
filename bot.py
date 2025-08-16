@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 from discord import PermissionOverwrite, app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from imageio_ffmpeg import get_ffmpeg_exe
 import yt_dlp
@@ -41,7 +41,14 @@ intents.voice_states = True
 intents.message_content = True
 intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-ID_SALON_COMPTEUR = 0  # ID du salon compteur de membres
+
+# ── Salons statistiques du serveur ─────────────────────────
+STATS_CATEGORY_ID = 1406408038692294676  # Catégorie "📊 Statistiques"
+STATS_CHANNELS = {
+    "members": "👥 Membres",
+    "online": "🟢 En ligne",
+    "voice": "🎮 En vocal",
+}
 # ── XP CONFIG ───────────────────────────────────────────────
 MSG_XP = 8  # XP par message texte
 VOICE_XP_PER_MIN = 3  # XP par minute en vocal
@@ -2066,42 +2073,87 @@ async def on_ready():
         logging.info("[radio] Boucle radio initialisée.")
 
     for g in bot.guilds:
-        await _update_member_counter(g)
+        await _refresh_stats_channels(g)
+
+    if not _stats_update_loop.is_running():
+        _stats_update_loop.start()
 
     logging.info(
         f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)"
     )
 
 
+async def _ensure_stats_channels(guild: discord.Guild) -> dict[str, discord.VoiceChannel]:
+    """Crée les salons de statistiques si nécessaire et les renvoie."""
+    category = guild.get_channel(STATS_CATEGORY_ID)
+    if not isinstance(category, discord.CategoryChannel):
+        logging.warning(
+            f"Catégorie statistiques introuvable ({STATS_CATEGORY_ID}) pour {guild.name}."
+        )
+        return {}
 
-async def _update_member_counter(guild: discord.Guild) -> None:
-    """Met à jour le salon compteur de membres."""
-    if not bot.intents.members:
-        logging.warning("L'intent 'members' n'est pas activé.")
+    channels: dict[str, discord.VoiceChannel] = {}
+    for key, base_name in STATS_CHANNELS.items():
+        channel = next(
+            (c for c in category.voice_channels if c.name.startswith(base_name)),
+            None,
+        )
+        if channel is None:
+            channel = await guild.create_voice_channel(base_name, category=category)
+            try:
+                overwrites = channel.overwrites_for(guild.default_role)
+                overwrites.connect = False
+                await channel.set_permissions(
+                    guild.default_role, overwrite=overwrites
+                )
+            except Exception as e:
+                logging.warning(
+                    f"Impossible de configurer les permissions du salon stats: {e}"
+                )
+        channels[key] = channel
+    return channels
+
+
+async def _refresh_stats_channels(guild: discord.Guild) -> None:
+    """Met à jour les noms des salons statistiques."""
+    channels = await _ensure_stats_channels(guild)
+    if not channels:
         return
-    channel = guild.get_channel(ID_SALON_COMPTEUR)
-    if channel is None:
-        return
-    if not channel.permissions_for(guild.me).manage_channels:
-        logging.warning("Permission 'Gérer le salon' manquante pour le salon compteur.")
-        return
+
+    total_members = guild.member_count
+    online_members = sum(
+        1 for m in guild.members if m.status != discord.Status.offline
+    )
+    voice_members = sum(1 for m in guild.members if m.voice)
+
     try:
-        await channel.edit(name=f"Membres : {guild.member_count}", position=0)
-        overwrites = channel.overwrites_for(guild.default_role)
-        overwrites.connect = False
-        await channel.set_permissions(guild.default_role, overwrite=overwrites)
+        await channels["members"].edit(
+            name=f"{STATS_CHANNELS['members']} : {total_members}"
+        )
+        await channels["online"].edit(
+            name=f"{STATS_CHANNELS['online']} : {online_members}"
+        )
+        await channels["voice"].edit(
+            name=f"{STATS_CHANNELS['voice']} : {voice_members}"
+        )
     except Exception as e:
-        logging.warning(f"Impossible de mettre à jour le salon compteur: {e}")
+        logging.warning(f"Impossible de mettre à jour les salons de stats: {e}")
+
+
+@tasks.loop(minutes=10)
+async def _stats_update_loop() -> None:
+    for guild in bot.guilds:
+        await _refresh_stats_channels(guild)
 
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    await _update_member_counter(member.guild)
+    await _refresh_stats_channels(member.guild)
 
 
 @bot.event
 async def on_member_remove(member: discord.Member):
-    await _update_member_counter(member.guild)
+    await _refresh_stats_channels(member.guild)
 
 
 @bot.event
