@@ -233,13 +233,16 @@ class RouletteCog(commands.Cog):
             self.bot.add_view(RouletteView())
         except Exception as e:
             logging.error("[Roulette] add_view échoué: %s", e)
+        self.roles_cleanup_loop.start()    
         self.boundary_watch_loop.start()
         self.roulette_poster_watchdog.start()
+        self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
+        self._last_announced_state = self.current_view_enabled
         try:
             await self._replace_poster_message()
             await self._post_state_message(self.current_view_enabled)
         except Exception:
-            pass
+            logging.warning("[Roulette] Init failed: %s", e)
 
     async def cog_unload(self):
         self.boundary_watch_loop.cancel()
