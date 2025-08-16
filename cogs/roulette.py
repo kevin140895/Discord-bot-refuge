@@ -215,12 +215,26 @@ class RouletteCog(commands.Cog):
                 f"[Roulette] Échec envoi nouveau message roulette: {e}"
             )
 
+    async def _ensure_poster_message(self):
+        poster = self.store.get_poster()
+        if not poster:
+            await self._replace_poster_message()
+            return
+        ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            await self._replace_poster_message()
+            return
+        try:
+            await ch.fetch_message(int(poster.get("message_id", 0)))
+        except discord.NotFound:
+            await self._replace_poster_message()
+
     async def _init_after_ready(self):
         await self.bot.wait_until_ready()
         self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
         self._last_announced_state = self.current_view_enabled
         try:
-            await self._replace_poster_message()
+            await self._ensure_poster_message()
             await self._post_state_message(self.current_view_enabled)
         except Exception as err:
             logging.warning("[Roulette] Init failed: %s", err)
