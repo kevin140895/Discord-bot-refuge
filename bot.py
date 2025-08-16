@@ -1510,36 +1510,13 @@ async def ensure_vc_buttons_message():
 
     view = VCButtonView()
 
-
-# Texte visible par les membres (sans le marqueur)
-display_text = (
-    "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
-    "• 💻 PC\n"
-    "• 🎮 Consoles\n"
-    "• 📱 Mobile\n"
-    "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
-)
-embed = discord.Embed(description=display_text, color=0x00C896)
-embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)
-
-
-# ─────────────────────── TÂCHES DE FOND ────────────────────
-async def ensure_vc_buttons_message():
-    await bot.wait_until_ready()
-    channel = bot.get_channel(LOBBY_TEXT_CHANNEL)
-    if not isinstance(channel, discord.TextChannel):
-        logging.warning(f"❌ Salon lobby introuvable: {LOBBY_TEXT_CHANNEL}")
-        return
-
-    view = VCButtonView()
-
     # Texte visible par les membres (sans le marqueur)
     display_text = (
-        "🎮 **Choisis ta plateforme** (exclusives) **et** active les notifications si tu veux être ping :\n"
+        "🎮 Rejoins d'abord <#1405630965803520221> puis choisis ton salon :\n"
         "• 💻 PC\n"
+        "• 🔄 Crossplay\n"
         "• 🎮 Consoles\n"
-        "• 📱 Mobile\n"
-        "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
+        "• 💬 Chat"
     )
     embed = discord.Embed(description=display_text, color=0x00C896)
 
