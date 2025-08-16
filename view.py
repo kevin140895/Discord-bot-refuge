@@ -23,11 +23,11 @@ class PlayerTypeView(discord.ui.View):
 
     # ---------- Logique commune ----------
     async def _assign_role(self, interaction, role_id: int, label: str):
-        guild   = interaction.guild
-        member  = interaction.user
+        guild = interaction.guild
+        member = interaction.user
 
-        role        = guild.get_role(role_id)
-        other_role  = guild.get_role(
+        role = guild.get_role(role_id)
+        other_role = guild.get_role(
             ROLE_PC if role_id == ROLE_CONSOLE else ROLE_CONSOLE
         )
 
