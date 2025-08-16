@@ -145,9 +145,8 @@ def _is_roles_permanent_message(msg: discord.Message) -> bool:
 
 
 # ─────────────────────── ETATS RUNTIME ──────────────────────
-voice_times: dict[str, datetime] = (
-    {}
-)  # user_id -> datetime d'entrée (naïf UTC)
+# voice_times et XP sont accumulés en mémoire puis sauvegardés périodiquement
+voice_times: dict[str, datetime] = {}  # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set(load_temp_vc_ids())  # ids des salons vocaux temporaires
 AUTO_MUTED_USERS: set[int] = set()  # utilisateurs auto-mute dans le canal radio
 
@@ -2291,7 +2290,6 @@ async def on_voice_state_update(
     # ⛔ Ignore entièrement les utilisateurs bot pour l'XP vocal / chrono / stats
     if member.bot:
         voice_times.pop(uid, None)  # nettoie un éventuel chrono
-        save_voice_times(voice_times)
         return
 
     # ── Chrono XP (UTC aware)
@@ -2300,7 +2298,6 @@ async def on_voice_state_update(
     # Connexion au vocal → start chrono
     if after.channel and not before.channel:
         voice_times[uid] = now_utc
-        save_voice_times(voice_times)
 
     # Déconnexion du vocal → calcule minutes + XP
     elif before.channel and not after.channel:
@@ -2317,8 +2314,7 @@ async def on_voice_state_update(
                 incr_daily_stat(
                     member.guild.id, member.id, voice_min_inc=minutes_spent
                 )
-                await xp_flush_cache_to_disk()
-        save_voice_times(voice_times)
+        
 
     # Move de salon → clôture partielle + restart chrono
     elif before.channel and after.channel and before.channel != after.channel:
@@ -2335,9 +2331,7 @@ async def on_voice_state_update(
                 incr_daily_stat(
                     member.guild.id, member.id, voice_min_inc=minutes_spent
                 )
-                await xp_flush_cache_to_disk()
         voice_times[uid] = now_utc
-        save_voice_times(voice_times)
 
     # ── Suppression des salons temporaires vides (⚠️ jamais le salon radio)
     if (
