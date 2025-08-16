@@ -58,6 +58,7 @@ PLATFORM_ROLE_IDS = {
 TEMP_VC_CATEGORY = 1400559884117999687  # ID catégorie vocale temporaire
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
+RADIO_MUTED_ROLE_ID = 1403510368340410550  # rôle à mute dans le canal radio
 RADIO_STREAM_URL = "http://stream.laut.fm/englishrap"
 
 
@@ -126,6 +127,7 @@ voice_times: dict[str, datetime] = (
     {}
 )  # user_id -> datetime d'entrée (naïf UTC)
 TEMP_VC_IDS: set[int] = set()  # ids des salons vocaux temporaires
+AUTO_MUTED_USERS: set[int] = set()  # utilisateurs auto-mute dans le canal radio
 
 # FFmpeg: privilégier le binaire système si présent
 FFMPEG_PATH = (
@@ -2305,6 +2307,38 @@ async def on_voice_state_update(
             )
     except Exception as e:
         logging.error(f"[radio] Exception dans on_voice_state_update: {e}")
+
+    # ── Auto mute/unmute pour un rôle spécifique dans le canal radio
+    try:
+        has_role = member.get_role(RADIO_MUTED_ROLE_ID) is not None
+        joined_target = (
+            has_role
+            and after.channel
+            and after.channel.id == RADIO_VC_ID
+            and (not before.channel or before.channel.id != RADIO_VC_ID)
+        )
+        left_target = (
+            has_role
+            and before.channel
+            and before.channel.id == RADIO_VC_ID
+            and (not after.channel or after.channel.id != RADIO_VC_ID)
+            and member.id in AUTO_MUTED_USERS
+        )
+
+        if joined_target:
+            await member.edit(
+                mute=True,
+                reason=f"Auto mute rôle {RADIO_MUTED_ROLE_ID} dans le canal radio {RADIO_VC_ID}",
+            )
+            AUTO_MUTED_USERS.add(member.id)
+        elif left_target:
+            await member.edit(
+                mute=False,
+                reason=f"Auto unmute en quittant le canal radio {RADIO_VC_ID}",
+            )
+            AUTO_MUTED_USERS.discard(member.id)
+    except Exception as e:
+        logging.error(f"[radio-mute] Exception dans on_voice_state_update: {e}")
 
 
 # ─────────────────────── SETUP ─────────────────────────────
