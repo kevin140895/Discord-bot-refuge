@@ -191,6 +191,7 @@ class RouletteCog(commands.Cog):
         self.store.clear_poster()
 
     async def _replace_poster_message(self):
+        await self.bot.wait_until_ready()
         await self._delete_old_poster_message()
         ch = self.bot.get_channel(CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
@@ -213,6 +214,19 @@ class RouletteCog(commands.Cog):
             logging.error(
                 f"[Roulette] Échec envoi nouveau message roulette: {e}"
             )
+
+    async def _init_after_ready(self):
+        await self.bot.wait_until_ready()
+        self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
+        self._last_announced_state = self.current_view_enabled
+        try:
+            await self._replace_poster_message()
+            await self._post_state_message(self.current_view_enabled)
+        except Exception as err:
+            logging.warning("[Roulette] Init failed: %s", err)
+        self.boundary_watch_loop.start()
+        self.roulette_poster_watchdog.start()
+        self.roles_cleanup_loop.start()
 
     async def _post_state_message(self, opened: bool):
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
@@ -285,16 +299,7 @@ class RouletteCog(commands.Cog):
             self.bot.add_view(RouletteView())
         except Exception as e:
             logging.error("[Roulette] add_view échoué: %s", e)
-        self.roles_cleanup_loop.start()
-        self.boundary_watch_loop.start()
-        self.roulette_poster_watchdog.start()
-        self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
-        self._last_announced_state = self.current_view_enabled
-        try:
-            await self._replace_poster_message()
-            await self._post_state_message(self.current_view_enabled)
-        except Exception as err:
-            logging.warning("[Roulette] Init failed: %s", err)
+        self.bot.loop.create_task(self._init_after_ready())
 
     async def cog_unload(self):
         self.boundary_watch_loop.cancel()
