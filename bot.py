@@ -702,28 +702,40 @@ async def maybe_rename_channel_by_game(
     _rename_state[ch.id] = (ch.name, members_count, game)
 
 
-# ─ INSERT HERE ─ [HELPERS MUTE]
-async def _force_mute(member: discord.Member, mute: bool, reason: str) -> bool:
-    """Mute/unmute serveur, avec logs et gestion d'erreurs."""
-    guild = member.guild
-    me = guild.me or guild.get_member(bot.user.id)
-    if not me or not me.guild_permissions.mute_members:
-        logging.error(
-            "[mute] Permission manquante: le bot n'a pas 'Mute Members'."
-        )
+async def _set_speak_permission(
+    channel: discord.VoiceChannel,
+    member: discord.Member,
+    allow: bool,
+    reason: str,
+) -> bool:
+    """Allow or deny the ability to speak for a member in a channel.
+
+    Opère uniquement sur le salon radio dédié (RADIO_VC_ID).
+    """
+    if channel.id != RADIO_VC_ID:
         return False
     try:
-        await member.edit(mute=mute, reason=reason)
-        logging.info(
-            f"[mute] {'Muted' if mute else 'Unmuted'} {member} — {reason}"
-        )
+        if allow:
+            await channel.set_permissions(member, overwrite=None, reason=reason)
+            logging.info(
+                f"[radio] Parole rétablie pour {member} dans {channel} — {reason}"
+            )
+        else:
+            overwrite = channel.overwrites_for(member)
+            overwrite.speak = False
+            await channel.set_permissions(member, overwrite=overwrite, reason=reason)
+            logging.info(
+                f"[radio] Parole retirée pour {member} dans {channel} — {reason}"
+            )
         return True
     except discord.Forbidden:
         logging.error(
-            f"[mute] Forbidden: impossible de {'mute' if mute else 'unmute'} {member}."
+            f"[radio] Forbidden: impossible de modifier la parole de {member} dans {channel}."
         )
     except Exception as e:
-        logging.error(f"[mute] Erreur mute/unmute {member}: {e}")
+        logging.error(
+            f"[radio] Erreur lors de la modification de la parole de {member} dans {channel}: {e}"
+        )
     return False
 
 
@@ -2264,7 +2276,7 @@ async def on_voice_state_update(
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
-    # ── Auto-mute/unmute sur le canal radio (uniquement humains)
+    # ── Auto retrait/restitution de la parole sur le canal radio (uniquement humains)
     try:
         joined_radio = (
             after.channel
@@ -2277,25 +2289,22 @@ async def on_voice_state_update(
             and (not after.channel or after.channel.id != RADIO_VC_ID)
         )
 
-        if joined_radio:
-            if (
-                member.voice
-                and member.voice.channel
-                and member.voice.channel.id == RADIO_VC_ID
-            ):
-                await _force_mute(
-                    member,
-                    True,
-                    f"Auto-mute en entrant dans le canal radio {RADIO_VC_ID}",
-                )
-        elif left_radio:
-            await _force_mute(
+        if joined_radio and after.channel:
+            await _set_speak_permission(
+                after.channel,
                 member,
-                False,
-                f"Auto-unmute en sortant du canal radio {RADIO_VC_ID}",
+                allow=False,
+                reason=f"Auto retrait de la parole dans le canal radio {RADIO_VC_ID}",
+            )
+        elif left_radio and before.channel:
+            await _set_speak_permission(
+                before.channel,
+                member,
+                allow=True,
+                reason=f"Auto restitution de la parole en sortant du canal radio {RADIO_VC_ID}",
             )
     except Exception as e:
-        logging.error(f"[mute] Exception dans on_voice_state_update: {e}")
+        logging.error(f"[radio] Exception dans on_voice_state_update: {e}")
 
 
 # ─────────────────────── SETUP ─────────────────────────────
