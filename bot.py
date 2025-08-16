@@ -923,22 +923,28 @@ async def _play_once(guild: discord.Guild) -> None:
         return
 
     # ---------- Création de la source ----------
-    source = None
 
-    # 🔁 Fallback PCM si besoin
-    if source is None:
-        try:
-            source = discord.FFmpegPCMAudio(
-                RADIO_STREAM_URL,
-                executable=FFMPEG_PATH,
-                before_options=_before_opts(),
-                options="-vn -loglevel error",
-            )
-            logging.info("[radio] Source FFmpegPCMAudio prête (PCM).")
-        except Exception:
-            logging.exception("[radio] Préparation source échouée")
-            await asyncio.sleep(5)
-            return
+    bitrate = 96
+    try:
+        if getattr(guild, "premium_tier", 0) >= 1:
+            bitrate = 128
+    except Exception:
+        pass
+
+    try:
+        source = discord.FFmpegOpusAudio(
+            RADIO_STREAM_URL,
+            bitrate=bitrate,
+            before_options=_before_opts(),
+            options="-vn -ar 48000 -ac 2 -vbr on",
+        )
+        logging.info(
+            f"[radio] Source FFmpegOpusAudio prête ({bitrate} kbps)."
+        )
+    except Exception:
+        logging.exception("[radio] Préparation source échouée")
+        await asyncio.sleep(5)
+        return
 
     # Brancher logs FFmpeg
     _wire_ffmpeg_stderr_to_log(source)
