@@ -1,4 +1,3 @@
-
 import os
 import logging
 import random
@@ -26,12 +25,8 @@ def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 class RouletteView(discord.ui.View):
-    def __init__(self, *, enabled: bool):
+    def __init__(self):
         super().__init__(timeout=None)
-        try:
-            self.play_button.disabled = not enabled  # type: ignore[attr-defined]
-        except Exception:
-            pass
 
     @discord.ui.button(
         label="🎰 Roulette",
@@ -116,5 +111,3 @@ class RouletteView(discord.ui.View):
             logging.error("[Roulette] announce_level_up échouée: %s", e)
 
         await interaction.response.send_message(msg, ephemeral=True)
-
-# The rest of the Cog implementation would go here (omitted for brevity in this output)
