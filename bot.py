@@ -365,6 +365,10 @@ def _load_perma_msg_id() -> int | None:
         return int(mid)
     return None
 
+def _save_roles_perma_msg_id(mid: int):
+    ensure_data_dir()
+    Path(ROLES_PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
+
 def _save_perma_msg_id(mid: int):
     ensure_data_dir()
     Path(PERMA_MSG_FILE).write_text(json.dumps({"message_id": mid}, indent=2), encoding="utf-8")
@@ -1807,7 +1811,8 @@ async def _setup_hook():
 async def ensure_roles_buttons_message():
     """
     (Re)poste le message permanent des rôles PC/Consoles/Mobile/Notifications
-    dans CHANNEL_ROLES et (ré)attache la vue PlayerTypeView, sans afficher le marqueur.
+    dans CHANNEL_ROLES et (ré)attache la vue PlayerTypeView, sans afficher de marqueur dans le contenu.
+    Reposte UNIQUEMENT s'il est manquant/supprimé.
     """
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ROLES)
@@ -1825,16 +1830,33 @@ async def ensure_roles_buttons_message():
         "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
     )
     embed = discord.Embed(description=display_text, color=0x00C896)
+    # 🔴 IMPORTANT: footer-marquage pour que le détecteur retrouve le message
+    embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)
 
-    # 1) chercher un message existant (legacy content ou nouveau footer)
+    # 1) D'abord: essayer par ID mémorisé
+    remembered_id = _load_roles_perma_msg_id()
+    if remembered_id:
+        try:
+            msg = await channel.fetch_message(remembered_id)
+            await msg.edit(content=None, embeds=[embed], view=view)
+            try:
+                await msg.pin(reason="Message rôles permanent")
+            except Exception:
+                pass
+            logging.info("🔁 [roles] Message permanent réattaché via ID mémorisé.")
+            return
+        except Exception:
+            logging.debug("[roles] ID mémorisé introuvable — on va rechercher dans l'historique.")
+
+    # 2) Chercher dans l'historique un message existant (footer ou legacy)
     found = None
     try:
-        async for msg in channel.history(limit=100):
-            if _is_roles_permanent_message(msg):
-                found = msg
+        async for m in channel.history(limit=100):
+            if _is_roles_permanent_message(m):
+                found = m
                 break
     except Exception as e:
-        logging.error(f"Erreur lecture historique (roles): {e}")
+        logging.error(f"[roles] Erreur lecture historique: {e}")
 
     if found:
         try:
@@ -1843,20 +1865,23 @@ async def ensure_roles_buttons_message():
                 await found.pin(reason="Message rôles permanent")
             except Exception:
                 pass
-            logging.info("🔁 Message rôles réattaché (avec vue).")
+            _save_roles_perma_msg_id(found.id)
+            logging.info("🔁 [roles] Message permanent réattaché (via recherche).")
             return
         except Exception as e:
-            logging.error(f"Échec réattachement des rôles, je reposte: {e}")
+            logging.error(f"[roles] Échec réattachement, on reposte: {e}")
 
+    # 3) Si rien trouvé: on (re)poste un nouveau message
     try:
         new_msg = await channel.send(embed=embed, view=view)
+        _save_roles_perma_msg_id(new_msg.id)
         try:
             await new_msg.pin(reason="Message rôles permanent")
         except Exception:
             pass
-        logging.info("📌 Message rôles publié (nouveau).")
+        logging.info("📌 [roles] Message permanent publié (nouveau).")
     except Exception as e:
-        logging.error(f"Erreur envoi message rôles: {e}")
+        logging.error(f"[roles] Erreur envoi message permanent: {e}")
 
 bot.setup_hook = _setup_hook
 
