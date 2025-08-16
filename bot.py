@@ -94,19 +94,30 @@ VC_PROFILES = {
 
 VOC_PATTERN = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?: (\d+))?$", re.I)
 PERMA_MESSAGE_MARK = "[VC_BUTTONS_PERMANENT]"
-ROLES_PERMA_MESSAGE_MARK = "[ROLES_BUTTONS_PERMANENT]"
 
 
 def _is_roles_permanent_message(msg: discord.Message) -> bool:
-    """Reconnaît le message permanent Rôles soit par contenu (legacy), soit par footer d'embed (nouveau)."""
+    """Détecte le message permanent des rôles via l'ID mémorisé ou la présence des boutons rôles."""
     if msg.author != bot.user:
         return False
-    if ROLES_PERMA_MESSAGE_MARK in (msg.content or ""):
+
+    remembered_id = _load_roles_perma_msg_id()
+    if remembered_id and msg.id == remembered_id:
         return True
-    for e in msg.embeds or []:
-        if e.footer and e.footer.text == ROLES_PERMA_MESSAGE_MARK:
-            return True
-    return False
+
+    required = {
+        "role_pc",
+        "role_console",
+        "role_mobile",
+        "role_notifications",
+    }
+    seen: set[str] = set()
+    for comp in msg.components:
+        for child in getattr(comp, "children", []):
+            cid = getattr(child, "custom_id", None)
+            if cid:
+                seen.add(cid)
+    return required.issubset(seen)
 
 
 # ─────────────────────── ETATS RUNTIME ──────────────────────
@@ -208,7 +219,7 @@ class PlayerTypeView(discord.ui.View):
     @discord.ui.button(
         label="🔔 Notifications",
         style=discord.ButtonStyle.secondary,
-        custom_id="role_notify",
+        custom_id="role_notifications",
     )
     async def btn_notify(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -1512,13 +1523,11 @@ async def ensure_vc_buttons_message():
 
     # Texte visible par les membres (sans le marqueur)
     display_text = (
-        "**🚀 Prêt à jouer ?**\n\n"
-        "1️⃣ Rejoins ⁠💤・Salle d’attente vocal\n"
-        "2️⃣ Choisis ta team ⬇️\n\n"
-        "💻 → **PC**\n"
-        "🔄 → **Crossplay**\n"
-        "🎮 → **Consoles**\n"
-        "💬 → **Chat**"
+        "🎮 Rejoins d'abord <#1405630965803520221> puis choisis ton salon :\n"
+        "• 💻 PC\n"
+        "• 🔄 Crossplay\n"
+        "• 🎮 Consoles\n"
+        "• 💬 Chat"
     )
     embed = discord.Embed(description=display_text, color=0x00C896)
 
@@ -2318,8 +2327,6 @@ async def ensure_roles_buttons_message():
         "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
     )
     embed = discord.Embed(description=display_text, color=0x00C896)
-    # 🔴 IMPORTANT: footer-marquage pour que le détecteur retrouve le message
-    embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)
 
     # 1) D'abord: essayer par ID mémorisé
     remembered_id = _load_roles_perma_msg_id()
@@ -2331,6 +2338,7 @@ async def ensure_roles_buttons_message():
                 await msg.pin(reason="Message rôles permanent")
             except Exception:
                 pass
+            _save_roles_perma_msg_id(msg.id)
             logging.info(
                 "🔁 [roles] Message permanent réattaché via ID mémorisé."
             )
@@ -2340,7 +2348,7 @@ async def ensure_roles_buttons_message():
                 "[roles] ID mémorisé introuvable — on va rechercher dans l'historique."
             )
 
-    # 2) Chercher dans l'historique un message existant (footer ou legacy)
+    # 2) Chercher dans l'historique un message existant (legacy ou composants)
     found = None
     try:
         async for m in channel.history(limit=100):
