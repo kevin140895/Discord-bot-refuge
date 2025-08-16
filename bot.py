@@ -16,6 +16,7 @@ from imageio_ffmpeg import get_ffmpeg_exe
 import yt_dlp
 from utils.discord_utils import ensure_channel_has_message
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs
+from utils.interactions import safe_respond
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
 
 
@@ -554,15 +555,6 @@ def get_level(xp: int) -> int:
         level += 1
     return level
 
-
-async def safe_respond(inter: discord.Interaction, content=None, **kwargs):
-    try:
-        if inter.response.is_done():
-            await inter.followup.send(content or "✅", **kwargs)
-        else:
-            await inter.response.send_message(content or "✅", **kwargs)
-    except Exception as e:
-        logging.error(f"Réponse interaction échouée: {e}")
 
 
 def is_xp_viewer(inter: discord.Interaction) -> bool:
@@ -1997,20 +1989,22 @@ class VCButtonView(discord.ui.View):
     async def create_vc(self, interaction: discord.Interaction, profile: str):
         guild = interaction.guild
         if guild is None:
-            return await interaction.response.send_message(
-                "❌ Action impossible en DM.", ephemeral=True
+            return await safe_respond(
+                interaction, "❌ Action impossible en DM.", ephemeral=True
             )
 
         member = interaction.user
 
         # Vérif présence dans le lobby
         if not member.voice or not member.voice.channel:
-            return await interaction.response.send_message(
+            return await safe_respond(
+                interaction,
                 "⛔ Rejoins d’abord le **vocal lobby** puis reclique sur un bouton.",
                 ephemeral=True,
             )
         if member.voice.channel.id != LOBBY_VC_ID:
-            return await interaction.response.send_message(
+            return await safe_respond(
+                interaction,
                 "⛔ Tu dois être **dans le vocal lobby** pour choisir le type (PC/Consoles/Crossplay/Chat).",
                 ephemeral=True,
             )
@@ -2018,7 +2012,8 @@ class VCButtonView(discord.ui.View):
         # Vérif permissions du bot
         me = guild.me or guild.get_member(bot.user.id)
         if not (me and me.guild_permissions.move_members):
-            return await interaction.response.send_message(
+            return await safe_respond(
+                interaction,
                 "⛔ Il me manque la permission **Déplacer des membres**.",
                 ephemeral=True,
             )
@@ -2026,8 +2021,8 @@ class VCButtonView(discord.ui.View):
         # Vérif catégorie
         category = guild.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
-            return await interaction.response.send_message(
-                "❌ Catégorie vocale temporaire introuvable.", ephemeral=True
+            return await safe_respond(
+                interaction, "❌ Catégorie vocale temporaire introuvable.", ephemeral=True
             )
 
         perms_cat = category.permissions_for(me)
@@ -2036,7 +2031,8 @@ class VCButtonView(discord.ui.View):
             and perms_cat.view_channel
             and perms_cat.connect
         ):
-            return await interaction.response.send_message(
+            return await safe_respond(
+                interaction,
                 "⛔ Permissions manquantes sur la catégorie (**Gérer les salons / Voir / Se connecter**).",
                 ephemeral=True,
             )
@@ -2048,7 +2044,8 @@ class VCButtonView(discord.ui.View):
                 1 for ch in category.voice_channels if ch.id in TEMP_VC_IDS
             )
             if current >= limit:
-                return await interaction.response.send_message(
+                return await safe_respond(
+                    interaction,
                     f"⛔ Limite atteinte : **{current}/{limit}** salons temporaires dans **{category.name}**.",
                     ephemeral=True,
                 )
@@ -2059,8 +2056,8 @@ class VCButtonView(discord.ui.View):
             category.voice_channels, name=TEMP_VC_TEMPLATE_NAME
         )
         if template is None:
-            return await interaction.response.send_message(
-                "❌ Salon template introuvable.", ephemeral=True
+            return await safe_respond(
+                interaction, "❌ Salon template introuvable.", ephemeral=True
             )
         try:
             vc = await template.clone(
@@ -2074,8 +2071,8 @@ class VCButtonView(discord.ui.View):
             save_temp_vc_ids(TEMP_VC_IDS)
         except Exception as e:
             logging.error(f"Erreur création VC: {e}")
-            return await interaction.response.send_message(
-                "❌ Impossible de créer le salon.", ephemeral=True
+            return await safe_respond(
+                interaction, "❌ Impossible de créer le salon.", ephemeral=True
             )
 
         # Déplacement obligatoire
@@ -2091,7 +2088,8 @@ class VCButtonView(discord.ui.View):
                 logging.error(f"Rollback delete failed: {de}")
             TEMP_VC_IDS.discard(vc.id)
             save_temp_vc_ids(TEMP_VC_IDS)
-            return await interaction.response.send_message(
+            return await safe_respond(
+                interaction,
                 "❌ Je n’ai pas pu te déplacer. Vérifie que tu es bien **dans le vocal lobby** et réessaie.",
                 ephemeral=True,
             )
@@ -2103,14 +2101,9 @@ class VCButtonView(discord.ui.View):
             pass
 
         # Confirmation
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True
-            )
+        await safe_respond(
+            interaction, f"🚀 Tu as été déplacé dans **{vc.name}**.", ephemeral=True
+        )
 
     # Boutons
     @discord.ui.button(
