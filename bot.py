@@ -1173,6 +1173,7 @@ display_text = (
     "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
 )
 embed = discord.Embed(description=display_text, color=0x00C896)
+embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)
 
 # ─────────────────────── TÂCHES DE FOND ────────────────────
 async def ensure_vc_buttons_message():
@@ -1824,7 +1825,7 @@ async def ensure_roles_buttons_message():
         "• 🔔 Notifications *(ajout/retrait **indépendant**, conservé quand tu changes de plateforme)*"
     )
     embed = discord.Embed(description=display_text, color=0x00C896)
-    embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)  # ← marqueur invisible
+    embed.set_footer(text=ROLES_PERMA_MESSAGE_MARK)
 
     # 1) chercher un message existant (legacy content ou nouveau footer)
     found = None
