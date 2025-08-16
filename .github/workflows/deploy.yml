@@ -1,20 +1,20 @@
 name: Deploy to Railway
 
 on:
-  workflow_dispatch:   # ça veut dire: tu peux lancer manuellement depuis GitHub (Actions → Run workflow)
+  workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest   # GitHub va lancer un petit serveur Linux
+    runs-on: ubuntu-latest
 
     steps:
       - name: Récupérer ton code
         uses: actions/checkout@v4
 
       - name: Installer Railway CLI
-        run: |
-          curl -fsSL https://railway.app/install.sh | sh
-          echo "${{ secrets.RAILWAY_TOKEN }}" | railway login --token
+        run: curl -fsSL https://railway.app/install.sh | sh
 
       - name: Déployer sur Railway
-        run: railway up
+        run: railway up --yes
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
