@@ -294,6 +294,31 @@ class RouletteCog(commands.Cog):
         except Exception as e:
             logging.error(f"[Roulette] roulette_poster_watchdog erreur: {e}")
 
+    @tasks.loop(minutes=5.0)
+    async def roles_cleanup_loop(self):
+        try:
+            assignments = self.store.get_all_role_assignments()
+            now = datetime.now(self.tz)
+            for uid, data in assignments.items():
+                try:
+                    exp = datetime.fromisoformat(data.get("expires_at", "")).astimezone(self.tz)
+                except Exception:
+                    self.store.clear_role_assignment(uid)
+                    continue
+                if exp <= now:
+                    guild = self.bot.get_guild(int(data.get("guild_id", 0)))
+                    if guild:
+                        member = guild.get_member(int(uid))
+                        role = guild.get_role(int(data.get("role_id", 0)))
+                        if member and role:
+                            try:
+                                await member.remove_roles(role, reason="Roulette rôle expiré")
+                            except Exception as e:
+                                logging.error("[Roulette] roles_cleanup_loop remove_roles erreur: %s", e)
+                    self.store.clear_role_assignment(uid)
+        except Exception as e:
+            logging.error(f"[Roulette] roles_cleanup_loop erreur: {e}")
+
     async def cog_load(self):
         try:
             self.bot.add_view(RouletteView())
@@ -304,6 +329,7 @@ class RouletteCog(commands.Cog):
     async def cog_unload(self):
         self.boundary_watch_loop.cancel()
         self.roulette_poster_watchdog.cancel()
+        self.roles_cleanup_loop.cancel()
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(RouletteCog(bot))
