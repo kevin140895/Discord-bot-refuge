@@ -24,7 +24,10 @@ class RouletteStore:
 
     # ——— Poster principal ———
     def set_poster(self, channel_id: str, message_id: str):
-        self.data["poster"] = {"channel_id": channel_id, "message_id": message_id}
+        self.data["poster"] = {
+            "channel_id": channel_id,
+            "message_id": message_id,
+        }
         self._save()
 
     def get_poster(self) -> Optional[dict]:
@@ -36,7 +39,10 @@ class RouletteStore:
 
     # ——— Message d’état ———
     def set_state_message(self, channel_id: str, message_id: str):
-        self.data["state_message"] = {"channel_id": channel_id, "message_id": message_id}
+        self.data["state_message"] = {
+            "channel_id": channel_id,
+            "message_id": message_id,
+        }
         self._save()
 
     def get_state_message(self) -> Optional[dict]:
@@ -62,7 +68,13 @@ class RouletteStore:
         self._save()
 
     # ——— Rôles 24h ———
-    def upsert_role_assignment(self, user_id: str, guild_id: str, role_id: str, expires_at: str):
+    def upsert_role_assignment(
+        self,
+        user_id: str,
+        guild_id: str,
+        role_id: str,
+        expires_at: str,
+    ):
         self.data.setdefault("role_assignments", {})[user_id] = {
             "guild_id": guild_id,
             "role_id": role_id,
