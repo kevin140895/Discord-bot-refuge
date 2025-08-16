@@ -353,6 +353,7 @@ DATA_DIR = os.getenv(
 XP_FILE = f"{DATA_DIR}/data.json"
 BACKUP_FILE = f"{DATA_DIR}/backup.json"
 DAILY_STATS_FILE = f"{DATA_DIR}/daily_stats.json"
+VOICE_TIMES_FILE = f"{DATA_DIR}/voice_times.json"
 
 
 def ensure_data_dir():
@@ -378,6 +379,22 @@ def save_json(path: str, data: dict):
 
 def load_json(path: str) -> dict:
     return _safe_read_json(path)
+
+
+def load_voice_times() -> dict[str, datetime]:
+    data = load_json(VOICE_TIMES_FILE)
+    out: dict[str, datetime] = {}
+    for uid, iso in data.items():
+        try:
+            out[uid] = datetime.fromisoformat(iso)
+        except Exception:
+            continue
+    return out
+
+
+def save_voice_times(d: dict[str, datetime]):
+    serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in d.items()}
+    save_json(VOICE_TIMES_FILE, serializable)
 
 
 def load_daily_stats() -> dict:
@@ -463,6 +480,7 @@ async def auto_backup_xp(interval_seconds: int = 600):  # toutes les 10 min
     while not bot.is_closed():
         try:
             await xp_flush_cache_to_disk()
+            save_voice_times(voice_times)
             logging.info("🛟 Sauvegarde périodique effectuée.")
         except Exception as e:
             logging.error(f"❌ Erreur sauvegarde périodique: {e}")
@@ -2323,6 +2341,7 @@ async def on_voice_state_update(
     # ⛔ Ignore entièrement les utilisateurs bot pour l'XP vocal / chrono / stats
     if member.bot:
         voice_times.pop(uid, None)  # nettoie un éventuel chrono
+        save_voice_times(voice_times)
         return
 
     # ── Chrono XP (UTC aware)
@@ -2331,6 +2350,7 @@ async def on_voice_state_update(
     # Connexion au vocal → start chrono
     if after.channel and not before.channel:
         voice_times[uid] = now_utc
+        save_voice_times(voice_times)
 
     # Déconnexion du vocal → calcule minutes + XP
     elif before.channel and not after.channel:
@@ -2347,6 +2367,8 @@ async def on_voice_state_update(
                 incr_daily_stat(
                     member.guild.id, member.id, voice_min_inc=minutes_spent
                 )
+                await xp_flush_cache_to_disk()
+        save_voice_times(voice_times)
 
     # Move de salon → clôture partielle + restart chrono
     elif before.channel and after.channel and before.channel != after.channel:
@@ -2363,7 +2385,9 @@ async def on_voice_state_update(
                 incr_daily_stat(
                     member.guild.id, member.id, voice_min_inc=minutes_spent
                 )
+                await xp_flush_cache_to_disk()
         voice_times[uid] = now_utc
+        save_voice_times(voice_times)
 
     # ── Suppression des salons temporaires vides (⚠️ jamais le salon radio)
     if (
@@ -2445,6 +2469,7 @@ async def on_voice_state_update(
 # ─────────────────────── SETUP ─────────────────────────────
 async def _setup_hook():
     await xp_bootstrap_cache()
+    voice_times.update(load_voice_times())
 
     # Exposer API pour les cogs
     bot.award_xp = award_xp
