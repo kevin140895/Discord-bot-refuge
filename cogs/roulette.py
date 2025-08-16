@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import random
 from datetime import datetime, timedelta
@@ -145,7 +146,10 @@ class RouletteView(discord.ui.View):
         except Exception as e:
             logging.error("[Roulette] announce_level_up échouée: %s", e)
 
-        await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("🎰 La roulette tourne…", ephemeral=True)
+        await asyncio.sleep(10)
+        await interaction.edit_original_response(content=msg)
 
 
 class RouletteCog(commands.Cog):
