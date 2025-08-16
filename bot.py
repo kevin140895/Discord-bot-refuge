@@ -94,7 +94,8 @@ AUTO_RENAME_ENABLED = True
 # Format du nom : {base} = PC/Crossplay/Consoles/Chat | {game} = nom du jeu détecté
 AUTO_RENAME_FORMAT = "{base} • {game}"
 # Fréquence min entre deux renames pour un même salon (anti-spam)
-AUTO_RENAME_COOLDOWN_SEC = 45
+# Valeur réduite pour rendre le renommage plus réactif
+AUTO_RENAME_COOLDOWN_SEC = 15
 
 # ─────────────────────── CONFIG ─────────────────────────────
 LEVEL_UP_CHANNEL = 1402419913716531352
@@ -1855,7 +1856,7 @@ async def auto_rename_poll():
                     await maybe_rename_channel_by_game(ch)
         except Exception as e:
             logging.debug(f"auto_rename_poll error: {e}")
-        await asyncio.sleep(20)  # toutes les 20s
+        await asyncio.sleep(5)  # toutes les 5s pour une réaction plus rapide
 
 
 async def vc_buttons_watchdog(interval_seconds: int = 120):
