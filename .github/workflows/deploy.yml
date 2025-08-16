@@ -1,7 +1,7 @@
 name: Deploy to Railway
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # Tu déclenches manuellement
 
 jobs:
   deploy:
@@ -15,6 +15,6 @@ jobs:
         run: curl -fsSL https://railway.app/install.sh | sh
 
       - name: Déployer sur Railway
-        run: railway up --yes
+        run: railway up --ci
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
