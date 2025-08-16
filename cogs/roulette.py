@@ -1,4 +1,3 @@
-import os
 import logging
 import random
 from datetime import datetime, timedelta
@@ -6,7 +5,6 @@ from typing import Optional
 
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands
 from zoneinfo import ZoneInfo
 
 from utils.timewin import is_open_now, next_boundary_dt
@@ -32,25 +30,44 @@ class RouletteView(discord.ui.View):
     @discord.ui.button(
         label="🎰 Roulette",
         style=discord.ButtonStyle.success,
-        custom_id="roulette:play"
+        custom_id="roulette:play",
     )
-    async def play_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog: Optional["RouletteCog"] = interaction.client.get_cog("RouletteCog")  # type: ignore
+    async def play_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        cog: Optional["RouletteCog"] = interaction.client.get_cog(
+            "RouletteCog",
+        )  # type: ignore
         if not cog:
-            return await interaction.response.send_message("❌ Fonction Roulette indisponible.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Fonction Roulette indisponible.",
+                ephemeral=True,
+            )
 
         if not is_open_now(PARIS_TZ, 10, 22):
             nxt = next_boundary_dt(tz=PARIS_TZ, start_h=10, end_h=22)
             return await interaction.response.send_message(
-                f"⏳ La roulette est ouverte **de 10:00 à 22:00 (Europe/Paris)**.\n"
+                (
+                    "⏳ La roulette est ouverte "
+                    "**de 10:00 à 22:00 (Europe/Paris)**.\n"
+                ),
                 f"🔔 Prochaine ouverture/fermeture : **{_fmt(nxt)}**.",
-                ephemeral=True
+                ephemeral=True,
             )
 
         uid = str(interaction.user.id)
         if cog.store.has_claimed_today(uid, tz=PARIS_TZ):
             now = datetime.now(cog.tz)
-            tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            tomorrow = (
+                now + timedelta(days=1)
+            ).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
             rest = int((tomorrow - now).total_seconds() // 60)
             h, m = divmod(rest, 60)
             return await interaction.response.send_message(
@@ -61,10 +78,16 @@ class RouletteView(discord.ui.View):
 
         gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
         try:
-            old_lvl, new_lvl, total_xp = await cog.bot.award_xp(interaction.user.id, gain)  # type: ignore[attr-defined]
+            old_lvl, new_lvl, total_xp = await cog.bot.award_xp(
+                interaction.user.id,
+                gain,
+            )  # type: ignore[attr-defined]
         except Exception as e:
             logging.exception("[Roulette] award_xp a échoué: %s", e)
-            return await interaction.response.send_message("❌ Erreur interne (XP). Réessaie plus tard.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Erreur interne (XP). Réessaie plus tard.",
+                ephemeral=True,
+            )
 
         role_given = False
         expires_at_txt = None
@@ -75,9 +98,14 @@ class RouletteView(discord.ui.View):
             if role and me and guild.me.guild_permissions.manage_roles:
                 try:
                     if role < me.top_role:
-                        await interaction.user.add_roles(role, reason="Roulette (gagnant 500 XP)")
+                        await interaction.user.add_roles(
+                            role,
+                            reason="Roulette (gagnant 500 XP)",
+                        )
                         role_given = True
-                        expires_at = datetime.now(cog.tz) + timedelta(hours=24)
+                        expires_at = (
+                            datetime.now(cog.tz) + timedelta(hours=24)
+                        )
                         expires_at_txt = _fmt(expires_at)
                         cog.store.upsert_role_assignment(
                             user_id=uid,
@@ -87,7 +115,6 @@ class RouletteView(discord.ui.View):
                         )
                 except Exception as e:
                     logging.error("[Roulette] add_roles échec: %s", e)
-
         cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
         msg = f"🎰 Résultat : **{gain} XP**."
         if gain == 0:
@@ -100,19 +127,25 @@ class RouletteView(discord.ui.View):
             msg += "\n💎 **Jackpot !**"
             if role_given and expires_at_txt:
                 msg += (
-                    f"\n🎖️ Tu reçois le rôle **{WINNER_ROLE_NAME}** pendant **24h** "
+                    "\n🎖️ Tu reçois le rôle "
+                    f"**{WINNER_ROLE_NAME}** pendant **24h** "
                     f"(jusqu’au **{expires_at_txt}**)."
                 )
 
         try:
             announce = getattr(cog.bot, "announce_level_up", None)
             if announce and new_lvl > old_lvl:
-                await announce(interaction.guild, interaction.user, old_lvl, new_lvl, total_xp)
+                await announce(
+                    interaction.guild,
+                    interaction.user,
+                    old_lvl,
+                    new_lvl,
+                    total_xp,
+                )
         except Exception as e:
             logging.error("[Roulette] announce_level_up échouée: %s", e)
 
         await interaction.response.send_message(msg, ephemeral=True)
-
 
 
 class RouletteCog(commands.Cog):
@@ -135,7 +168,8 @@ class RouletteCog(commands.Cog):
             description=(
                 f"{desc_state}\n\n"
                 "Clique pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
-                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant **24h** si tu gagnes **500 XP**.\n"
+                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant "
+                "**24h** si tu gagnes **500 XP**.\n"
                 "🗓️ **Une seule tentative par jour.**"
             ),
             color=color
@@ -164,37 +198,52 @@ class RouletteCog(commands.Cog):
             return
         try:
             if self.current_view_enabled:
-                msg = await ch.send(embed=self._poster_embed(), view=RouletteView())
+                msg = await ch.send(
+                    embed=self._poster_embed(),
+                    view=RouletteView(),
+                )
             else:
                 msg = await ch.send(embed=self._poster_embed())
-            self.store.set_poster(channel_id=str(ch.id), message_id=str(msg.id))
+            self.store.set_poster(
+                channel_id=str(ch.id),
+                message_id=str(msg.id),
+            )
             logging.info("[Roulette] Nouveau message roulette publié.")
         except Exception as e:
-            logging.error(f"[Roulette] Échec envoi nouveau message roulette: {e}")
+            logging.error(
+                f"[Roulette] Échec envoi nouveau message roulette: {e}"
+            )
 
     async def _post_state_message(self, opened: bool):
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
             logging.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
             return
+
         try:
             content = None
             allowed = None
             if opened:
                 content = (
-                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant — "
-                    "vous pouvez jouer jusqu’à **22:00**."
+                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant "
+                    "— vous pouvez jouer jusqu’à **22:00**."
                 )
                 allowed = discord.AllowedMentions(roles=True)
             embed = discord.Embed(
                 title=f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}",
                 description=(
-                    "✅ La roulette est **ouverte** de **10:00 à 22:00** (Europe/Paris)." if opened else
-                    "⛔ La roulette est **fermée**. Rendez-vous **demain à 10:00** (Europe/Paris) !"
+                    "✅ La roulette est **ouverte** de **10:00 à 22:00** "
+                    "(Europe/Paris)." if opened else
+                    "⛔ La roulette est **fermée**. "
+                    "Rendez-vous **demain à 10:00** (Europe/Paris) !"
                 ),
-                color=0x2ECC71 if opened else 0xED4245
+                color=0x2ECC71 if opened else 0xED4245,
             )
-            await ch.send(content=content, embed=embed, allowed_mentions=allowed)
+            await ch.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=allowed,
+            )
         except Exception as e:
             logging.error("[Roulette] Post state message fail: %s", e)
 
@@ -202,7 +251,10 @@ class RouletteCog(commands.Cog):
     async def boundary_watch_loop(self):
         try:
             enabled_now = is_open_now(PARIS_TZ, 10, 22)
-            if self._last_announced_state is None or enabled_now != self._last_announced_state:
+            if (
+                self._last_announced_state is None
+                or enabled_now != self._last_announced_state
+            ):
                 self.current_view_enabled = enabled_now
                 await self._replace_poster_message()
                 await self._post_state_message(enabled_now)
@@ -233,7 +285,7 @@ class RouletteCog(commands.Cog):
             self.bot.add_view(RouletteView())
         except Exception as e:
             logging.error("[Roulette] add_view échoué: %s", e)
-        self.roles_cleanup_loop.start()    
+        self.roles_cleanup_loop.start()
         self.boundary_watch_loop.start()
         self.roulette_poster_watchdog.start()
         self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
@@ -241,8 +293,8 @@ class RouletteCog(commands.Cog):
         try:
             await self._replace_poster_message()
             await self._post_state_message(self.current_view_enabled)
-        except Exception:
-            logging.warning("[Roulette] Init failed: %s", e)
+        except Exception as err:
+            logging.warning("[Roulette] Init failed: %s", err)
 
     async def cog_unload(self):
         self.boundary_watch_loop.cancel()
