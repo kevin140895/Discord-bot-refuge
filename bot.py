@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import logging
 import os
@@ -61,6 +62,7 @@ LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
 RADIO_MUTED_ROLE_ID = 1403510368340410550  # rôle à mute dans le canal radio
 RADIO_STREAM_URL = "http://stream.laut.fm/englishrap"
+XP_VIEWER_ROLE_ID = 1403510368340410550  # rôle autorisé à voir l'XP serveur
 
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
@@ -558,6 +560,12 @@ async def safe_respond(inter: discord.Interaction, content=None, **kwargs):
             await inter.response.send_message(content or "✅", **kwargs)
     except Exception as e:
         logging.error(f"Réponse interaction échouée: {e}")
+
+
+def is_xp_viewer(inter: discord.Interaction) -> bool:
+    if inter.guild and inter.user.id == inter.guild.owner_id:
+        return True
+    return any(r.id == XP_VIEWER_ROLE_ID for r in getattr(inter.user, "roles", []))
 
 
 async def generate_rank_card(
@@ -1432,6 +1440,38 @@ async def rang(interaction: discord.Interaction):
         await interaction.followup.send(
             "❌ Une erreur est survenue pendant la génération de la carte.",
             ephemeral=True,
+        )
+
+
+@bot.tree.command(
+    name="xp_serveur",
+    description="Affiche l'XP de tous les membres du serveur",
+)
+@app_commands.check(is_xp_viewer)
+async def xp_serveur(interaction: discord.Interaction):
+    async with XP_LOCK:
+        items = list(XP_CACHE.items())
+    if not items:
+        await safe_respond(interaction, "Aucune donnée XP.", ephemeral=True)
+        return
+    lines = []
+    for uid, data in sorted(items, key=lambda x: x[1].get("xp", 0), reverse=True):
+        member = interaction.guild.get_member(int(uid)) if interaction.guild else None
+        if not member:
+            continue
+        xp = int(data.get("xp", 0))
+        lvl = int(data.get("level", 0))
+        lines.append(f"{member.display_name} - {xp} XP (niveau {lvl})")
+    if not lines:
+        await safe_respond(interaction, "Aucun membre trouvé.", ephemeral=True)
+        return
+    report = "\n".join(lines)
+    if len(report) < 1900:
+        await safe_respond(interaction, f"```\n{report}\n```", ephemeral=True)
+    else:
+        file = discord.File(io.StringIO(report), filename="xp_serveur.txt")
+        await safe_respond(
+            interaction, "📄 Liste XP en pièce jointe.", ephemeral=True, file=file
         )
 
 
