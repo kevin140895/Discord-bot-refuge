@@ -24,11 +24,17 @@ class StatsCog(commands.Cog):
             return
         members = guild.member_count
         online = sum(1 for m in guild.members if m.status != discord.Status.offline)
+        voice = sum(
+            len([m for m in vc.members if not getattr(m, "bot", False)])
+            for vc in getattr(guild, "voice_channels", [])
+        )
         channels = getattr(category, "channels", [])
         if len(channels) > 0:
-            await safe_channel_edit(channels[0], name=f"Members: {members}")
+            await safe_channel_edit(channels[0], name=f"👥 Membres : {members}")
         if len(channels) > 1:
-            await safe_channel_edit(channels[1], name=f"Online: {online}")
+            await safe_channel_edit(channels[1], name=f"🟢 En ligne : {online}")
+        if len(channels) > 2:
+            await safe_channel_edit(channels[2], name=f"🔊 Voc : {voice}")
 
     @tasks.loop(minutes=10)
     async def refresh_stats(self) -> None:
