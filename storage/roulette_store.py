@@ -1,27 +1,31 @@
 import json
-import os
+import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 
 class RouletteStore:
     def __init__(self, data_dir: str):
-        self.data_file = os.path.join(data_dir, "roulette.json")
-        os.makedirs(data_dir, exist_ok=True)
+        self.data_file = Path(data_dir) / "roulette.json"
+        Path(data_dir).mkdir(parents=True, exist_ok=True)
         self._load()
 
     def _load(self):
         try:
-            with open(self.data_file, "r", encoding="utf-8") as f:
+            with self.data_file.open("r", encoding="utf-8") as f:
                 self.data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             self.data = {}
             self._save()
 
     def _save(self):
-        with open(self.data_file, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
+        try:
+            with self.data_file.open("w", encoding="utf-8") as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logging.error("[RouletteStore] Écriture échouée pour %s: %s", self.data_file, e)
 
     # ——— Poster principal ———
     def set_poster(self, channel_id: str, message_id: str):

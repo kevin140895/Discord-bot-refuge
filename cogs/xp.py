@@ -38,8 +38,13 @@ def _safe_read_json(path: str) -> dict:
         return {}
 
 def save_json(path: str, data: dict) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(
+            json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
+        )
+    except Exception as e:
+        logging.error("❌ Écriture JSON échouée pour %s: %s", path, e)
 
 def load_json(path: str) -> dict:
     return _safe_read_json(path)
