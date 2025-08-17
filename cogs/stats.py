@@ -22,8 +22,12 @@ class StatsCog(commands.Cog):
         category = guild.get_channel(config.STATS_CATEGORY_ID)
         if category is None:
             return
-        members = guild.member_count
-        online = sum(1 for m in guild.members if m.status != discord.Status.offline)
+        members = sum(1 for m in guild.members if not getattr(m, "bot", False))
+        online = sum(
+            1
+            for m in guild.members
+            if not getattr(m, "bot", False) and m.status != discord.Status.offline
+        )
         voice = sum(
             len([m for m in vc.members if not getattr(m, "bot", False)])
             for vc in getattr(guild, "voice_channels", [])
