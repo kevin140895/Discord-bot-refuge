@@ -219,18 +219,39 @@ class RouletteCog(commands.Cog):
                 f"[Roulette] Échec envoi nouveau message roulette: {e}"
             )
 
+    async def _find_existing_poster(self) -> Optional[discord.Message]:
+        ch = self.bot.get_channel(CHANNEL_ID)
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            return None
+        try:
+            async for msg in ch.history(limit=20):
+                if (
+                    msg.author.id == self.bot.user.id
+                    and msg.embeds
+                    and msg.embeds[0].title == "🎰 Roulette"
+                ):
+                    return msg
+        except Exception:
+            pass
+        return None
+
     async def _ensure_poster_message(self):
         poster = self.store.get_poster()
-        if not poster:
-            await self._replace_poster_message()
-            return
-        ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
-        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            await self._replace_poster_message()
-            return
-        try:
-            await ch.fetch_message(int(poster.get("message_id", 0)))
-        except discord.NotFound:
+        if poster:
+            ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
+            if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                try:
+                    await ch.fetch_message(int(poster.get("message_id", 0)))
+                    return
+                except discord.NotFound:
+                    pass
+        existing = await self._find_existing_poster()
+        if existing:
+            self.store.set_poster(
+                channel_id=str(existing.channel.id),
+                message_id=str(existing.id),
+            )
+        else:
             await self._replace_poster_message()
 
     async def _init_after_ready(self):
@@ -239,7 +260,7 @@ class RouletteCog(commands.Cog):
         self._last_announced_state = self.current_view_enabled
         try:
             await self._ensure_poster_message()
-            await self._post_state_message(self.current_view_enabled)
+            await self._ensure_state_message(self.current_view_enabled)
         except Exception as err:
             logging.warning("[Roulette] Init failed: %s", err)
         self.boundary_watch_loop.start()
@@ -251,8 +272,36 @@ class RouletteCog(commands.Cog):
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
             logging.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
             return
-
         try:
+            old = self.store.get_state_message()
+            msg_to_delete = None
+            if old:
+                old_ch = self.bot.get_channel(int(old.get("channel_id", 0)))
+                if isinstance(old_ch, (discord.TextChannel, discord.Thread)):
+                    try:
+                        msg_to_delete = await old_ch.fetch_message(
+                            int(old.get("message_id", 0))
+                        )
+                    except Exception:
+                        pass
+            if not msg_to_delete:
+                try:
+                    async for m in ch.history(limit=20):
+                        if (
+                            m.author.id == self.bot.user.id
+                            and m.embeds
+                            and m.embeds[0].title.startswith("🎰 Roulette —")
+                        ):
+                            msg_to_delete = m
+                            break
+                except Exception:
+                    pass
+            if msg_to_delete:
+                try:
+                    await msg_to_delete.delete()
+                except Exception:
+                    pass
+
             content = None
             allowed = None
             if opened:
@@ -271,13 +320,45 @@ class RouletteCog(commands.Cog):
                 ),
                 color=0x2ECC71 if opened else 0xED4245,
             )
-            await ch.send(
+            msg = await ch.send(
                 content=content,
                 embed=embed,
                 allowed_mentions=allowed,
             )
+            self.store.set_state_message(str(ch.id), str(msg.id))
         except Exception as e:
             logging.error("[Roulette] Post state message fail: %s", e)
+
+    async def _ensure_state_message(self, opened: bool):
+        ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            logging.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
+            return
+        stored = self.store.get_state_message()
+        if stored:
+            try:
+                msg = await ch.fetch_message(int(stored.get("message_id", 0)))
+                if (
+                    msg.embeds
+                    and msg.embeds[0].title
+                    == f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}"
+                ):
+                    return
+            except discord.NotFound:
+                pass
+        try:
+            async for msg in ch.history(limit=20):
+                if (
+                    msg.author.id == self.bot.user.id
+                    and msg.embeds
+                    and msg.embeds[0].title
+                    == f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}"
+                ):
+                    self.store.set_state_message(str(ch.id), str(msg.id))
+                    return
+        except Exception:
+            pass
+        await self._post_state_message(opened)
 
     @tasks.loop(seconds=60.0)
     async def boundary_watch_loop(self):
