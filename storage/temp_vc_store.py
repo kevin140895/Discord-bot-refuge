@@ -1,8 +1,9 @@
 import json
+import os
 from pathlib import Path
 from typing import Iterable, Set
 
-DATA_FILE = Path("data/temp_vc_ids.json")
+DATA_FILE = Path(os.getenv("DATA_DIR", "/data")) / "temp_vc_ids.json"
 
 
 def load_temp_vc_ids() -> Set[int]:

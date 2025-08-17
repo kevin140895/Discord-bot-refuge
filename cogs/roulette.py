@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import random
 from datetime import datetime, timedelta
 from typing import Optional
@@ -179,7 +180,7 @@ class RouletteCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.tz = ZoneInfo(PARIS_TZ)
-        self.store = RouletteStore(data_dir="/data")
+        self.store = RouletteStore(data_dir=os.getenv("DATA_DIR", "/data"))
         self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
         self._last_announced_state: Optional[bool] = None
 
