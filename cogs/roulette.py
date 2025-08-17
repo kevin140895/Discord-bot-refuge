@@ -213,8 +213,8 @@ class RouletteCog(commands.Cog):
         try:
             msg = await ch.fetch_message(int(poster.get("message_id", 0)))
             await msg.delete()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Failed to delete old poster message: %s", e)
         self.store.clear_poster()
 
     async def _replace_poster_message(self):
@@ -254,8 +254,8 @@ class RouletteCog(commands.Cog):
                     and msg.embeds[0].title == "🎰 Roulette"
                 ):
                     return msg
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Failed to find existing poster: %s", e)
         return None
 
     async def _ensure_poster_message(self):
@@ -266,8 +266,8 @@ class RouletteCog(commands.Cog):
                 try:
                     await ch.fetch_message(int(poster.get("message_id", 0)))
                     return
-                except discord.NotFound:
-                    pass
+                except discord.NotFound as e:
+                    logging.debug("Poster message missing: %s", e)
         existing = await self._find_existing_poster()
         if existing:
             self.store.set_poster(
@@ -305,8 +305,8 @@ class RouletteCog(commands.Cog):
                         msg_to_delete = await old_ch.fetch_message(
                             int(old.get("message_id", 0))
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.debug("Failed to fetch old state message: %s", e)
             if not msg_to_delete:
                 try:
                     async for m in ch.history(limit=20):
@@ -317,13 +317,13 @@ class RouletteCog(commands.Cog):
                         ):
                             msg_to_delete = m
                             break
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.debug("Error scanning history for state msg: %s", e)
             if msg_to_delete:
                 try:
                     await msg_to_delete.delete()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.debug("Failed to delete old state msg: %s", e)
 
             content = None
             allowed = None
@@ -367,8 +367,8 @@ class RouletteCog(commands.Cog):
                     == f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}"
                 ):
                     return
-            except discord.NotFound:
-                pass
+            except discord.NotFound as e:
+                logging.debug("State message missing: %s", e)
         try:
             async for msg in ch.history(limit=20):
                 if (
@@ -379,8 +379,8 @@ class RouletteCog(commands.Cog):
                 ):
                     self.store.set_state_message(str(ch.id), str(msg.id))
                     return
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Error ensuring state message: %s", e)
         await self._post_state_message(opened)
 
     @tasks.loop(seconds=60.0)

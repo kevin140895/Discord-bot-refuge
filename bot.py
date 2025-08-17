@@ -9,7 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import discord
-from discord import PermissionOverwrite, app_commands
+from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from imageio_ffmpeg import get_ffmpeg_exe
@@ -23,7 +23,6 @@ from view import (
     ROLE_PC,
     ROLE_CONSOLE,
     ROLE_MOBILE,
-    ROLE_NOTIFICATION,
 )
 
 
@@ -241,7 +240,8 @@ def load_voice_times() -> dict[str, datetime]:
     for uid, iso in data.items():
         try:
             out[uid] = datetime.fromisoformat(iso)
-        except Exception:
+        except Exception as e:
+            logging.warning("Invalid voice time for user %s: %s", uid, e)
             continue
     return out
 
@@ -418,8 +418,8 @@ def _is_vc_permanent_message(msg: discord.Message) -> bool:
                         "create_vc_chat",
                     }:
                         return True
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("Error checking message buttons: %s", e)
 
     # Détection par description de l'embed (fallback)
     for e in msg.embeds or []:
@@ -449,7 +449,8 @@ def is_xp_viewer(inter: discord.Interaction) -> bool:
 async def generate_rank_card(
     user: discord.User, level: int, xp: int, xp_needed: int
 ):
-    from PIL import Image, ImageDraw
+    from PIL import Image
+    from PIL import ImageDraw
 
     img = Image.new("RGB", (460, 140), color=(30, 41, 59))
     draw = ImageDraw.Draw(img)
@@ -881,7 +882,8 @@ def _wire_ffmpeg_stderr_to_log(source):
     )
     if not proc or not getattr(proc, "stderr", None):
         return
-    import threading, collections
+    import threading
+    import collections
 
     tail = collections.deque(maxlen=50)
 
@@ -892,14 +894,14 @@ def _wire_ffmpeg_stderr_to_log(source):
                     text = line.decode("utf-8", "ignore").rstrip()
                     tail.append(text)
                     logging.debug("[ffmpeg] " + text)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logging.debug("FFmpeg stderr decode error: %s", e)
+        except Exception as e:
+            logging.debug("FFmpeg stderr reader error: %s", e)
         try:
             proc._stderr_tail = list(tail)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Failed to assign _stderr_tail: %s", e)
 
     threading.Thread(target=_reader, daemon=True).start()
 
@@ -916,8 +918,8 @@ async def _play_once(guild: discord.Guild) -> None:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
             await asyncio.sleep(0.2)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("Error stopping VC playback: %s", e)
 
     # Vérif FFmpeg
     if not FFMPEG_PATH or not os.path.isfile(FFMPEG_PATH):
@@ -931,8 +933,8 @@ async def _play_once(guild: discord.Guild) -> None:
     try:
         if getattr(guild, "premium_tier", 0) >= 1:
             bitrate = 128
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("Error determining bitrate: %s", e)
 
     try:
         audio_opts = (
@@ -969,12 +971,12 @@ async def _play_once(guild: discord.Guild) -> None:
             if proc:
                 try:
                     proc.wait()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.debug("FFmpeg wait error: %s", e)
                 rc = getattr(proc, "returncode", None)
-        except Exception:
+        except Exception as e:
             proc = None
-            pass
+            logging.debug("FFmpeg process error: %s", e)
 
         if rc is not None and rc < 0:
             logging.error(f"[radio] FFmpeg exited with signal {-rc} (rc={rc})")
@@ -999,8 +1001,8 @@ async def _play_once(guild: discord.Guild) -> None:
             logging.info(f"[radio] Lecture terminée (rc={rc})")
         try:
             done.set()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Error signalling completion: %s", e)
 
     # Lancer la lecture
     try:
@@ -1010,8 +1012,8 @@ async def _play_once(guild: discord.Guild) -> None:
         logging.exception("[radio] Impossible de lancer la lecture")
         try:
             source.cleanup()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Error during source cleanup: %s", e)
         await asyncio.sleep(5)
         return
 
@@ -1030,12 +1032,12 @@ async def _play_once(guild: discord.Guild) -> None:
     finally:
         try:
             vc.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Error stopping VC: %s", e)
         try:
             source.cleanup()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Error cleaning source: %s", e)
 
 
 # ───────────────── RADIO: boucle principale ─────────────────
@@ -1088,9 +1090,9 @@ async def grant_level_roles(
     if REMOVE_LOWER_TIER_ROLES:
         try:
             lower_roles = [
-                member.guild.get_role(LEVEL_ROLE_REWARDS[l])
-                for l in LEVEL_ROLE_REWARDS.keys()
-                if l < best_lvl
+                member.guild.get_role(LEVEL_ROLE_REWARDS[level])
+                for level in LEVEL_ROLE_REWARDS.keys()
+                if level < best_lvl
             ]
             lower_roles = [r for r in lower_roles if r and r in member.roles]
             if lower_roles:
@@ -1319,8 +1321,8 @@ async def rang(interaction: discord.Interaction):
     # Defer pour le spinner (et éviter timeout)
     try:
         await interaction.response.defer(ephemeral=True, thinking=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("rang defer failed: %s", e)
 
     user_id = str(interaction.user.id)
     async with XP_LOCK:
@@ -1340,8 +1342,8 @@ async def rang(interaction: discord.Interaction):
         file = discord.File(fp=image, filename="rank.png")
         try:
             await interaction.followup.send(file=file, ephemeral=True)
-        except discord.Forbidden:
-            pass
+        except discord.Forbidden as e:
+            logging.debug("Forbidden sending rank card: %s", e)
         except discord.HTTPException as e:
             logging.warning(
                 f"/rang: envoi ephemeral échoué, fallback public. Raison: {e}"
@@ -1426,8 +1428,8 @@ async def purge(
 ):
     try:
         await interaction.response.defer(thinking=True, ephemeral=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("xpadd defer failed: %s", e)
 
     if interaction.user.id != OWNER_ID:
         await interaction.followup.send(
@@ -1520,8 +1522,8 @@ async def ensure_vc_buttons_message():
             await msg.edit(content=None, embeds=[embed], view=view)
             try:
                 await msg.pin(reason="Message permanent des salons vocaux")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug("Pin failed: %s", e)
             logging.info("🔁 Message permanent (ID mémorisé) réattaché.")
             return
         except Exception:
@@ -1544,8 +1546,8 @@ async def ensure_vc_buttons_message():
             await found.edit(content=None, embeds=[embed], view=view)
             try:
                 await found.pin(reason="Message permanent des salons vocaux")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug("Pin failed: %s", e)
             _save_perma_msg_id(found.id)
             logging.info("🔁 Message permanent réattaché (via recherche).")
             return
@@ -1558,8 +1560,8 @@ async def ensure_vc_buttons_message():
         _save_perma_msg_id(new_msg.id)
         try:
             await new_msg.pin(reason="Message permanent des salons vocaux")
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Pin failed: %s", e)
         logging.info("📌 Message permanent publié (nouveau).")
     except Exception as e:
         logging.error(f"Erreur envoi message permanent: {e}")
@@ -2029,8 +2031,8 @@ class VCButtonView(discord.ui.View):
         # Auto-rename initial
         try:
             await maybe_rename_channel_by_game(vc, wait_presences=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Initial rename failed: %s", e)
 
         # Confirmation
         await safe_respond(
@@ -2536,8 +2538,8 @@ async def ensure_roles_buttons_message():
             await msg.edit(content=None, embeds=[embed], view=view)
             try:
                 await msg.pin(reason="Message rôles permanent")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug("Pin failed: %s", e)
             _save_roles_perma_msg_id(msg.id)
             logging.info(
                 "🔁 [roles] Message permanent réattaché via ID mémorisé."
@@ -2563,8 +2565,8 @@ async def ensure_roles_buttons_message():
             await found.edit(content=None, embeds=[embed], view=view)
             try:
                 await found.pin(reason="Message rôles permanent")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug("Pin failed: %s", e)
             _save_roles_perma_msg_id(found.id)
             logging.info(
                 "🔁 [roles] Message permanent réattaché (via recherche)."
@@ -2579,8 +2581,8 @@ async def ensure_roles_buttons_message():
         _save_roles_perma_msg_id(new_msg.id)
         try:
             await new_msg.pin(reason="Message rôles permanent")
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Pin failed: %s", e)
         logging.info("📌 [roles] Message permanent publié (nouveau).")
     except Exception as e:
         logging.error(f"[roles] Erreur envoi message permanent: {e}")
