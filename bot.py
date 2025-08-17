@@ -252,12 +252,19 @@ def save_voice_times(d: dict[str, datetime]):
     save_json(VOICE_TIMES_FILE, serializable)
 
 
+# --- Cache statistiques quotidiennes en mémoire ---
+DAILY_STATS_CACHE: dict = load_json(DAILY_STATS_FILE)
+
+
 def load_daily_stats() -> dict:
-    return load_json(DAILY_STATS_FILE)
+    """Retourne le cache des statistiques quotidiennes."""
+    return DAILY_STATS_CACHE
 
 
 def save_daily_stats(d: dict):
-    save_json(DAILY_STATS_FILE, d)
+    """Met à jour le cache des statistiques quotidiennes (persisté périodiquement)."""
+    DAILY_STATS_CACHE.clear()
+    DAILY_STATS_CACHE.update(d)
 
 
 # --- XP cache en mémoire (moins d'I/O, thread-safe via lock) ---
@@ -1176,7 +1183,6 @@ def incr_daily_stat(
     )
     stats[g][date_key][str(user_id)]["msg"] += msg_inc
     stats[g][date_key][str(user_id)]["voice_min"] += voice_min_inc
-    save_daily_stats(stats)
 
 
 # ─────────────────────── XP PUBLIC API (pour cogs) ───────────────────────
@@ -2100,6 +2106,8 @@ async def roles_refresh(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
+    load_daily_stats()
+
     # chunk des guilds
     try:
         for g in bot.guilds:
@@ -2151,6 +2159,9 @@ async def on_ready():
 
     if not _stats_update_loop.is_running():
         _stats_update_loop.start()
+
+    if not _stats_persist_loop.is_running():
+        _stats_persist_loop.start()
 
     logging.info(
         f"✅ Connecté en tant que {bot.user} (latence {bot.latency*1000:.0f} ms)"
@@ -2218,6 +2229,15 @@ async def _refresh_stats_channels(guild: discord.Guild) -> None:
 async def _stats_update_loop() -> None:
     for guild in bot.guilds:
         await _refresh_stats_channels(guild)
+
+
+@tasks.loop(minutes=5)
+async def _stats_persist_loop() -> None:
+    """Sauvegarde périodiquement les statistiques quotidiennes sur disque."""
+    try:
+        save_json(DAILY_STATS_FILE, load_daily_stats())
+    except Exception as e:
+        logging.error(f"Impossible de sauvegarder les stats quotidiennes: {e}")
 
 
 @bot.event
