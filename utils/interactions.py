@@ -16,7 +16,8 @@ async def safe_respond(inter: discord.Interaction, content=None, **kwargs):
             await inter.followup.send(content or "✅", **kwargs)
         else:
             await inter.response.send_message(content or "✅", **kwargs)
-    except discord.NotFound as e:
-        logging.debug(f"Interaction inconnue: {e}")
+    except discord.NotFound:
+        # L'interaction a expiré ou est invalide ; aucun log nécessaire
+        pass
     except Exception as e:
         logging.error(f"Réponse interaction échouée: {e}")
