@@ -537,10 +537,14 @@ _rename_state: dict[int, tuple[str, int, str | None]] = (
 async def maybe_rename_channel_by_game(
     ch: discord.VoiceChannel, *, wait_presences: bool = False
 ):
-    # ⛔ Ne jamais renommer le salon radio
-    if getattr(ch, "id", None) == RADIO_VC_ID:
+    # ⛔ Ne jamais renommer certains salons fixes
+    if getattr(ch, "id", None) in {RADIO_VC_ID, LOBBY_VC_ID}:
         return
     if not AUTO_RENAME_ENABLED or not isinstance(ch, discord.VoiceChannel):
+        return
+
+    # Ne renommer que les salons vocaux temporaires
+    if ch.id not in TEMP_VC_IDS:
         return
 
     if wait_presences:
@@ -549,8 +553,11 @@ async def maybe_rename_channel_by_game(
 
     base = _base_name_from_channel(ch)
 
-    # Salon vide → reset du nom de base
-    if not ch.members:
+    # Exclure les bots (dont le bot lui-même) des statistiques
+    members = [m for m in ch.members if not m.bot]
+
+    # Salon vide (aucun humain) → reset du nom de base
+    if not members:
         if ch.name != base and _can_rename(ch.id):
             try:
                 await ch.edit(
@@ -564,7 +571,7 @@ async def maybe_rename_channel_by_game(
 
     # Détection du jeu majoritaire (type Playing)
     counts: dict[str, int] = {}
-    for m in ch.members:
+    for m in members:
         acts = list(getattr(m, "activities", []) or [])
         single = getattr(m, "activity", None)
         if single and single not in acts:
@@ -584,7 +591,7 @@ async def maybe_rename_channel_by_game(
 
     game = max(counts, key=counts.get) if counts else None
     target = _target_name(base, game)
-    members_count = len(ch.members)
+    members_count = len(members)
 
     prev = _rename_state.get(ch.id)
     changed = (
@@ -2191,11 +2198,12 @@ async def _refresh_stats_channels(guild: discord.Guild) -> None:
     if not channels:
         return
 
-    total_members = guild.member_count
+    human_members = [m for m in guild.members if not m.bot]
+    total_members = len(human_members)
     online_members = sum(
-        1 for m in guild.members if m.status != discord.Status.offline
+        1 for m in human_members if m.status != discord.Status.offline
     )
-    voice_members = sum(1 for m in guild.members if m.voice)
+    voice_members = sum(1 for m in human_members if m.voice)
 
     try:
         await channels["members"].edit(
