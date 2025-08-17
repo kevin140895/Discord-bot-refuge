@@ -285,7 +285,6 @@ class RouletteCog(commands.Cog):
         self._last_announced_state = self.current_view_enabled
         try:
             await self._ensure_poster_message()
-            await self._ensure_state_message(self.current_view_enabled)
         except Exception as err:
             logging.warning("[Roulette] Init failed: %s", err)
         self.boundary_watch_loop.start()
