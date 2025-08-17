@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from utils.interactions import safe_respond
+from utils.persistence import atomic_write_json, schedule_checkpoint
 
 # Fichiers de persistance
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
@@ -53,9 +54,9 @@ def load_voice_times() -> dict[str, datetime]:
             continue
     return out
 
-def save_voice_times(d: dict[str, datetime]) -> None:
-    serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in d.items()}
-    save_json(VOICE_TIMES_FILE, serializable)
+async def save_voice_times_to_disk() -> None:
+    serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
+    await atomic_write_json(VOICE_TIMES_FILE, serializable)
 
 def _disk_load_xp() -> dict:
     ensure_data_dir()
@@ -158,8 +159,17 @@ class XPCog(commands.Cog):
     @tasks.loop(seconds=600)
     async def auto_backup_xp(self) -> None:
         await xp_flush_cache_to_disk()
-        save_voice_times(voice_times)
+        await save_voice_times_to_disk()
         logging.info("🛟 Sauvegarde périodique effectuée.")
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        await schedule_checkpoint(save_voice_times_to_disk)
 
     @auto_backup_xp.before_loop
     async def before_auto_backup_xp(self) -> None:
