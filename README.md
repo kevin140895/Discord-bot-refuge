@@ -23,3 +23,22 @@ Audio playback relies on FFmpeg. Some useful parameters can be tuned in
 
 Ces valeurs peuvent être ajustées dans la fonction `_before_opts()` et dans
 la variable `audio_opts` selon vos besoins.
+
+## Configuration du serveur
+
+Les IDs propres à votre serveur Discord (rôles, salons, catégories…) sont
+réunis dans le fichier [`config.py`](./config.py).
+Modifiez les valeurs de ce fichier pour correspondre à votre serveur.
+
+Pour récupérer un ID dans Discord, activez le *Mode développeur* puis
+faites un clic droit sur un élément et choisissez **Copier l'identifiant**.
+
+Exemple de personnalisation :
+
+```python
+# config.py
+ROLE_PC = 123456789012345678  # ID du rôle PC de votre serveur
+```
+
+`bot.py` et `view.py` importent ces constantes afin d'éviter toute valeur
+en dur dans le code.

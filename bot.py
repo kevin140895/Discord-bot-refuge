@@ -18,11 +18,30 @@ from utils.discord_utils import ensure_channel_has_message
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs
 from utils.interactions import safe_respond
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
-from view import (
-    PlayerTypeView,
+from view import PlayerTypeView
+from config import (
+    STATS_CATEGORY_ID,
     ROLE_PC,
     ROLE_CONSOLE,
     ROLE_MOBILE,
+    LEVEL_ROLE_REWARDS,
+    TEMP_VC_CATEGORY,
+    LOBBY_VC_ID,
+    RADIO_VC_ID,
+    RADIO_MUTED_ROLE_ID,
+    XP_VIEWER_ROLE_ID,
+    TOP_MSG_ROLE_ID,
+    TOP_VC_ROLE_ID,
+    MVP_ROLE_ID,
+    TEMP_VC_LIMITS,
+    LEVEL_UP_CHANNEL,
+    CHANNEL_ROLES,
+    CHANNEL_WELCOME,
+    LOBBY_TEXT_CHANNEL,
+    TIKTOK_ANNOUNCE_CH,
+    ACTIVITY_SUMMARY_CH,
+    ROULETTE_CHANNEL_ID,
+    OWNER_ID,
 )
 
 
@@ -42,7 +61,6 @@ intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ── Salons statistiques du serveur ─────────────────────────
-STATS_CATEGORY_ID = 1406408038692294676  # Catégorie "📊 Statistiques"
 STATS_CHANNELS = {
     "members": "👥 Membres",
     "online": "🟢 En ligne",
@@ -55,11 +73,7 @@ VOICE_XP_PER_MIN = 3  # XP par minute en vocal
 REMOVE_LOWER_TIER_ROLES = True
 
 # ── Récompenses par niveau (requis par grant_level_roles)
-LEVEL_ROLE_REWARDS = {
-    5: 1403510226354700430,  # Bronze
-    10: 1403510368340410550,  # Argent
-    20: 1403510466818605118,  # Or
-}
+# Définies dans config.py
 
 # ── Rôles plateformes + notifications
 
@@ -69,23 +83,11 @@ PLATFORM_ROLE_IDS = {
     "Consoles": ROLE_CONSOLE,
     "Mobile": ROLE_MOBILE,
 }
-TEMP_VC_CATEGORY = 1400559884117999687  # ID catégorie vocale temporaire
-LOBBY_VC_ID = 1405630965803520221
-RADIO_VC_ID: int = 1405695147114758245
-RADIO_MUTED_ROLE_ID = 1403510368340410550  # rôle à mute dans le canal radio
 RADIO_STREAM_URL = "http://stream.laut.fm/englishrap"
-XP_VIEWER_ROLE_ID = 1403510368340410550  # rôle autorisé à voir l'XP serveur
-TOP_MSG_ROLE_ID = 1406412171965104208  # Écrivain du Refuge
-TOP_VC_ROLE_ID = 1406412383878119485   # Voix du Refuge
-MVP_ROLE_ID = 1406412507433795595      # MVP du Refuge
 
 
 # ── LIMITES & AUTO-RENAME SALONS TEMP ──────────────────────
-# Limite par catégorie (par défaut: pas de limite si non présent dans ce dict)
-TEMP_VC_LIMITS: dict[int, int] = {
-    TEMP_VC_CATEGORY: 5,  # ex: max 5 salons temporaires dans la catégorie "temp"
-    # 1400553078373089301: 3,  # (optionnel) limite pour la catégorie LFG "fps"
-}
+# TEMP_VC_LIMITS défini dans config.py
 
 # Auto-rename du salon selon le jeu détecté (Discord Rich Presence)
 AUTO_RENAME_ENABLED = True
@@ -96,16 +98,9 @@ AUTO_RENAME_FORMAT = "{base} • {game}"
 AUTO_RENAME_COOLDOWN_SEC = 15
 
 # ─────────────────────── CONFIG ─────────────────────────────
-LEVEL_UP_CHANNEL = 1402419913716531352
-CHANNEL_ROLES = 1400560866478395512
-CHANNEL_WELCOME = 1400550333796716574
-LOBBY_TEXT_CHANNEL = 1402258805533970472
-TIKTOK_ANNOUNCE_CH = 1400552164979507263
-ACTIVITY_SUMMARY_CH = 1400552164979507263
-ROULETTE_CHANNEL_ID = 1405170020748755034
+# IDs des salons et rôles configurables dans config.py
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
-OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
 
 VC_PROFILES = {
     "PC": {"emoji": "💻"},
@@ -1506,7 +1501,7 @@ async def ensure_vc_buttons_message():
 
     # Texte visible par les membres (sans le marqueur)
     display_text = (
-        "🎮 Rejoins d'abord <#1405630965803520221> puis choisis ton salon :\n"
+        f"🎮 Rejoins d'abord <#{LOBBY_VC_ID}> puis choisis ton salon :\n"
         "• 💻 PC\n"
         "• 🔄 Crossplay\n"
         "• 🎮 Consoles\n"
@@ -2087,7 +2082,7 @@ class VCButtonView(discord.ui.View):
     description="Reposter/reattacher le message des rôles (réservé au propriétaire)",
 )
 async def roles_refresh(interaction: discord.Interaction):
-    if interaction.user.id != 541417878314942495:
+    if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message(
             "❌ Tu n'as pas la permission d'utiliser cette commande.",
             ephemeral=True,
