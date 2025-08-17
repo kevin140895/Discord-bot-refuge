@@ -81,20 +81,27 @@ class TempVCCog(commands.Cog):
         if not channel.members:
             return None
         base = self._base_name_from_members(channel.members)
-        status = "Chat"
+
+        # Priorité : nom du jeu > "Endormie" > "Chat"
+        game_name = None
         for m in channel.members:
-            if m.voice and m.voice.self_mute:
-                status = "Endormie"
-                break
             for act in m.activities:
                 if isinstance(act, discord.Game) or (
                     isinstance(act, discord.Activity)
                     and act.type is discord.ActivityType.playing
                 ):
-                    status = act.name
+                    game_name = act.name
                     break
-            if status not in {"Chat", "Endormie"}:
+            if game_name:
                 break
+
+        if game_name:
+            status = game_name
+        elif any(m.voice and m.voice.self_mute for m in channel.members):
+            status = "Endormie"
+        else:
+            status = "Chat"
+
         return f"{base} • {status}"
 
     async def _rename_channel(self, channel: discord.VoiceChannel) -> None:
