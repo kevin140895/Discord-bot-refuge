@@ -45,11 +45,24 @@ class TempVCCog(commands.Cog):
                 return name
         return "Chat"
 
+    def _base_name_from_members(self, members: list[discord.Member]) -> str:
+        """Détermine le nom principal selon les rôles des membres du salon."""
+        platforms = {
+            self._base_name_for(m)
+            for m in members
+            if self._base_name_for(m) != "Chat"
+        }
+        if len(platforms) == 1:
+            return next(iter(platforms))
+        if len(platforms) > 1:
+            return "Crossplay"
+        return "Chat"
+
     async def _update_channel_name(self, channel: discord.VoiceChannel) -> None:
         """Renomme le salon selon l'activité ou le statut du membre."""
         if not channel.members:
             return
-        base = channel.name.split("•", 1)[0].strip()
+        base = self._base_name_from_members(channel.members)
         status = "Chat"
         for m in channel.members:
             if m.voice and m.voice.self_mute:
