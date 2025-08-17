@@ -71,7 +71,6 @@ PLATFORM_ROLE_IDS = {
     "Mobile": ROLE_MOBILE,
 }
 TEMP_VC_CATEGORY = 1400559884117999687  # ID catégorie vocale temporaire
-TEMP_VC_TEMPLATE_NAME = "template"
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID: int = 1405695147114758245
 RADIO_MUTED_ROLE_ID = 1403510368340410550  # rôle à mute dans le canal radio
@@ -1983,80 +1982,42 @@ class VCButtonView(discord.ui.View):
                     ephemeral=True,
                 )
 
-        # Création du vocal à partir du template + permission membre
+        # Création du vocal avec permissions explicites
         name = next_vc_name(guild, profile)
-        template = discord.utils.get(
-            category.voice_channels, name=TEMP_VC_TEMPLATE_NAME
-        )
-        if template is None:
+        try:
+            vc = await guild.create_voice_channel(
+                name,
+                category=category,
+                reason=(
+                    f"Salon temporaire ({profile}) demandé depuis le lobby par {member}"
+                ),
+            )
+            await vc.set_permissions(guild.default_role, connect=True, speak=True)
+            await vc.set_permissions(member, connect=True, speak=True)
+            TEMP_VC_IDS.add(vc.id)
+            save_temp_vc_ids(TEMP_VC_IDS)
             try:
-                vc = await guild.create_voice_channel(
-                    name,
-                    category=category,
-                    reason=(
-                        f"Salon temporaire ({profile}) demandé depuis le lobby par {member}"
-                    ),
+                await member.move_to(
+                    vc, reason="Choix de type depuis le lobby (move obligatoire)"
                 )
-                await vc.set_permissions(member, connect=True, speak=True)
-                TEMP_VC_IDS.add(vc.id)
-                save_temp_vc_ids(TEMP_VC_IDS)
-                try:
-                    await member.move_to(
-                        vc, reason="Choix de type depuis le lobby (move obligatoire)"
-                    )
-                except Exception as e:
-                    logging.warning(f"Move failed after create_voice_channel: {e}")
-                    try:
-                        await vc.delete(reason="Rollback: déplacement impossible")
-                    except Exception as de:
-                        logging.error(f"Rollback delete failed: {de}")
-                    TEMP_VC_IDS.discard(vc.id)
-                    save_temp_vc_ids(TEMP_VC_IDS)
-                    return await safe_respond(
-                        interaction,
-                        "❌ Je n’ai pas pu te déplacer. Vérifie que tu es bien **dans le vocal lobby** et réessaie.",
-                        ephemeral=True,
-                    )
             except Exception as e:
-                logging.error(f"Erreur création VC: {e}")
-                return await safe_respond(
-                    interaction, "❌ Impossible de créer le salon.", ephemeral=True
-                )
-        else:
-            try:
-                vc = await template.clone(
-                    name=name,
-                    reason=(
-                        f"Salon temporaire ({profile}) demandé depuis le lobby par {member}"
-                    ),
-                )
-                if vc.category != category:
-                    await vc.edit(category=category)
-                await vc.set_permissions(member, connect=True, speak=True)
-                TEMP_VC_IDS.add(vc.id)
-                save_temp_vc_ids(TEMP_VC_IDS)
+                logging.warning(f"Move failed after create_voice_channel: {e}")
                 try:
-                    await member.move_to(
-                        vc, reason="Choix de type depuis le lobby (move obligatoire)"
-                    )
-                except Exception as e:
-                    logging.error(f"Move failed (rollback): {e}")
-                    try:
-                        await vc.delete(reason="Rollback: déplacement impossible")
-                    except Exception as de:
-                        logging.error(f"Rollback delete failed: {de}")
-                    TEMP_VC_IDS.discard(vc.id)
-                    save_temp_vc_ids(TEMP_VC_IDS)
-                    return await safe_respond(
-                        interaction,
-                        "❌ Je n’ai pas pu te déplacer. Vérifie que tu es bien **dans le vocal lobby** et réessaie.",
-                        ephemeral=True,
-                    )
-            except Exception as e:
-                logging.error(f"Erreur création VC: {e}")
+                    await vc.delete(reason="Rollback: déplacement impossible")
+                except Exception as de:
+                    logging.error(f"Rollback delete failed: {de}")
+                TEMP_VC_IDS.discard(vc.id)
+                save_temp_vc_ids(TEMP_VC_IDS)
                 return await safe_respond(
-                    interaction, "❌ Impossible de créer le salon.", ephemeral=True
+                    interaction,
+                    "❌ Je n’ai pas pu te déplacer. Vérifie que tu es bien **dans le vocal lobby** et réessaie.",
+                    ephemeral=True,
                 )
+        except Exception as e:
+            logging.error(f"Erreur création VC: {e}")
+            return await safe_respond(
+                interaction, "❌ Impossible de créer le salon.", ephemeral=True
+            )
 
         # Auto-rename initial
         try:
