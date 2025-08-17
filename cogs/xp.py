@@ -213,12 +213,9 @@ class XPCog(commands.Cog):
         if not lines:
             await safe_respond(interaction, "Aucun membre trouvé.", ephemeral=True)
             return
-        report = "
-".join(lines)
+        report = "\n".join(lines)
         if len(report) < 1900:
-            await safe_respond(interaction, f"```
-{report}
-```", ephemeral=True)
+            await safe_respond(interaction, f"```\n{report}\n```", ephemeral=True)
         else:
             file = discord.File(io.StringIO(report), filename="xp_serveur.txt")
             await safe_respond(interaction, "📄 Liste XP en pièce jointe.", ephemeral=True, file=file)
