@@ -183,6 +183,26 @@ class XPCog(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ) -> None:
+        # Ignorer si l'utilisateur ne change pas réellement de salon
+        if before.channel == after.channel:
+            await schedule_checkpoint(save_voice_times_to_disk)
+            return
+
+        now = datetime.now(timezone.utc)
+        uid = str(member.id)
+
+        # Déconnexion ou changement de salon : calculer la durée et attribuer l'XP
+        if before.channel is not None:
+            start = voice_times.pop(uid, None)
+            if start is not None:
+                duration = now - start
+                xp_amount = int(duration.total_seconds() // 60)
+                await award_xp(member.id, xp_amount)
+
+        # Connexion à un nouveau salon
+        if after.channel is not None:
+            voice_times[uid] = now
+
         await schedule_checkpoint(save_voice_times_to_disk)
 
     @auto_backup_xp.before_loop
