@@ -19,6 +19,8 @@ ROLE_ID = 1405170057792979025
 CHANNEL_ID = 1405170020748755034
 REWARDS = [0, 5, 50, 500]
 WEIGHTS = [40, 40, 18, 2]
+SPIN_GIF_URL = "https://media.tenor.com/ZzOaGh2sg2AAAAAi/roulette-spin.gif"
+WIN_GIF_URL = "https://media.tenor.com/XwI-iYdkfVIAAAAi/lottery-winner.gif"
 
 def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -133,6 +135,21 @@ class RouletteView(discord.ui.View):
                     f"(jusqu’au **{expires_at_txt}**)."
                 )
 
+            ch = cog.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+            if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                try:
+                    embed = discord.Embed(
+                        title="🎉 Jackpot !",
+                        description=(
+                            f"{interaction.user.mention} a gagné **500 XP** à la roulette !"
+                        ),
+                        color=0xFFD700,
+                    )
+                    embed.set_image(url=WIN_GIF_URL)
+                    await ch.send(embed=embed)
+                except Exception as e:
+                    logging.error("[Roulette] Échec annonce gagnant: %s", e)
+
         try:
             announce = getattr(cog.bot, "announce_level_up", None)
             if announce and new_lvl > old_lvl:
@@ -147,9 +164,14 @@ class RouletteView(discord.ui.View):
             logging.error("[Roulette] announce_level_up échouée: %s", e)
 
         await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send("🎰 La roulette tourne…", ephemeral=True)
-        await asyncio.sleep(10)
-        await interaction.edit_original_response(content=msg)
+        spin_embed = discord.Embed(title="🎰 La roulette tourne…")
+        spin_embed.set_image(url=SPIN_GIF_URL)
+        spin_msg = await interaction.followup.send(
+            embed=spin_embed,
+            ephemeral=True,
+        )
+        await asyncio.sleep(5)
+        await spin_msg.edit(content=msg, embed=None)
 
 
 class RouletteCog(commands.Cog):
