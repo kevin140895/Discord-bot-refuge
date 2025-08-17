@@ -26,7 +26,9 @@ TEMP_VC_LIMITS = {TEMP_VC_CATEGORY: 5}
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID = 1405695147114758245
 RADIO_MUTED_ROLE_ID = 1403510368340410550
-RADIO_STREAM_URL = os.getenv("RADIO_STREAM_URL", "https://listen.moe/stream")
+RADIO_STREAM_URL = os.getenv(
+    "RADIO_STREAM_URL", "http://stream.laut.fm/englishrap"
+)
 
 # ── Divers ───────────────────────────────────────────────────
 XP_VIEWER_ROLE_ID = 1403510368340410550
