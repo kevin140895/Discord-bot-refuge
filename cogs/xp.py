@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -152,6 +153,9 @@ class XPCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.auto_backup_xp.start()
+        self._message_cooldown = commands.CooldownMapping.from_cooldown(
+            1, 60.0, commands.BucketType.user
+        )
 
     def cog_unload(self) -> None:
         self.auto_backup_xp.cancel()
@@ -161,6 +165,16 @@ class XPCog(commands.Cog):
         await xp_flush_cache_to_disk()
         await save_voice_times_to_disk()
         logging.info("🛟 Sauvegarde périodique effectuée.")
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot or message.guild is None:
+            return
+        bucket = self._message_cooldown.get_bucket(message)
+        if bucket.update_rate_limit():
+            return
+        amount = random.randint(5, 15)
+        await award_xp(message.author.id, amount)
 
     @commands.Cog.listener()
     async def on_voice_state_update(
