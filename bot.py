@@ -1517,11 +1517,13 @@ async def ensure_vc_buttons_message():
 
     # Texte visible par les membres (sans le marqueur)
     display_text = (
-        "🎮 Rejoins d'abord <#1405630965803520221> puis choisis ton salon :\n"
-        "• 💻 PC\n"
-        "• 🔄 Crossplay\n"
-        "• 🎮 Consoles\n"
-        "• 💬 Chat"
+        "**🚀 Prêt à jouer ?**\n\n"
+        "1️⃣ Rejoins ⁠💤・Salle d’attente vocal\n"
+        "2️⃣ Choisis ta team ⬇️\n\n"
+        "💻 → **PC**\n"
+        "🔄 → **Crossplay**\n"
+        "🎮 → **Consoles**\n"
+        "💬 → **Chat**"
     )
     embed = discord.Embed(description=display_text, color=0x00C896)
 
