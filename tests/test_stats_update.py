@@ -17,14 +17,21 @@ class DummyCategory:
 
 
 class DummyMember:
-    def __init__(self, status):
+    def __init__(self, status, bot=False):
         self.status = status
+        self.bot = bot
+
+
+class DummyVoiceChannel:
+    def __init__(self, members):
+        self.members = members
 
 
 class DummyGuild:
-    def __init__(self, members, category):
+    def __init__(self, members, category, voice_channels):
         self.members = members
         self._category = category
+        self.voice_channels = voice_channels
 
     @property
     def member_count(self):
@@ -40,10 +47,15 @@ class DummyGuild:
 async def test_update_stats_changes_channel_names(monkeypatch):
     ch1 = DummyChannel()
     ch2 = DummyChannel()
-    category = DummyCategory([ch1, ch2])
+    ch3 = DummyChannel()
+    category = DummyCategory([ch1, ch2, ch3])
+    voice_channel = DummyVoiceChannel(
+        [DummyMember(discord.Status.online), DummyMember(discord.Status.online, bot=True)]
+    )
     guild = DummyGuild(
         [DummyMember(discord.Status.online), DummyMember(discord.Status.offline)],
         category,
+        [voice_channel],
     )
 
     async def fake_safe_channel_edit(channel, **kwargs):
@@ -57,8 +69,10 @@ async def test_update_stats_changes_channel_names(monkeypatch):
 
     await cog.update_stats(guild)
 
-    assert ch1.name == f"Members: {guild.member_count}"
+    assert ch1.name == f"👥 Membres : {guild.member_count}"
     online = sum(1 for m in guild.members if m.status != discord.Status.offline)
-    assert ch2.name == f"Online: {online}"
+    assert ch2.name == f"🟢 En ligne : {online}"
+    voice = sum(len([m for m in vc.members if not m.bot]) for vc in guild.voice_channels)
+    assert ch3.name == f"🔊 Voc : {voice}"
 
     await bot.close()
