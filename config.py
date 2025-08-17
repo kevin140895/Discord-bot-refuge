@@ -22,6 +22,7 @@ LEVEL_ROLE_REWARDS = {
 # ── Salons temporaires & radio ───────────────────────────────
 TEMP_VC_CATEGORY = 1400559884117999687
 TEMP_VC_LIMITS = {TEMP_VC_CATEGORY: 5}
+RENAME_DELAY = 5  # délai en secondes avant renommage des salons temporaires
 
 LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID = 1405695147114758245

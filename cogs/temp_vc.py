@@ -12,6 +12,7 @@ from config import (
     ROLE_PC,
     TEMP_VC_CATEGORY,
     TEMP_VC_LIMITS,
+    RENAME_DELAY,
 )
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
@@ -99,7 +100,7 @@ class TempVCCog(commands.Cog):
     async def _rename_channel(self, channel: discord.VoiceChannel) -> None:
         """Tâche différée effectuant le renommage du salon."""
         try:
-            await asyncio.sleep(5)
+            await asyncio.sleep(RENAME_DELAY)
             task = asyncio.current_task()
             if self._rename_tasks.get(channel.id) is not task:
                 return
