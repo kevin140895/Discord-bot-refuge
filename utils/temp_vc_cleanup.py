@@ -5,7 +5,7 @@ from typing import Iterable
 import discord
 from discord.ext import commands
 
-TEMP_VC_NAME_RE = re.compile(r"^(PC|Crossplay|Consoles|Chat)(?:\b.*)?$", re.I)
+TEMP_VC_NAME_RE = re.compile(r"^(PC|Console|Mobile|Crossplay|Chat)(?:\b.*)?$", re.I)
 
 
 async def delete_untracked_temp_vcs(
