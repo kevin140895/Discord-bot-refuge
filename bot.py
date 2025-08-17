@@ -2219,7 +2219,24 @@ async def _refresh_stats_channels(guild: discord.Guild) -> None:
         logging.warning(f"Impossible de mettre à jour les salons de stats: {e}")
 
 
-@tasks.loop(minutes=10)
+_STATS_REFRESH_DELAY = 5
+_stats_refresh_tasks: dict[int, asyncio.Task] = {}
+
+
+def _schedule_stats_refresh(guild: discord.Guild) -> None:
+    """Planifie une mise à jour des salons statistiques avec un léger délai."""
+    task = _stats_refresh_tasks.get(guild.id)
+    if task and not task.done():
+        return
+
+    async def _delayed_refresh() -> None:
+        await asyncio.sleep(_STATS_REFRESH_DELAY)
+        await _refresh_stats_channels(guild)
+
+    _stats_refresh_tasks[guild.id] = asyncio.create_task(_delayed_refresh())
+
+
+@tasks.loop(minutes=1)
 async def _stats_update_loop() -> None:
     for guild in bot.guilds:
         await _refresh_stats_channels(guild)
@@ -2235,13 +2252,13 @@ async def _stats_persist_loop() -> None:
 
 
 @bot.event
-async def on_member_join(member: discord.Member):
-    await _refresh_stats_channels(member.guild)
+async def on_member_remove(member: discord.Member):
+    _schedule_stats_refresh(member.guild)
 
 
 @bot.event
-async def on_member_remove(member: discord.Member):
-    await _refresh_stats_channels(member.guild)
+async def on_presence_update(before: discord.Member, after: discord.Member):
+    _schedule_stats_refresh(after.guild)
 
 
 @bot.event
@@ -2290,6 +2307,7 @@ async def on_message(message: discord.Message):
 
 @bot.event
 async def on_member_join(member: discord.Member):
+    _schedule_stats_refresh(member.guild)
     channel = bot.get_channel(CHANNEL_WELCOME)
     if not isinstance(channel, discord.TextChannel):
         logging.warning("❌ Salon de bienvenue introuvable.")
@@ -2315,6 +2333,7 @@ async def on_voice_state_update(
     before: discord.VoiceState,
     after: discord.VoiceState,
 ):
+    _schedule_stats_refresh(member.guild)
     uid = str(member.id)
 
     # ── Auto-rename: ancien et nouveau salon (no-op si AUTO_RENAME_ENABLED=False)
