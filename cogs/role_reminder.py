@@ -387,8 +387,8 @@ class RoleReminderCog(commands.Cog):
             try:
                 msg = await ch.fetch_message(int(rec.get("message_id")))
                 await msg.delete()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug("Failed to delete reminder message: %s", e)
 
         self.reminders.get(g_key, {}).pop(u_key, None)
         self._save_state()
@@ -400,5 +400,5 @@ async def setup(bot: commands.Bot):
     # enregistrer le groupe (idempotent)
     try:
         bot.tree.add_command(RoleReminderCog.group)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("Failed to add RoleReminder group: %s", e)
