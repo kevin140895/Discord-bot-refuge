@@ -32,18 +32,26 @@ async def atomic_write_json(path: Union[str, os.PathLike[str]], data: Any) -> No
 
 _checkpoint_lock = asyncio.Lock()
 _checkpoint_task: asyncio.Task | None = None
-VOICE_CP_DEBOUNCE_SECONDS = float(os.getenv("VOICE_CP_DEBOUNCE_SECONDS", "2"))
+# Interval (seconds) between automatic voice_times checkpoints.
+# Defaults to 5 minutes to reduce disk writes.
+VOICE_CP_DEBOUNCE_SECONDS = float(os.getenv("VOICE_CP_DEBOUNCE_SECONDS", "300"))
 
 
 async def schedule_checkpoint(
     save_fn: Callable[[], Awaitable[None]],
     delay: float = VOICE_CP_DEBOUNCE_SECONDS,
 ) -> None:
-    """Schedule ``save_fn`` after ``delay`` seconds, debouncing rapid calls."""
+    """Schedule ``save_fn`` to run after ``delay`` seconds.
+
+    Unlike a debounce, once a checkpoint is scheduled it will not be
+    cancelled by subsequent calls. This throttles saves so they happen at
+    most once per ``delay`` interval.
+    """
     global _checkpoint_task
     async with _checkpoint_lock:
         if _checkpoint_task and not _checkpoint_task.done():
-            _checkpoint_task.cancel()
+            # A checkpoint is already scheduled; do nothing to avoid rescheduling
+            return
 
         async def _run() -> None:
             try:
@@ -54,5 +62,8 @@ async def schedule_checkpoint(
                 pass
             except Exception:
                 logging.exception("voice_times checkpoint failed")
+            finally:
+                # Allow future checkpoints to be scheduled
+                _checkpoint_task = None
 
         _checkpoint_task = asyncio.create_task(_run())
