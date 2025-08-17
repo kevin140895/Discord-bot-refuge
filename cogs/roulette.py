@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from utils.timewin import is_open_now, next_boundary_dt
 from storage.roulette_store import RouletteStore
+from .xp import award_xp
 
 PARIS_TZ = "Europe/Paris"
 ANNOUNCE_CHANNEL_ID = 1400552164979507263
@@ -83,10 +84,10 @@ class RouletteView(discord.ui.View):
 
         gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
         try:
-            old_lvl, new_lvl, total_xp = await cog.bot.award_xp(
+            old_lvl, new_lvl, total_xp = await award_xp(
                 interaction.user.id,
                 gain,
-            )  # type: ignore[attr-defined]
+            )
         except Exception as e:
             logging.exception("[Roulette] award_xp a échoué: %s", e)
             return await interaction.response.send_message(
