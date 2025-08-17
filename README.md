@@ -57,6 +57,17 @@ export DATA_DIR=/chemin/vers/mes/données
 Assurez-vous que ce dossier existe et est accessible en lecture/écriture par
 le bot.
 
+### Sauvegarde des sessions vocales
+
+Les heures d'entrée des membres en vocal sont stockées dans
+`data/voice_times.json`. Chaque événement vocal programme un *checkpoint*
+debouncé (2 s par défaut) qui écrit ce fichier de manière atomique dans un
+thread séparé afin de ne pas bloquer l'event loop. Une sauvegarde
+périodique toutes les 10 minutes est conservée en secours.
+
+Le délai de debounce peut être ajusté via la variable d'environnement
+`VOICE_CP_DEBOUNCE_SECONDS`.
+
 ## Limitation des éditions de salon
 
 Pour éviter les erreurs HTTP 429 causées par des modifications trop fréquentes
