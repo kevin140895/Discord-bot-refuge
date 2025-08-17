@@ -1,16 +1,16 @@
 # Discord Bot Refuge
 
-This Discord bot requires the Opus audio codec library for voice features.
+This Discord bot requires the Opus audio codec library and FFmpeg for voice features.
 
 ## System dependencies
 
-Install `libopus0` on Debian/Ubuntu:
+Install `libopus0` and `ffmpeg` on Debian/Ubuntu:
 
 ```bash
-sudo apt install libopus0
+sudo apt install libopus0 ffmpeg
 ```
 
-The `nixpacks.toml` build configuration already lists `libopus0` to ensure the library is present in production environments.
+The `nixpacks.toml` build configuration already lists `libopus0` to ensure the library is present in production environments.  The Python dependencies in [`requirements.txt`](./requirements.txt) include `discord.py[voice]` and `imageio-ffmpeg` so FFmpeg support is available.
 
 ## FFmpeg options
 
