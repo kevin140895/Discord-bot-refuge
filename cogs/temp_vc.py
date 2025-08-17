@@ -104,10 +104,17 @@ class TempVCCog(commands.Cog):
             task = asyncio.current_task()
             if self._rename_tasks.get(channel.id) is not task:
                 return
+            # Le salon peut avoir été supprimé pendant l'attente
+            if getattr(channel, "guild", None) and channel.guild.get_channel(channel.id) is None:
+                return
+
             new = self._compute_channel_name(channel)
             if new and channel.name != new:
                 try:
                     await safe_channel_edit(channel, name=new)
+                except discord.NotFound:
+                    # Le salon n'existe plus, rien à faire
+                    return
                 except discord.HTTPException:
                     logging.exception("Renommage du salon %s échoué", channel.id)
         except asyncio.CancelledError:
