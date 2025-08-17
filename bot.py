@@ -877,13 +877,13 @@ def _ff_headers() -> str:
 def _before_opts() -> str:
     """FFmpeg arguments placed before the input URL.
 
-    -bufsize 64k: limit the internal buffer to reduce latency.
+    -buffer_size 64k: limit the input buffer to reduce latency.
     -probesize 32k: lower probe size so the stream starts faster.
     """
     return (
         "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
         "-protocol_whitelist file,http,https,tcp,tls,crypto,pipe "
-        "-bufsize 64k -probesize 32k "
+        "-buffer_size 64k -probesize 32k "
         f'-headers "{_ff_headers()}"'
     )
 
