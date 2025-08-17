@@ -336,17 +336,21 @@ async def xp_flush_cache_to_disk():
         )
 
 
-# (optionnel) tu peux remplacer ta tâche auto_backup_xp par une version plus fréquente
-async def auto_backup_xp(interval_seconds: int = 600):  # toutes les 10 min
+@tasks.loop(seconds=600)
+async def auto_backup_xp():
+    await xp_flush_cache_to_disk()
+    save_voice_times(voice_times)
+    logging.info("🛟 Sauvegarde périodique effectuée.")
+
+
+@auto_backup_xp.before_loop
+async def before_auto_backup_xp():
     await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            await xp_flush_cache_to_disk()
-            save_voice_times(voice_times)
-            logging.info("🛟 Sauvegarde périodique effectuée.")
-        except Exception as e:
-            logging.error(f"❌ Erreur sauvegarde périodique: {e}")
-        await asyncio.sleep(interval_seconds)
+
+
+@auto_backup_xp.error
+async def auto_backup_xp_error(e: Exception):
+    logging.error(f"❌ Erreur sauvegarde périodique: {e}")
 
 
 # ── PERSISTANCE DU MESSAGE PERMANENT VC ────────────────────
@@ -1861,28 +1865,38 @@ async def weekly_summary_loop():
                     )
 
 
+@tasks.loop(seconds=5)
 async def auto_rename_poll():
+    for vc_id in list(TEMP_VC_IDS):
+        ch = bot.get_channel(vc_id)
+        if isinstance(ch, discord.VoiceChannel):
+            await maybe_rename_channel_by_game(ch)
+
+
+@auto_rename_poll.before_loop
+async def before_auto_rename_poll():
     await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            for vc_id in list(TEMP_VC_IDS):
-                ch = bot.get_channel(vc_id)
-                if isinstance(ch, discord.VoiceChannel):
-                    await maybe_rename_channel_by_game(ch)
-        except Exception as e:
-            logging.debug(f"auto_rename_poll error: {e}")
-        await asyncio.sleep(5)  # toutes les 5s pour une réaction plus rapide
 
 
-async def vc_buttons_watchdog(interval_seconds: int = 120):
+@auto_rename_poll.error
+async def auto_rename_poll_error(e: Exception):
+    logging.debug(f"auto_rename_poll error: {e}")
+
+
+@tasks.loop(seconds=120)
+async def vc_buttons_watchdog():
     """Vérifie périodiquement que le message permanent existe et est à jour."""
+    await ensure_vc_buttons_message()
+
+
+@vc_buttons_watchdog.before_loop
+async def before_vc_buttons_watchdog():
     await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            await ensure_vc_buttons_message()
-        except Exception as e:
-            logging.debug(f"vc_buttons_watchdog: {e}")
-        await asyncio.sleep(interval_seconds)
+
+
+@vc_buttons_watchdog.error
+async def vc_buttons_watchdog_error(e: Exception):
+    logging.debug(f"vc_buttons_watchdog: {e}")
 
 
 # ─────────────────────── VIEWS ─────────────────────────────
@@ -2465,13 +2479,13 @@ async def _setup_hook():
     bot.add_view(LiveTikTokView())
     bot.add_view(PlayerTypeView())
 
-    asyncio.create_task(vc_buttons_watchdog())
-    asyncio.create_task(auto_backup_xp())
+    vc_buttons_watchdog.start()
+    auto_backup_xp.start()
     asyncio.create_task(ensure_vc_buttons_message())
     asyncio.create_task(ensure_roles_buttons_message())
     asyncio.create_task(daily_summary_loop())  # Résumé quotidien
     asyncio.create_task(weekly_summary_loop())  # Résumé hebdo
-    asyncio.create_task(auto_rename_poll())
+    auto_rename_poll.start()
 
     # 🔽 CHARGER L’EXTENSION AVANT LA SYNC (et l’await !)
     try:
