@@ -1,12 +1,11 @@
 import asyncio
 import logging
-import os
 from typing import Optional
 
 import discord
 from discord.ext import commands
 
-from config import RADIO_VC_ID
+from config import RADIO_VC_ID, RADIO_STREAM_URL
 
 FFMPEG_BEFORE = "-fflags nobuffer -probesize 32k"
 FFMPEG_OPTIONS = "-filter:a loudnorm"
@@ -18,7 +17,7 @@ class RadioCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.vc_id = RADIO_VC_ID
-        self.stream_url: Optional[str] = os.getenv("RADIO_STREAM_URL")
+        self.stream_url: Optional[str] = RADIO_STREAM_URL
         self.voice: Optional[discord.VoiceClient] = None
         self._reconnect_task: Optional[asyncio.Task] = None
 
