@@ -15,6 +15,7 @@ from config import (
 )
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs
+from utils.discord_utils import safe_channel_edit
 
 # IDs des salons vocaux temporaires connus
 TEMP_VC_IDS: Set[int] = set(load_temp_vc_ids())
@@ -91,7 +92,7 @@ class TempVCCog(commands.Cog):
             new = self._compute_channel_name(channel)
             if new and channel.name != new:
                 try:
-                    await channel.edit(name=new)
+                    await safe_channel_edit(channel, name=new)
                 except discord.HTTPException:
                     logging.exception("Renommage du salon %s échoué", channel.id)
         except asyncio.CancelledError:
