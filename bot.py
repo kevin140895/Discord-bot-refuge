@@ -508,30 +508,11 @@ async def _rebuild_temp_vc_ids() -> None:
 
 
 async def ensure_temp_vc_template(bot: commands.Bot) -> None:
-    """Garantit la présence d'un salon vocal modèle."""
-    category = bot.get_channel(TEMP_VC_CATEGORY)
-    if not isinstance(category, discord.CategoryChannel):
-        logging.warning(
-            "Catégorie vocale temporaire introuvable (%s)", TEMP_VC_CATEGORY
-        )
-        return
-    template = discord.utils.get(category.voice_channels, name=TEMP_VC_TEMPLATE_NAME)
-    if template:
-        return
-    overwrites = {
-        category.guild.default_role: PermissionOverwrite(connect=False, speak=False)
-    }
-    try:
-        await category.guild.create_voice_channel(
-            TEMP_VC_TEMPLATE_NAME,
-            category=category,
-            bitrate=96000,
-            user_limit=0,
-            overwrites=overwrites,
-            reason="Création du template de salon vocal temporaire",
-        )
-    except Exception as exc:
-        logging.warning("Impossible de créer le salon template: %s", exc)
+    """Anciennement garantissait la présence d'un salon vocal modèle.
+
+    Cette fonction est maintenant neutralisée et ne crée plus de salon par défaut.
+    """
+    return
 
 
 # Anti-spam renommage
@@ -2177,7 +2158,6 @@ async def on_ready():
         "Premier message dans ce salon !",
     )
 
-    await ensure_temp_vc_template(bot)
     await delete_untracked_temp_vcs(bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
     await _rebuild_temp_vc_ids()
 
