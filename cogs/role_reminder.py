@@ -76,10 +76,13 @@ def _read_json(path: str) -> Dict[str, Any]:
 
 def _write_json(path: str, data: Dict[str, Any]):
     _ensure_data_dir()
-    Path(path).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    try:
+        Path(path).write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logging.error(f"[rolescan] Écriture JSON échouée pour {path}: {e}")
 
 
 def user_without_chosen_role(member: discord.Member) -> bool:

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Iterable, Set
@@ -17,6 +18,9 @@ def load_temp_vc_ids() -> Set[int]:
 
 def save_temp_vc_ids(ids: Iterable[int]) -> None:
     """Persiste ``ids`` vers le fichier de stockage."""
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with DATA_FILE.open("w", encoding="utf-8") as fp:
-        json.dump(sorted(set(ids)), fp, ensure_ascii=False, indent=2)
+    try:
+        DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with DATA_FILE.open("w", encoding="utf-8") as fp:
+            json.dump(sorted(set(ids)), fp, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error("[temp_vc_store] Écriture échouée pour %s: %s", DATA_FILE, e)
