@@ -56,3 +56,16 @@ export DATA_DIR=/chemin/vers/mes/données
 
 Assurez-vous que ce dossier existe et est accessible en lecture/écriture par
 le bot.
+
+## Limitation des éditions de salon
+
+Pour éviter les erreurs HTTP 429 causées par des modifications trop fréquentes
+des salons, deux variables d'environnement permettent d'ajuster le rythme :
+
+- `CHANNEL_EDIT_MIN_INTERVAL_SECONDS` (défaut `180`) : intervalle minimal entre
+  deux éditions du même salon.
+- `CHANNEL_EDIT_DEBOUNCE_SECONDS` (défaut `15`) : délai d'agrégation avant
+  d'appliquer les changements.
+
+Ces variables peuvent être définies dans votre fichier `.env` (voir
+`.env.example`).
