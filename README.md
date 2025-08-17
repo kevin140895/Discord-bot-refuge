@@ -17,7 +17,7 @@ The `nixpacks.toml` build configuration already lists `libopus0` to ensure the l
 Audio playback relies on FFmpeg. Some useful parameters can be tuned in
 `bot.py`:
 
-- `-buffer_size 64k` : limite le tampon d'entrée pour réduire la latence.
+- `-fflags nobuffer` : désactive le tampon d'entrée pour réduire la latence.
 - `-probesize 32k` : diminue les données analysées afin d'accélérer le démarrage du flux.
 - `-filter:a loudnorm` : applique une normalisation du volume.
 
