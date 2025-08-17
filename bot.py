@@ -440,7 +440,6 @@ async def generate_rank_card(
     user: discord.User, level: int, xp: int, xp_needed: int
 ):
     from PIL import Image, ImageDraw
-    import io
 
     img = Image.new("RGB", (460, 140), color=(30, 41, 59))
     draw = ImageDraw.Draw(img)
