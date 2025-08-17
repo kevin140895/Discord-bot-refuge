@@ -25,6 +25,7 @@ async def setup_hook() -> None:
     await bot.load_extension("cogs.temp_vc")
     await bot.load_extension("cogs.misc")
     await bot.load_extension("cogs.radio")
+    await bot.load_extension("cogs.stats")
 
 
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN") or os.getenv("BOT_TOKEN")
