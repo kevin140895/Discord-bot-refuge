@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 
 class RouletteStore:
@@ -54,13 +55,13 @@ class RouletteStore:
 
     # ——— Claims journaliers ———
     def mark_claimed_today(self, user_id: str, tz: str):
-        now = datetime.now().astimezone().date().isoformat()
+        now = datetime.now(ZoneInfo(tz)).date().isoformat()
         self.data.setdefault("claims", {})[user_id] = now
         self._save()
 
     def has_claimed_today(self, user_id: str, tz: str) -> bool:
         claims = self.data.get("claims", {})
-        today = datetime.now().astimezone().date().isoformat()
+        today = datetime.now(ZoneInfo(tz)).date().isoformat()
         return claims.get(user_id) == today
 
     def unmark_claimed(self, user_id: str):
