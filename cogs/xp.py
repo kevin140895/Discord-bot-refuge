@@ -4,13 +4,14 @@ import json
 import logging
 import os
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time, timedelta
 from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from config import LOBBY_TEXT_CHANNEL, MVP_ROLE_ID, TOP_MSG_ROLE_ID, TOP_VC_ROLE_ID
 from utils.interactions import safe_respond
 from utils.persistence import atomic_write_json, schedule_checkpoint
 
@@ -19,11 +20,14 @@ DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 XP_FILE = f"{DATA_DIR}/data.json"
 BACKUP_FILE = f"{DATA_DIR}/backup.json"
 VOICE_TIMES_FILE = f"{DATA_DIR}/voice_times.json"
+DAILY_STATS_FILE = f"{DATA_DIR}/daily_stats.json"
 
 # Caches en mémoire
 voice_times: dict[str, datetime] = {}
 XP_CACHE: dict[str, dict] = {}
+DAILY_STATS: dict[str, dict[str, dict[str, int]]] = {}
 XP_LOCK = asyncio.Lock()
+DAILY_LOCK = asyncio.Lock()
 
 def ensure_data_dir() -> None:
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
@@ -64,6 +68,14 @@ async def save_voice_times_to_disk() -> None:
     serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
     await atomic_write_json(VOICE_TIMES_FILE, serializable)
 
+def load_daily_stats() -> dict:
+    return load_json(DAILY_STATS_FILE)
+
+async def save_daily_stats_to_disk() -> None:
+    async with DAILY_LOCK:
+        data = DAILY_STATS
+    await atomic_write_json(DAILY_STATS_FILE, data)
+
 def _disk_load_xp() -> dict:
     ensure_data_dir()
     path = Path(XP_FILE)
@@ -102,9 +114,10 @@ def _disk_save_xp(data: dict) -> None:
         logging.error(f"❌ Écriture backup échouée: {e}")
 
 async def xp_bootstrap_cache() -> None:
-    global XP_CACHE, voice_times
+    global XP_CACHE, voice_times, DAILY_STATS
     XP_CACHE = _disk_load_xp()
     voice_times = load_voice_times()
+    DAILY_STATS = load_daily_stats()
     logging.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
 async def xp_flush_cache_to_disk() -> None:
@@ -158,23 +171,95 @@ class XPCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.auto_backup_xp.start()
+        self.daily_awards.start()
         self._message_cooldown = commands.CooldownMapping.from_cooldown(
             1, 60.0, commands.BucketType.user
         )
 
     def cog_unload(self) -> None:
         self.auto_backup_xp.cancel()
+        self.daily_awards.cancel()
 
     @tasks.loop(seconds=600)
     async def auto_backup_xp(self) -> None:
         await xp_flush_cache_to_disk()
         await save_voice_times_to_disk()
+        await save_daily_stats_to_disk()
         logging.info("🛟 Sauvegarde périodique effectuée.")
+
+    @tasks.loop(time=time(hour=0, tzinfo=timezone.utc))
+    async def daily_awards(self) -> None:
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+        async with DAILY_LOCK:
+            stats = DAILY_STATS.get(yesterday, {})
+        if not stats:
+            return
+
+        def top_user(key: str) -> str | None:
+            if not stats:
+                return None
+            return max(stats.items(), key=lambda x: x[1].get(key, 0))[0]
+
+        top_msg = top_user("messages")
+        top_vc = top_user("voice")
+        top_mvp = max(
+            stats.items(),
+            key=lambda x: x[1].get("messages", 0) + x[1].get("voice", 0) // 60,
+        )[0]
+
+        guild = self.bot.guilds[0] if self.bot.guilds else None
+        if guild:
+            roles = {
+                "mvp": guild.get_role(MVP_ROLE_ID),
+                "msg": guild.get_role(TOP_MSG_ROLE_ID),
+                "vc": guild.get_role(TOP_VC_ROLE_ID),
+            }
+            for member in guild.members:
+                to_remove = [r for r in roles.values() if r and r in member.roles]
+                if to_remove:
+                    try:
+                        await member.remove_roles(*to_remove, reason="Remise à zéro du classement quotidien")
+                    except Exception:
+                        pass
+            winners = {
+                "mvp": guild.get_member(int(top_mvp)) if top_mvp else None,
+                "msg": guild.get_member(int(top_msg)) if top_msg else None,
+                "vc": guild.get_member(int(top_vc)) if top_vc else None,
+            }
+            if winners["mvp"] and roles["mvp"]:
+                await winners["mvp"].add_roles(roles["mvp"], reason="👑 MVP du Refuge")
+            if winners["msg"] and roles["msg"]:
+                await winners["msg"].add_roles(roles["msg"], reason="📜 Écrivain du Refuge")
+            if winners["vc"] and roles["vc"]:
+                await winners["vc"].add_roles(roles["vc"], reason="🎤 Voix du Refuge")
+            channel = guild.get_channel(LOBBY_TEXT_CHANNEL)
+            if channel:
+                await channel.send(
+                    "🎉 Félicitations aux champions du Refuge ! 🎉\n\n"
+                    "Chaque jour, nous mettons à l’honneur nos membres les plus actifs.\n"
+                    "Les Top 1 de chaque catégorie reçoivent un rôle spécial, valable du moment du message (00h00) jusqu’à 23h59 :\n\n"
+                    f"👑 MVP du Refuge **{winners['mvp'].mention if winners['mvp'] else 'Personne'}**\n"
+                    f"📜 Écrivain du Refuge **{winners['msg'].mention if winners['msg'] else 'Personne'}**\n"
+                    f"🎤 Voix du Refuge **{winners['vc'].mention if winners['vc'] else 'Personne'}**\n\n"
+                    "👏 Bravo aux gagnants du jour, continuez à faire vivre le Refuge !"
+                )
+
+        async with DAILY_LOCK:
+            DAILY_STATS.pop(yesterday, None)
+        await save_daily_stats_to_disk()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None:
             return
+        # Statistiques quotidiennes
+        today = datetime.now(timezone.utc).date().isoformat()
+        async with DAILY_LOCK:
+            day = DAILY_STATS.setdefault(today, {})
+            user = day.setdefault(str(message.author.id), {"messages": 0, "voice": 0})
+            user["messages"] = int(user.get("messages", 0)) + 1
+        await schedule_checkpoint(save_daily_stats_to_disk)
+
         bucket = self._message_cooldown.get_bucket(message)
         if bucket.update_rate_limit():
             return
@@ -203,6 +288,13 @@ class XPCog(commands.Cog):
                 duration = now - start
                 xp_amount = int(duration.total_seconds() // 60)
                 await award_xp(member.id, xp_amount)
+                # Statistiques quotidiennes (en secondes)
+                day = now.date().isoformat()
+                async with DAILY_LOCK:
+                    d = DAILY_STATS.setdefault(day, {})
+                    u = d.setdefault(uid, {"messages": 0, "voice": 0})
+                    u["voice"] = int(u.get("voice", 0)) + int(duration.total_seconds())
+                await schedule_checkpoint(save_daily_stats_to_disk)
 
         # Connexion à un nouveau salon
         if after.channel is not None:
@@ -212,6 +304,10 @@ class XPCog(commands.Cog):
 
     @auto_backup_xp.before_loop
     async def before_auto_backup_xp(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @daily_awards.before_loop
+    async def before_daily_awards(self) -> None:
         await self.bot.wait_until_ready()
 
     @app_commands.command(name="rang", description="Affiche ton niveau avec une carte graphique")
