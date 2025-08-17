@@ -2419,8 +2419,7 @@ async def on_voice_state_update(
         )
 
         has_role = member.get_role(RADIO_MUTED_ROLE_ID) is not None
-        tasks = []
-        set_action = None
+        tasks: list[asyncio.Future] = []
 
         if joined_radio and after.channel:
             tasks.append(
@@ -2432,13 +2431,13 @@ async def on_voice_state_update(
                 )
             )
             if has_role:
+                AUTO_MUTED_USERS.add(member.id)
                 tasks.append(
                     member.edit(
                         mute=True,
                         reason=f"Auto mute rôle {RADIO_MUTED_ROLE_ID} dans le canal radio {RADIO_VC_ID}",
                     )
                 )
-                set_action = ("add", member.id)
         elif left_radio and before.channel:
             tasks.append(
                 _set_speak_permission(
@@ -2449,18 +2448,16 @@ async def on_voice_state_update(
                 )
             )
             if has_role and member.id in AUTO_MUTED_USERS:
+                AUTO_MUTED_USERS.discard(member.id)
                 tasks.append(
                     member.edit(
                         mute=False,
                         reason=f"Auto unmute en quittant le canal radio {RADIO_VC_ID}",
                     )
                 )
-                set_action = ("discard", member.id)
 
         if tasks:
             await asyncio.gather(*tasks)
-            if set_action:
-                getattr(AUTO_MUTED_USERS, set_action[0])(set_action[1])
     except Exception as e:
         logging.error(f"[radio] Exception dans on_voice_state_update: {e}")
 
