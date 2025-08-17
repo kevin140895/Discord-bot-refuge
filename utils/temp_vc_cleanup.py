@@ -26,6 +26,8 @@ async def delete_untracked_temp_vcs(
     for ch in list(category.voice_channels):
         base = ch.name.split("•", 1)[0].strip()
         if TEMP_VC_NAME_RE.match(base) and ch.id not in tracked:
+            if ch.members:
+                continue
             try:
                 await ch.delete(reason="Salon temporaire orphelin")
             except discord.HTTPException as exc:

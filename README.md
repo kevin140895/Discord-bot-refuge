@@ -57,6 +57,11 @@ export DATA_DIR=/chemin/vers/mes/données
 Assurez-vous que ce dossier existe et est accessible en lecture/écriture par
 le bot.
 
+Les salons vocaux temporaires sont listés dans `data/temp_vc_ids.json`. Ce
+fichier doit être conservé entre les redéploiements (volume monté ou dossier
+`DATA_DIR` persistant), sans quoi les salons existants seront supprimés lors du
+démarrage.
+
 ### Sauvegarde des sessions vocales
 
 Les heures d'entrée des membres en vocal sont stockées dans

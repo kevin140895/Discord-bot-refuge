@@ -14,7 +14,7 @@ from config import (
     TEMP_VC_LIMITS,
 )
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
-from utils.temp_vc_cleanup import delete_untracked_temp_vcs
+from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
 from utils.discord_utils import safe_channel_edit
 
 # IDs des salons vocaux temporaires connus
@@ -33,6 +33,17 @@ class TempVCCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+        if not TEMP_VC_IDS:
+            category = bot.get_channel(TEMP_VC_CATEGORY)
+            if isinstance(category, discord.CategoryChannel):
+                for ch in category.voice_channels:
+                    base = ch.name.split("•", 1)[0].strip()
+                    if TEMP_VC_NAME_RE.match(base):
+                        TEMP_VC_IDS.add(ch.id)
+                if TEMP_VC_IDS:
+                    save_temp_vc_ids(TEMP_VC_IDS)
+
         self.cleanup.start()
         self._rename_tasks: Dict[int, asyncio.Task] = {}
 
