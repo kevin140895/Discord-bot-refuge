@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from zoneinfo import ZoneInfo
 
@@ -439,6 +440,22 @@ class RouletteCog(commands.Cog):
                     self.store.clear_role_assignment(uid)
         except Exception as e:
             logging.error(f"[Roulette] roles_cleanup_loop erreur: {e}")
+
+    # ── Slash command admin ──
+    group = app_commands.Group(
+        name="roulette",
+        description="Gestion de la roulette",
+    )
+
+    @group.command(
+        name="refresh",
+        description="Republier le message de la roulette",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def refresh_roulette(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self._replace_poster_message()
+        await interaction.followup.send("✅ Message roulette rafraîchi.", ephemeral=True)
 
     async def cog_load(self):
         try:

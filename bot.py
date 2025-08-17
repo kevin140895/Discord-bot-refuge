@@ -1371,7 +1371,7 @@ async def rang(interaction: discord.Interaction):
     name="xp_serveur",
     description="Affiche l'XP de tous les membres du serveur",
 )
-@app_commands.check(is_xp_viewer)
+@app_commands.checks.has_permissions(manage_guild=True)
 async def xp_serveur(interaction: discord.Interaction):
     async with XP_LOCK:
         items = list(XP_CACHE.items())
