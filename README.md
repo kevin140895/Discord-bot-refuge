@@ -62,6 +62,9 @@ fichier doit être conservé entre les redéploiements (volume monté ou dossier
 `DATA_DIR` persistant), sans quoi les salons existants seront supprimés lors du
 démarrage.
 
+Le délai avant renommage de ces salons peut être ajusté via la constante
+`RENAME_DELAY` dans [`config.py`](./config.py).
+
 ### Sauvegarde des sessions vocales
 
 Les heures d'entrée des membres en vocal sont stockées dans
