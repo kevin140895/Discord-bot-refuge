@@ -111,6 +111,10 @@ class RoleReminderCog(commands.Cog):
         self._scan_task = asyncio.create_task(self._scan_loop())
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
+    def cog_unload(self):
+        self._scan_task.cancel()
+        self._cleanup_task.cancel()
+
     # ── State ──
 
     def _load_state(self):
