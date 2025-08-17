@@ -2403,7 +2403,7 @@ async def on_voice_state_update(
         except Exception as e:
             logging.error(f"Suppression VC temporaire échouée: {e}")
 
-    # ── Auto retrait/restitution de la parole sur le canal radio (uniquement humains)
+    # ── Auto gestion parole + mute/unmute sur le canal radio (uniquement humains)
     try:
         joined_radio = (
             after.channel
@@ -2416,54 +2416,51 @@ async def on_voice_state_update(
             and (not after.channel or after.channel.id != RADIO_VC_ID)
         )
 
+        has_role = member.get_role(RADIO_MUTED_ROLE_ID) is not None
+        tasks = []
+        set_action = None
+
         if joined_radio and after.channel:
-            await _set_speak_permission(
-                after.channel,
-                member,
-                allow=False,
-                reason=f"Auto retrait de la parole dans le canal radio {RADIO_VC_ID}",
+            tasks.append(
+                _set_speak_permission(
+                    after.channel,
+                    member,
+                    allow=False,
+                    reason=f"Auto retrait de la parole dans le canal radio {RADIO_VC_ID}",
+                )
             )
+            if has_role:
+                tasks.append(
+                    member.edit(
+                        mute=True,
+                        reason=f"Auto mute rôle {RADIO_MUTED_ROLE_ID} dans le canal radio {RADIO_VC_ID}",
+                    )
+                )
+                set_action = ("add", member.id)
         elif left_radio and before.channel:
-            await _set_speak_permission(
-                before.channel,
-                member,
-                allow=True,
-                reason=f"Auto restitution de la parole en sortant du canal radio {RADIO_VC_ID}",
+            tasks.append(
+                _set_speak_permission(
+                    before.channel,
+                    member,
+                    allow=True,
+                    reason=f"Auto restitution de la parole en sortant du canal radio {RADIO_VC_ID}",
+                )
             )
+            if has_role and member.id in AUTO_MUTED_USERS:
+                tasks.append(
+                    member.edit(
+                        mute=False,
+                        reason=f"Auto unmute en quittant le canal radio {RADIO_VC_ID}",
+                    )
+                )
+                set_action = ("discard", member.id)
+
+        if tasks:
+            await asyncio.gather(*tasks)
+            if set_action:
+                getattr(AUTO_MUTED_USERS, set_action[0])(set_action[1])
     except Exception as e:
         logging.error(f"[radio] Exception dans on_voice_state_update: {e}")
-
-    # ── Auto mute/unmute pour un rôle spécifique dans le canal radio
-    try:
-        has_role = member.get_role(RADIO_MUTED_ROLE_ID) is not None
-        joined_target = (
-            has_role
-            and after.channel
-            and after.channel.id == RADIO_VC_ID
-            and (not before.channel or before.channel.id != RADIO_VC_ID)
-        )
-        left_target = (
-            has_role
-            and before.channel
-            and before.channel.id == RADIO_VC_ID
-            and (not after.channel or after.channel.id != RADIO_VC_ID)
-            and member.id in AUTO_MUTED_USERS
-        )
-
-        if joined_target:
-            await member.edit(
-                mute=True,
-                reason=f"Auto mute rôle {RADIO_MUTED_ROLE_ID} dans le canal radio {RADIO_VC_ID}",
-            )
-            AUTO_MUTED_USERS.add(member.id)
-        elif left_target:
-            await member.edit(
-                mute=False,
-                reason=f"Auto unmute en quittant le canal radio {RADIO_VC_ID}",
-            )
-            AUTO_MUTED_USERS.discard(member.id)
-    except Exception as e:
-        logging.error(f"[radio-mute] Exception dans on_voice_state_update: {e}")
 
 
 # ─────────────────────── SETUP ─────────────────────────────
