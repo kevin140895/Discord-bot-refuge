@@ -56,8 +56,8 @@ class RouletteView(discord.ui.View):
                 (
                     "⏳ La roulette est ouverte "
                     "**de 10:00 à 22:00 (Europe/Paris)**.\n"
+                    f"🔔 Prochaine ouverture/fermeture : **{_fmt(nxt)}**."
                 ),
-                f"🔔 Prochaine ouverture/fermeture : **{_fmt(nxt)}**.",
                 ephemeral=True,
             )
 
