@@ -42,3 +42,17 @@ ROLE_PC = 123456789012345678  # ID du rôle PC de votre serveur
 
 `bot.py` et `view.py` importent ces constantes afin d'éviter toute valeur
 en dur dans le code.
+
+## Données persistantes
+
+Certaines fonctionnalités (XP, roulette, salons temporaires…) écrivent des
+fichiers JSON pour conserver leur état.  Par défaut, ces fichiers sont
+stockés dans le dossier `/data`.  Vous pouvez modifier cet emplacement en
+définissant la variable d'environnement `DATA_DIR` :
+
+```bash
+export DATA_DIR=/chemin/vers/mes/données
+```
+
+Assurez-vous que ce dossier existe et est accessible en lecture/écriture par
+le bot.
