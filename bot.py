@@ -2219,7 +2219,9 @@ async def _refresh_stats_channels(guild: discord.Guild) -> None:
         logging.warning(f"Impossible de mettre à jour les salons de stats: {e}")
 
 
-_STATS_REFRESH_DELAY = 5
+# Délai entre deux rafraîchissements programmés pour éviter de spammer l'API
+# Discord recommande de rester sous ~5 requêtes/s par route; 1s est sûr.
+_STATS_REFRESH_DELAY = 1
 _stats_refresh_tasks: dict[int, asyncio.Task] = {}
 
 
@@ -2236,8 +2238,9 @@ def _schedule_stats_refresh(guild: discord.Guild) -> None:
     _stats_refresh_tasks[guild.id] = asyncio.create_task(_delayed_refresh())
 
 
-@tasks.loop(minutes=1)
+@tasks.loop(seconds=2)
 async def _stats_update_loop() -> None:
+    # Boucle de fond pour maintenir les statistiques à jour très fréquemment
     for guild in bot.guilds:
         await _refresh_stats_channels(guild)
 
