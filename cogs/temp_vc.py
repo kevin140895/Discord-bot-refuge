@@ -86,7 +86,10 @@ class TempVCCog(commands.Cog):
                 status = "Endormie"
                 break
             for act in m.activities:
-                if isinstance(act, discord.Game):
+                if isinstance(act, discord.Game) or (
+                    isinstance(act, discord.Activity)
+                    and act.type is discord.ActivityType.playing
+                ):
                     status = act.name
                     break
             if status not in {"Chat", "Endormie"}:
