@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Dict, Set
 
@@ -32,9 +33,13 @@ class TempVCCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.cleanup.start()
+        self._rename_tasks: Dict[int, asyncio.Task] = {}
 
     def cog_unload(self) -> None:
         self.cleanup.cancel()
+        for task in self._rename_tasks.values():
+            task.cancel()
+        self._rename_tasks.clear()
 
     # ---------- outils internes ----------
 
@@ -58,10 +63,10 @@ class TempVCCog(commands.Cog):
             return "Crossplay"
         return "Chat"
 
-    async def _update_channel_name(self, channel: discord.VoiceChannel) -> None:
-        """Renomme le salon selon l'activité ou le statut du membre."""
+    def _compute_channel_name(self, channel: discord.VoiceChannel) -> str | None:
+        """Calcule le nom attendu pour le salon selon les membres."""
         if not channel.members:
-            return
+            return None
         base = self._base_name_from_members(channel.members)
         status = "Chat"
         for m in channel.members:
@@ -74,12 +79,34 @@ class TempVCCog(commands.Cog):
                     break
             if status not in {"Chat", "Endormie"}:
                 break
-        new = f"{base} • {status}"
-        if channel.name != new:
-            try:
-                await channel.edit(name=new)
-            except discord.HTTPException:
-                logging.exception("Renommage du salon %s échoué", channel.id)
+        return f"{base} • {status}"
+
+    async def _rename_channel(self, channel: discord.VoiceChannel) -> None:
+        """Tâche différée effectuant le renommage du salon."""
+        try:
+            await asyncio.sleep(5)
+            task = asyncio.current_task()
+            if self._rename_tasks.get(channel.id) is not task:
+                return
+            new = self._compute_channel_name(channel)
+            if new and channel.name != new:
+                try:
+                    await channel.edit(name=new)
+                except discord.HTTPException:
+                    logging.exception("Renommage du salon %s échoué", channel.id)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if self._rename_tasks.get(channel.id) is asyncio.current_task():
+                self._rename_tasks.pop(channel.id, None)
+
+    async def _update_channel_name(self, channel: discord.VoiceChannel) -> None:
+        """Programme ou reprogramme le renommage du salon après un délai."""
+        task = self._rename_tasks.get(channel.id)
+        if task:
+            task.cancel()
+        new_task = self.bot.loop.create_task(self._rename_channel(channel))
+        self._rename_tasks[channel.id] = new_task
 
     async def _create_temp_vc(self, member: discord.Member) -> discord.VoiceChannel:
         """Crée un salon vocal temporaire et l’enregistre."""
