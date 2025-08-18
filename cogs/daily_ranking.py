@@ -1,3 +1,11 @@
+"""Gestion du classement quotidien et attribution des rôles associés.
+
+Ce module calcule les gagnants quotidiens à partir des statistiques
+d'activité et persiste les résultats dans ``daily_ranking.json`` via
+``utils.persist``. Il lit et écrit également les statistiques
+journalières partagées avec la cog XP.
+"""
+
 import logging
 import os
 from datetime import datetime, timedelta, time, timezone

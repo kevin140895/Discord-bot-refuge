@@ -1,3 +1,11 @@
+"""Système d'XP du serveur : messages, voix et statistiques quotidiennes.
+
+La cog enregistre l'activité des membres, calcule l'XP et gère les
+statistiques journalières. La persistance repose sur ``xp_store`` pour
+les données d'XP et sur des fichiers JSON pour les temps vocaux et les
+statistiques quotidiennes.
+"""
+
 import asyncio
 import io
 import logging

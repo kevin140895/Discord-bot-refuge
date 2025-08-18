@@ -1,3 +1,10 @@
+"""Commandes diverses ne nécessitant pas de persistance.
+
+Cette cog regroupe plusieurs commandes utilitaires (sondages, liens,
+purge, choix du type de joueur) qui n'enregistrent aucune donnée de
+manière permanente.
+"""
+
 import logging
 
 import discord
