@@ -52,6 +52,13 @@ class TempVCCog(commands.Cog):
 
         self.cleanup.start()
 
+        if rename_manager._worker is None:
+            async def _ensure_rename_worker() -> None:
+                await rename_manager.start()
+                logging.info("[temp_vc] rename_manager worker démarré")
+
+            asyncio.create_task(_ensure_rename_worker())
+
     def cog_unload(self) -> None:
         self.cleanup.cancel()
         for task in self._rename_tasks.values():
