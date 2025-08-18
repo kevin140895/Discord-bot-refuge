@@ -104,7 +104,7 @@ class RouletteView(discord.ui.View):
             guild = interaction.guild
             role = guild.get_role(ROLE_ID)
             me = guild.me or guild.get_member(cog.bot.user.id)  # type: ignore
-            if role and me and guild.me.guild_permissions.manage_roles:
+            if role and me and me.guild_permissions.manage_roles:
                 try:
                     if role < me.top_role:
                         await interaction.user.add_roles(
