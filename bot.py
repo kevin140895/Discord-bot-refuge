@@ -44,6 +44,7 @@ class RefugeBot(commands.Bot):
         await rename_manager.start()
 
     async def close(self) -> None:
+        rename_manager.stop()
         await xp_store.aclose()
         await super().close()
 
