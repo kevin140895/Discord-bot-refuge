@@ -5,6 +5,8 @@ from typing import Iterable
 import discord
 from discord.ext import commands
 
+logger = logging.getLogger(__name__)
+
 TEMP_VC_NAME_RE = re.compile(r"^(PC|Console|Mobile|Crossplay|Chat)(?:\b.*)?$", re.I)
 
 
@@ -31,4 +33,4 @@ async def delete_untracked_temp_vcs(
             try:
                 await ch.delete(reason="Salon temporaire orphelin")
             except discord.HTTPException as exc:
-                logging.warning("Suppression salon %s échouée: %s", ch.id, exc)
+                logger.warning("Suppression salon %s échouée: %s", ch.id, exc)
