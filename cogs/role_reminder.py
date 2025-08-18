@@ -10,7 +10,7 @@ from typing import Any, Dict
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from utils.metrics import measure
 
 # ─────────────────────── PARAMS ───────────────────────
@@ -112,12 +112,12 @@ class RoleReminderCog(commands.Cog):
         self.reminders: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._load_state()
 
-        self._scan_task = asyncio.create_task(self._scan_loop())
-        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+        self._scan_loop.start()
+        self._cleanup_loop.start()
 
     def cog_unload(self):
-        self._scan_task.cancel()
-        self._cleanup_task.cancel()
+        self._scan_loop.cancel()
+        self._cleanup_loop.cancel()
 
     # ── State ──
 
@@ -135,24 +135,28 @@ class RoleReminderCog(commands.Cog):
 
     # ── Loops ──
 
+    @tasks.loop(hours=SCAN_PERIOD_HOURS)
     async def _scan_loop(self):
+        try:
+            await self._run_scan_once()
+        except Exception as e:
+            logging.exception(f"[rolescan] erreur scan: {e}")
+
+    @_scan_loop.before_loop
+    async def _before_scan_loop(self):
         await self.bot.wait_until_ready()
         await asyncio.sleep(5)  # laisse le cache de membres arriver
-        while not self.bot.is_closed():
-            try:
-                await self._run_scan_once()
-            except Exception as e:
-                logging.exception(f"[rolescan] erreur scan: {e}")
-            await asyncio.sleep(SCAN_PERIOD_HOURS * 3600)
 
+    @tasks.loop(minutes=CLEANUP_TICK_MIN)
     async def _cleanup_loop(self):
+        try:
+            await self._run_cleanup_tick()
+        except Exception as e:
+            logging.exception(f"[rolescan] erreur cleanup: {e}")
+
+    @_cleanup_loop.before_loop
+    async def _before_cleanup_loop(self):
         await self.bot.wait_until_ready()
-        while not self.bot.is_closed():
-            try:
-                await self._run_cleanup_tick()
-            except Exception as e:
-                logging.exception(f"[rolescan] erreur cleanup: {e}")
-            await asyncio.sleep(CLEANUP_TICK_MIN * 60)
 
     # ── Core actions ──
 
