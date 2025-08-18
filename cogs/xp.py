@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+import math
 from datetime import datetime, timezone, time, timedelta
 from pathlib import Path
 
@@ -126,10 +127,13 @@ async def xp_flush_cache_to_disk() -> None:
         logging.info("💾 XP flush vers disque (%d utilisateurs).", len(XP_CACHE))
 
 def get_level(xp: int) -> int:
-    level = 0
-    while xp >= (level + 1) ** 2 * 100:
-        level += 1
-    return level
+    try:
+        return int(math.isqrt(xp // 100))
+    except Exception:
+        level = 0
+        while xp >= (level + 1) ** 2 * 100:
+            level += 1
+        return level
 
 async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
     """Ajoute `amount` d'XP à `user_id` et retourne (old_level, new_level, total_xp)."""
