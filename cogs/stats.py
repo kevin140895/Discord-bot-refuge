@@ -1,3 +1,11 @@
+"""Mise à jour des salons de statistiques du serveur.
+
+La cog renomme périodiquement les canaux affichant le nombre de
+membres, les utilisateurs en ligne et l'activité vocale. Elle ne recourt
+à aucune persistance, s'appuyant seulement sur ``rename_manager`` pour
+effectuer les changements.
+"""
+
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
