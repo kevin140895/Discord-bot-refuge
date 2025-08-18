@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import os
 import random
 from datetime import datetime, timezone, time, timedelta
 
@@ -16,14 +17,17 @@ from config import (
     TOP_VC_ROLE_ID,
 )
 from utils.interactions import safe_respond
-from utils.persist import atomic_write_json, read_json_safe
+from utils.persist import atomic_write_json, read_json_safe, ensure_dir
 from utils.persistence import schedule_checkpoint
 from utils.metrics import measure
 from storage.xp_store import xp_store
 
 # Fichiers de persistance
-VOICE_TIMES_FILE = f"{DATA_DIR}/voice_times.json"
-DAILY_STATS_FILE = f"{DATA_DIR}/daily_stats.json"
+VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
+DAILY_STATS_FILE = os.path.join(DATA_DIR, "daily_stats.json")
+
+# S'assurer que le répertoire de données existe
+ensure_dir(DATA_DIR)
 
 # Caches en mémoire
 voice_times: dict[str, datetime] = {}
@@ -46,8 +50,13 @@ def load_voice_times() -> dict[str, datetime]:
 
 
 async def save_voice_times_to_disk() -> None:
-    serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
-    await atomic_write_json(VOICE_TIMES_FILE, serializable)
+    """Sauvegarde atomique des temps vocaux sans bloquer l'event loop."""
+    try:
+        serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
+        await asyncio.to_thread(atomic_write_json, VOICE_TIMES_FILE, serializable)
+        logging.info("[xp] Voice times sauvegardés (%s)", VOICE_TIMES_FILE)
+    except Exception as e:
+        logging.exception("[xp] Échec sauvegarde voice times: %s", e)
 
 
 def load_daily_stats() -> dict:
@@ -57,7 +66,7 @@ def load_daily_stats() -> dict:
 async def save_daily_stats_to_disk() -> None:
     async with DAILY_LOCK:
         data = DAILY_STATS
-    await atomic_write_json(DAILY_STATS_FILE, data)
+    await asyncio.to_thread(atomic_write_json, DAILY_STATS_FILE, data)
 
 
 async def xp_bootstrap_cache() -> None:
@@ -107,10 +116,13 @@ class XPCog(commands.Cog):
         self.auto_backup_xp.cancel()
         self.daily_awards.cancel()
 
-    @tasks.loop(seconds=600)
+    @tasks.loop(minutes=10)
     async def auto_backup_xp(self) -> None:
         await xp_flush_cache_to_disk()
-        await save_voice_times_to_disk()
+        try:
+            await save_voice_times_to_disk()
+        except Exception as e:
+            logging.exception("[xp] auto_backup_xp: exception: %s", e)
         await save_daily_stats_to_disk()
         logging.info("🛟 Sauvegarde périodique effectuée.")
 
