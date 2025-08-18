@@ -54,6 +54,7 @@ async def schedule_checkpoint(
             return
 
         async def _run() -> None:
+            global _checkpoint_task
             try:
                 await asyncio.sleep(delay)
                 await save_fn()
