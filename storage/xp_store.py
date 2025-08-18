@@ -8,7 +8,10 @@ from typing import Dict
 from config import DATA_DIR
 from utils.persist import ensure_dir, read_json_safe, atomic_write_json
 
-XP_PATH = os.path.join(DATA_DIR, "xp.json")
+# Legacy bots stored XP in ``data.json``. To maintain compatibility with
+# existing deployments that expect this filename, we default to writing XP
+# data into ``data.json`` instead of ``xp.json``.
+XP_PATH = os.path.join(DATA_DIR, "data.json")
 
 
 class XPStore:
