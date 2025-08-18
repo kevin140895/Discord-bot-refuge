@@ -60,6 +60,10 @@ class GlobalRateLimiter:
                 bucket = TokenBucket(4, 4)  # 4 reactions per second globally
             elif name.startswith("roles:"):
                 bucket = TokenBucket(10, 1)  # 10 roles / 10s per member
+            elif name == "channel_edit":
+                bucket = TokenBucket(1, 1)  # 1 channel edit per second globally
+            elif name.startswith("channel_edit:"):
+                bucket = TokenBucket(2, 1 / 300)  # 2 edits / 10 min per channel
             else:
                 bucket = TokenBucket(self.global_rps, self.global_rps)
             self.buckets[name] = bucket
