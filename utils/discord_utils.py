@@ -48,7 +48,7 @@ async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None
     lock = _CHANNEL_LOCKS.setdefault(channel.id, asyncio.Lock())
     async with lock:
         if all(getattr(channel, k, None) == v for k, v in kwargs.items()):
-            logging.info("[safe_channel_edit] no-op for %s", channel.id)
+            logging.debug("[safe_channel_edit] no-op for %s", channel.id)
             return
 
         if _DEBOUNCE > 0:
@@ -64,7 +64,7 @@ async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None
             await asyncio.sleep(wait)
 
         try:
-            logging.info(
+            logging.debug(
                 "[safe_channel_edit] editing channel %s with %s", channel.id, kwargs
             )
             await channel.edit(**kwargs)
