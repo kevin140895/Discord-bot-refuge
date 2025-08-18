@@ -62,10 +62,10 @@ async def test_update_stats_changes_channel_names(monkeypatch):
         [voice_channel],
     )
 
-    async def fake_safe_channel_edit(channel, **kwargs):
-        channel.name = kwargs.get("name")
+    async def fake_request(channel, name):
+        channel.name = name
 
-    monkeypatch.setattr("cogs.stats.safe_channel_edit", fake_safe_channel_edit)
+    monkeypatch.setattr("cogs.stats.rename_manager.request", fake_request)
 
     bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
     cog = StatsCog(bot)

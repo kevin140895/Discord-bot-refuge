@@ -17,7 +17,7 @@ from config import (
 )
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
-from utils.discord_utils import safe_channel_edit
+from utils.rename_manager import rename_manager
 
 # IDs des salons vocaux temporaires connus
 TEMP_VC_IDS: Set[int] = set(load_temp_vc_ids())
@@ -38,16 +38,17 @@ class TempVCCog(commands.Cog):
         self._rename_tasks: Dict[int, asyncio.Task] = {}
         self._last_names: Dict[int, str] = {}
 
-        getter = getattr(bot, "get_channel", lambda _id: None)
-        category = getter(TEMP_VC_CATEGORY)
-        if isinstance(category, discord.CategoryChannel):
-            for ch in category.voice_channels:
-                base = ch.name.split("•", 1)[0].strip()
-                if TEMP_VC_NAME_RE.match(base):
-                    TEMP_VC_IDS.add(ch.id)
-                    self._last_names[ch.id] = ch.name
-            if TEMP_VC_IDS:
-                save_temp_vc_ids(TEMP_VC_IDS)
+        if not TEMP_VC_IDS:
+            getter = getattr(bot, "get_channel", lambda _id: None)
+            category = getter(TEMP_VC_CATEGORY)
+            if isinstance(category, discord.CategoryChannel):
+                for ch in category.voice_channels:
+                    base = ch.name.split("•", 1)[0].strip()
+                    if TEMP_VC_NAME_RE.match(base):
+                        TEMP_VC_IDS.add(ch.id)
+                        self._last_names[ch.id] = ch.name
+                if TEMP_VC_IDS:
+                    save_temp_vc_ids(TEMP_VC_IDS)
 
         self.cleanup.start()
 
@@ -120,15 +121,8 @@ class TempVCCog(commands.Cog):
 
             new = self._compute_channel_name(channel)
             if new and channel.name != new:
-                try:
-                    await safe_channel_edit(channel, name=new)
-                except discord.NotFound:
-                    # Le salon n'existe plus, rien à faire
-                    return
-                except discord.HTTPException:
-                    logging.exception("Renommage du salon %s échoué", channel.id)
-                else:
-                    self._last_names[channel.id] = new
+                await rename_manager.request(channel, new)
+                self._last_names[channel.id] = new
         except asyncio.CancelledError:
             pass
         finally:
@@ -186,7 +180,9 @@ class TempVCCog(commands.Cog):
 
         # 2) Suppression du salon temporaire quand il se vide
         if before.channel and before.channel.id in TEMP_VC_IDS:
-            if len(before.channel.members) == 0:
+            if before.channel.members:
+                pass
+            else:
                 try:
                     await before.channel.delete(reason="Salon temporaire vide")
                 except discord.HTTPException:

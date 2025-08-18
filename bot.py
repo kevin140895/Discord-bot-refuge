@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from utils.rate_limit import GlobalRateLimiter
 from storage.xp_store import xp_store
+from utils.rename_manager import rename_manager
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -38,6 +39,7 @@ class RefugeBot(commands.Bot):
             except Exception:
                 logging.exception("Failed to load extension %s", ext)
         limiter.start()
+        await rename_manager.start()
 
     async def close(self) -> None:
         await xp_store.aclose()
