@@ -5,10 +5,16 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-from config import RADIO_VC_ID, RADIO_STREAM_URL
+from config import ENABLE_LOUDNORM, RADIO_VC_ID, RADIO_STREAM_URL
 
-FFMPEG_BEFORE = "-fflags nobuffer -probesize 32k"
-FFMPEG_OPTIONS = "-filter:a loudnorm"
+FFMPEG_BEFORE = (
+    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+    "-reconnect_on_http_error 429,502,503,504 -user_agent 'Mozilla/5.0' "
+    "-fflags nobuffer -rw_timeout 30000000 -headers 'Icy-MetaData:1'"
+)
+FFMPEG_OPTIONS = "-vn -loglevel error"
+if ENABLE_LOUDNORM:
+    FFMPEG_OPTIONS += " -filter:a loudnorm"
 
 
 class RadioCog(commands.Cog):

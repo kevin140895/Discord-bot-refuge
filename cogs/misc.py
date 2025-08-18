@@ -8,6 +8,7 @@ from utils.interactions import safe_respond
 from utils.metrics import measure
 from view import PlayerTypeView
 from config import CHANNEL_ROLES, OWNER_ID
+from utils.permanent_message import ensure_permanent_message
 
 
 class MiscCog(commands.Cog):
@@ -23,9 +24,12 @@ class MiscCog(commands.Cog):
                 f"Les boutons ont été postés dans <#{CHANNEL_ROLES}> 😉",
                 ephemeral=True,
             )
-            channel = interaction.guild.get_channel(CHANNEL_ROLES)
-        if channel:
-            await channel.send("Quel type de joueur es-tu ?", view=PlayerTypeView())
+            await ensure_permanent_message(
+                self.bot,
+                CHANNEL_ROLES,
+                "Quel type de joueur es-tu ?",
+                lambda: (PlayerTypeView(), None),
+            )
 
     @app_commands.command(name="sondage", description="Créer un sondage Oui/Non")
     @app_commands.describe(question="La question à poser")

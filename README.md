@@ -14,15 +14,16 @@ The `nixpacks.toml` build configuration already lists `libopus0` to ensure the l
 
 ## FFmpeg options
 
-Audio playback relies on FFmpeg. Some useful parameters can be tuned in
-`bot.py`:
+Audio playback relies on FFmpeg with resilient parameters:
 
-- `-fflags nobuffer` : désactive le tampon d'entrée pour réduire la latence.
-- `-probesize 32k` : diminue les données analysées afin d'accélérer le démarrage du flux.
-- `-filter:a loudnorm` : applique une normalisation du volume.
+- `-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5`
+- `-reconnect_on_http_error 429,502,503,504`
+- `-user_agent 'Mozilla/5.0'`
+- `-fflags nobuffer -rw_timeout 30000000 -headers 'Icy-MetaData:1'`
+- `-vn -loglevel error`
 
-Ces valeurs peuvent être ajustées dans la fonction `_before_opts()` et dans
-la variable `audio_opts` selon vos besoins.
+Set the environment variable `ENABLE_LOUDNORM=1` to append
+`-filter:a loudnorm` and normalize volume.
 
 ## Configuration du serveur
 
@@ -58,6 +59,7 @@ export DATA_DIR=/chemin/vers/mes/données
 Assurez-vous que ce dossier existe et est accessible en lecture/écriture par
 le bot. Pour migrer un ancien déploiement utilisant `/data`, copiez vos fichiers
 vers `/app/data` ou définissez `DATA_DIR=/data`.
+Au démarrage, un log "[boot] DATA_DIR résolu" indique le chemin utilisé.
 
 Les salons vocaux temporaires sont listés dans `data/temp_vc_ids.json`. Ce
 fichier doit être conservé entre les redéploiements (volume monté ou dossier
