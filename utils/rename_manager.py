@@ -76,6 +76,13 @@ class _RenameManager:
             if gwait > 0:
                 await asyncio.sleep(gwait)
 
+            if channel.guild.get_channel(cid) is None:
+                logging.debug(
+                    "[rename_manager] channel %s deleted before rename; skipping", cid
+                )
+                self._queue.task_done()
+                continue
+
             attempt = 0
             while True:
                 start = time.monotonic()
