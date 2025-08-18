@@ -2,6 +2,8 @@ import logging
 import discord
 from discord.ext import commands
 
+from utils.channel_edit_manager import channel_edit_manager
+
 
 async def ensure_channel_has_message(
     bot: commands.Bot, channel_id: int, content: str
@@ -28,15 +30,6 @@ async def ensure_channel_has_message(
 
 
 async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None:
-    """Edit a channel while gracefully handling Discord errors."""
-    if all(getattr(channel, k, None) == v for k, v in kwargs.items()):
-        logging.debug("[safe_channel_edit] no-op for %s", channel.id)
-        return
-
-    try:
-        await channel.edit(**kwargs)
-    except discord.NotFound:
-        logging.warning("[safe_channel_edit] channel %s not found", channel.id)
-    except discord.HTTPException as exc:
-        logging.warning("[safe_channel_edit] edit failed for %s: %s", channel.id, exc)
+    """Schedule a channel edit respecting configured rate limits."""
+    await channel_edit_manager.request(channel, **kwargs)
 
