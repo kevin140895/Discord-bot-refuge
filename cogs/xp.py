@@ -3,7 +3,7 @@ import io
 import logging
 import os
 import random
-from datetime import datetime, timezone, time, timedelta
+from datetime import datetime, timezone, time
 
 import discord
 from discord import app_commands
@@ -11,10 +11,6 @@ from discord.ext import commands, tasks
 
 from config import (
     DATA_DIR,
-    ACTIVITY_SUMMARY_CH,
-    MVP_ROLE_ID,
-    TOP_MSG_ROLE_ID,
-    TOP_VC_ROLE_ID,
 )
 from utils.interactions import safe_respond
 from utils.persist import atomic_write_json, read_json_safe, ensure_dir
@@ -108,14 +104,12 @@ class XPCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.auto_backup_xp.start()
-        self.daily_awards.start()
         self._message_cooldown = commands.CooldownMapping.from_cooldown(
             1, 60.0, commands.BucketType.user
         )
 
     def cog_unload(self) -> None:
         self.auto_backup_xp.cancel()
-        self.daily_awards.cancel()
 
     @tasks.loop(minutes=10)
     async def auto_backup_xp(self) -> None:
@@ -126,69 +120,6 @@ class XPCog(commands.Cog):
             logging.exception("[xp] auto_backup_xp: exception: %s", e)
         await save_daily_stats_to_disk()
         logging.info("🛟 Sauvegarde périodique effectuée.")
-
-    @tasks.loop(time=time(hour=0, tzinfo=timezone.utc))
-    async def daily_awards(self) -> None:
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
-        async with DAILY_LOCK:
-            stats = DAILY_STATS.get(yesterday, {})
-        if not stats:
-            return
-
-        def top_user(key: str) -> str | None:
-            if not stats:
-                return None
-            return max(stats.items(), key=lambda x: x[1].get(key, 0))[0]
-
-        top_msg = top_user("messages")
-        top_vc = top_user("voice")
-        top_mvp = max(
-            stats.items(),
-            key=lambda x: x[1].get("messages", 0) + x[1].get("voice", 0) // 60,
-        )[0]
-
-        guild = self.bot.guilds[0] if self.bot.guilds else None
-        if guild:
-            roles = {
-                "mvp": guild.get_role(MVP_ROLE_ID),
-                "msg": guild.get_role(TOP_MSG_ROLE_ID),
-                "vc": guild.get_role(TOP_VC_ROLE_ID),
-            }
-            for member in guild.members:
-                to_remove = [r for r in roles.values() if r and r in member.roles]
-                if to_remove:
-                    try:
-                        await member.remove_roles(*to_remove, reason="Remise à zéro du classement quotidien")
-                    except Exception:
-                        pass
-            winners = {
-                "mvp": guild.get_member(int(top_mvp)) if top_mvp else None,
-                "msg": guild.get_member(int(top_msg)) if top_msg else None,
-                "vc": guild.get_member(int(top_vc)) if top_vc else None,
-            }
-            if winners["mvp"] and roles["mvp"]:
-                await winners["mvp"].add_roles(roles["mvp"], reason="👑 MVP du Refuge")
-            if winners["msg"] and roles["msg"]:
-                await winners["msg"].add_roles(roles["msg"], reason="📜 Écrivain du Refuge")
-            if winners["vc"] and roles["vc"]:
-                await winners["vc"].add_roles(roles["vc"], reason="🎤 Voix du Refuge")
-            channel = guild.get_channel(ACTIVITY_SUMMARY_CH)
-            if channel:
-                await channel.send(
-                    (
-                        "🎉 Félicitations aux champions du Refuge ! 🎉\n\n"
-                        "Chaque jour, nous mettons à l’honneur nos membres les plus actifs.\n"
-                        "Les Top 1 de chaque catégorie reçoivent un rôle spécial, valable du moment du message (00h00) jusqu’à 23h59 :\n\n"
-                        f"👑 MVP du Refuge **{winners['mvp'].mention if winners['mvp'] else 'Personne'}**\n"
-                        f"📜 Écrivain du Refuge **{winners['msg'].mention if winners['msg'] else 'Personne'}**\n"
-                        f"🎤 Voix du Refuge **{winners['vc'].mention if winners['vc'] else 'Personne'}**\n\n"
-                        "👏 Bravo aux gagnants du jour, continuez à faire vivre le Refuge !"
-                    )
-                )
-
-        async with DAILY_LOCK:
-            DAILY_STATS.pop(yesterday, None)
-        await save_daily_stats_to_disk()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -248,9 +179,6 @@ class XPCog(commands.Cog):
     async def before_auto_backup_xp(self) -> None:
         await self.bot.wait_until_ready()
 
-    @daily_awards.before_loop
-    async def before_daily_awards(self) -> None:
-        await self.bot.wait_until_ready()
 
     @app_commands.command(name="rang", description="Affiche ton niveau avec une carte graphique")
     async def rang(self, interaction: discord.Interaction) -> None:
