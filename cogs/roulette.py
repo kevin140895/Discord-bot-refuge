@@ -425,7 +425,8 @@ class RouletteCog(commands.Cog):
         try:
             assignments = self.store.get_all_role_assignments()
             now = datetime.now(self.tz)
-            for uid, data in assignments.items():
+            # Iterate over a copy to avoid RuntimeError: dictionary changed size during iteration
+            for uid, data in list(assignments.items()):
                 try:
                     exp = datetime.fromisoformat(data.get("expires_at", "")).astimezone(self.tz)
                 except Exception:
