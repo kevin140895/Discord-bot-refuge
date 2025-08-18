@@ -79,13 +79,20 @@ bot.http.request = types.MethodType(_limited_request, bot.http)
 
 @bot.event
 async def setup_hook() -> None:
-    await bot.load_extension("cogs.role_reminder")
-    await bot.load_extension("cogs.roulette")
-    await bot.load_extension("cogs.xp")
-    await bot.load_extension("cogs.temp_vc")
-    await bot.load_extension("cogs.misc")
-    await bot.load_extension("cogs.radio")
-    await bot.load_extension("cogs.stats")
+    extensions = [
+        "cogs.role_reminder",
+        "cogs.roulette",
+        "cogs.xp",
+        "cogs.temp_vc",
+        "cogs.misc",
+        "cogs.radio",
+        "cogs.stats",
+    ]
+    for ext in extensions:
+        try:
+            await bot.load_extension(ext)
+        except Exception:
+            logging.exception("Failed to load extension %s", ext)
     limiter.start()
 
 

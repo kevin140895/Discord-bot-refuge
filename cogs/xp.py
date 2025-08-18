@@ -2,7 +2,6 @@ import asyncio
 import io
 import json
 import logging
-import os
 import random
 import math
 from datetime import datetime, timezone, time, timedelta
@@ -12,13 +11,18 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import LOBBY_TEXT_CHANNEL, MVP_ROLE_ID, TOP_MSG_ROLE_ID, TOP_VC_ROLE_ID
+from config import (
+    DATA_DIR,
+    LOBBY_TEXT_CHANNEL,
+    MVP_ROLE_ID,
+    TOP_MSG_ROLE_ID,
+    TOP_VC_ROLE_ID,
+)
 from utils.interactions import safe_respond
 from utils.persistence import atomic_write_json, schedule_checkpoint
 from utils.metrics import measure
 
 # Fichiers de persistance
-DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 XP_FILE = f"{DATA_DIR}/data.json"
 BACKUP_FILE = f"{DATA_DIR}/backup.json"
 VOICE_TIMES_FILE = f"{DATA_DIR}/voice_times.json"
@@ -240,13 +244,15 @@ class XPCog(commands.Cog):
             channel = guild.get_channel(LOBBY_TEXT_CHANNEL)
             if channel:
                 await channel.send(
-                    "🎉 Félicitations aux champions du Refuge ! 🎉\n\n"
-                    "Chaque jour, nous mettons à l’honneur nos membres les plus actifs.\n"
-                    "Les Top 1 de chaque catégorie reçoivent un rôle spécial, valable du moment du message (00h00) jusqu’à 23h59 :\n\n"
-                    f"👑 MVP du Refuge **{winners['mvp'].mention if winners['mvp'] else 'Personne'}**\n"
-                    f"📜 Écrivain du Refuge **{winners['msg'].mention if winners['msg'] else 'Personne'}**\n"
-                    f"🎤 Voix du Refuge **{winners['vc'].mention if winners['vc'] else 'Personne'}**\n\n"
-                    "👏 Bravo aux gagnants du jour, continuez à faire vivre le Refuge !"
+                    (
+                        "🎉 Félicitations aux champions du Refuge ! 🎉\n\n"
+                        "Chaque jour, nous mettons à l’honneur nos membres les plus actifs.\n"
+                        "Les Top 1 de chaque catégorie reçoivent un rôle spécial, valable du moment du message (00h00) jusqu’à 23h59 :\n\n"
+                        f"👑 MVP du Refuge **{winners['mvp'].mention if winners['mvp'] else 'Personne'}**\n"
+                        f"📜 Écrivain du Refuge **{winners['msg'].mention if winners['msg'] else 'Personne'}**\n"
+                        f"🎤 Voix du Refuge **{winners['vc'].mention if winners['vc'] else 'Personne'}**\n\n"
+                        "👏 Bravo aux gagnants du jour, continuez à faire vivre le Refuge !"
+                    )
                 )
 
         async with DAILY_LOCK:

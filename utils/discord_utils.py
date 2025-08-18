@@ -1,21 +1,23 @@
 import asyncio
 import logging
-import os
 import time
 
 import discord
 from discord.ext import commands
+from config import (
+    CHANNEL_EDIT_DEBOUNCE_SECONDS,
+    CHANNEL_EDIT_MIN_INTERVAL_SECONDS,
+    CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS,
+)
 
 
 _CHANNEL_LOCKS: dict[int, asyncio.Lock] = {}
 _LAST_EDIT: dict[int, float] = {}
-_MIN_INTERVAL = int(os.getenv("CHANNEL_EDIT_MIN_INTERVAL_SECONDS", "180"))
-_DEBOUNCE = int(os.getenv("CHANNEL_EDIT_DEBOUNCE_SECONDS", "15"))
+_MIN_INTERVAL = CHANNEL_EDIT_MIN_INTERVAL_SECONDS
+_DEBOUNCE = CHANNEL_EDIT_DEBOUNCE_SECONDS
 _GLOBAL_LOCK = asyncio.Lock()
 _LAST_GLOBAL_EDIT = 0.0
-_GLOBAL_MIN_INTERVAL = int(
-    os.getenv("CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS", "10")
-)
+_GLOBAL_MIN_INTERVAL = CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS
 
 async def ensure_channel_has_message(
     bot: commands.Bot,
@@ -85,6 +87,11 @@ async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None
                     "[safe_channel_edit] editing channel %s with %s", channel.id, kwargs
                 )
                 await channel.edit(**kwargs)
+            except discord.NotFound:
+                logging.warning(
+                    "[safe_channel_edit] channel %s not found", channel.id
+                )
+                return
             except discord.HTTPException as exc:
                 if exc.status == 429 and getattr(exc, "retry_after", None):
                     logging.warning(
@@ -95,12 +102,24 @@ async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None
                     await asyncio.sleep(exc.retry_after)
                     try:
                         await channel.edit(**kwargs)
-                    except discord.HTTPException:
-                        logging.exception(
-                            "[safe_channel_edit] second edit failed for %s", channel.id
+                    except discord.NotFound:
+                        logging.warning(
+                            "[safe_channel_edit] channel %s not found", channel.id
                         )
-                        raise
+                        return
+                    except discord.HTTPException as exc2:
+                        logging.warning(
+                            "[safe_channel_edit] second edit failed for %s: %s",
+                            channel.id,
+                            exc2,
+                        )
+                        return
                 else:
-                    raise
+                    logging.warning(
+                        "[safe_channel_edit] edit failed for %s: %s",
+                        channel.id,
+                        exc,
+                    )
+                    return
             _LAST_EDIT[channel.id] = time.monotonic()
             _LAST_GLOBAL_EDIT = _LAST_EDIT[channel.id]

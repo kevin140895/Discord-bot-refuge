@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import random
 from datetime import datetime, timedelta
 from typing import Optional
@@ -14,13 +13,16 @@ from utils.timewin import is_open_now, next_boundary_dt
 from utils.metrics import measure
 from storage.roulette_store import RouletteStore
 from .xp import award_xp
+from config import (
+    ANNOUNCE_CHANNEL_ID,
+    ROLE_NOTIFICATION as NOTIF_ROLE_ID,
+    ROULETTE_ROLE_ID as ROLE_ID,
+    ROULETTE_CHANNEL_ID as CHANNEL_ID,
+    DATA_DIR,
+)
 
 PARIS_TZ = "Europe/Paris"
-ANNOUNCE_CHANNEL_ID = 1400552164979507263
-NOTIF_ROLE_ID = 1404882154370109450
 WINNER_ROLE_NAME = "🏆 Gagnant Roulette"
-ROLE_ID = 1405170057792979025
-CHANNEL_ID = 1405170020748755034
 REWARDS = [0, 5, 50, 500]
 WEIGHTS = [40, 40, 18, 2]
 SPIN_GIF_URL = "https://media.tenor.com/ZzOaGh2sg2AAAAAi/roulette-spin.gif"
@@ -182,7 +184,7 @@ class RouletteCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.tz = ZoneInfo(PARIS_TZ)
-        self.store = RouletteStore(data_dir=os.getenv("DATA_DIR", "/data"))
+        self.store = RouletteStore(data_dir=DATA_DIR)
         self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
         self._last_announced_state: Optional[bool] = None
 

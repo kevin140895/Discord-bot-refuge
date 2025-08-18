@@ -46,5 +46,47 @@ TIKTOK_ANNOUNCE_CH = 1400552164979507263
 ACTIVITY_SUMMARY_CH = 1400552164979507263
 ROULETTE_CHANNEL_ID = 1405170020748755034
 
+# ── Rappels de rôles et notifications ────────────────────────
+REMINDER_CHANNEL_ID: int = 1400552164979507263
+"""Salon unique où sont envoyés les rappels de rôles."""
+
+ROLE_CHOICE_CHANNEL_ID: int = 1400560866478395512
+"""Salon contenant les boutons pour choisir ses rôles."""
+
+IGNORED_ROLE_IDS: set[int] = {
+    1402071696277635157,
+    1404054439706234910,
+    1403510368340410550,
+    1405170057792979025,
+    1402302249035894968,
+}
+"""Rôles à ignorer lors des rappels."""
+
+# ── Roue de la fortune ──────────────────────────────────────
+ROULETTE_ROLE_ID: int = 1405170057792979025
+"""Rôle attribué au gagnant de la roulette."""
+
+ANNOUNCE_CHANNEL_ID: int = 1400552164979507263
+"""Salon utilisé pour les annonces de la roulette."""
+
+# ── Persistance et I/O ───────────────────────────────────────
+DATA_DIR: str = os.getenv("DATA_DIR", "/data")
+"""Répertoire de stockage persistant (monté sur Railway)."""
+
+CHANNEL_EDIT_MIN_INTERVAL_SECONDS: int = int(
+    os.getenv("CHANNEL_EDIT_MIN_INTERVAL_SECONDS", "180")
+)
+"""Intervalle minimal entre deux modifications du même salon."""
+
+CHANNEL_EDIT_DEBOUNCE_SECONDS: int = int(
+    os.getenv("CHANNEL_EDIT_DEBOUNCE_SECONDS", "15")
+)
+"""Délai appliqué avant l'édition d'un salon."""
+
+CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS: int = int(
+    os.getenv("CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS", "10")
+)
+"""Intervalle minimal global entre les éditions de salons."""
+
 # ── Propriétaire du bot ──────────────────────────────────────
 OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
