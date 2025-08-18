@@ -1,10 +1,11 @@
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Iterable, Set
 
-DATA_FILE = Path(os.getenv("DATA_DIR", "/data")) / "temp_vc_ids.json"
+from config import DATA_DIR
+
+DATA_FILE = Path(DATA_DIR) / "temp_vc_ids.json"
 
 
 def load_temp_vc_ids() -> Set[int]:

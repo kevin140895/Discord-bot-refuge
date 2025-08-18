@@ -2,7 +2,6 @@
 import asyncio
 import json
 import logging
-import os
 import random
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +11,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from utils.metrics import measure
+from config import (
+    REMINDER_CHANNEL_ID,
+    ROLE_CHOICE_CHANNEL_ID,
+    IGNORED_ROLE_IDS,
+    DATA_DIR,
+)
 
 # ─────────────────────── PARAMS ───────────────────────
 try:
@@ -20,19 +25,6 @@ try:
 except Exception:
     PARIS_TZ = None  # fallback naive UTC si indispo
 
-REMINDER_CHANNEL_ID = 1400552164979507263          # salon unique où on écrit
-ROLE_CHOICE_CHANNEL_ID = 1400560866478395512       # salon des boutons de rôles
-
-# Rôles à ignorer (fournis par toi)
-IGNORED_ROLE_IDS = {
-    1402071696277635157,
-    1404054439706234910,
-    1403510368340410550,
-    1405170057792979025,
-    1402302249035894968,
-}
-
-DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 ROLE_REMINDERS_FILE = f"{DATA_DIR}/role_reminders.json"
 
 SCAN_PERIOD_HOURS = 72
