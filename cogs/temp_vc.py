@@ -13,6 +13,7 @@ from config import (
     TEMP_VC_CATEGORY,
     TEMP_VC_LIMITS,
     RENAME_DELAY,
+    TEMP_VC_CHECK_INTERVAL_SECONDS,
 )
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
@@ -204,8 +205,12 @@ class TempVCCog(commands.Cog):
 
     # ---------- tâche de nettoyage ----------
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(seconds=TEMP_VC_CHECK_INTERVAL_SECONDS)
     async def cleanup(self) -> None:
+        for channel_id in list(TEMP_VC_IDS):
+            channel = self.bot.get_channel(channel_id)
+            if isinstance(channel, discord.VoiceChannel):
+                await self._update_channel_name(channel)
         await delete_untracked_temp_vcs(self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
         save_temp_vc_ids(TEMP_VC_IDS)
 
