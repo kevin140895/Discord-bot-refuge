@@ -5,7 +5,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-from config import RADIO_VC_ID, RADIO_STREAM_URL
+from config import RADIO_MUTED_ROLE_ID, RADIO_STREAM_URL, RADIO_VC_ID
 
 FFMPEG_BEFORE = "-fflags nobuffer -probesize 32k"
 FFMPEG_OPTIONS = "-filter:a loudnorm"
@@ -69,6 +69,21 @@ class RadioCog(commands.Cog):
                 self._reconnect_task = self.bot.loop.create_task(
                     self._delayed_reconnect()
                 )
+            return
+
+        if any(role.id == RADIO_MUTED_ROLE_ID for role in member.roles):
+            # Join radio channel -> mute
+            if after.channel and after.channel.id == self.vc_id:
+                try:
+                    await member.edit(mute=True)
+                except Exception as e:
+                    logging.warning("Impossible de mute %s: %s", member, e)
+            # Leave radio channel -> unmute
+            elif before.channel and before.channel.id == self.vc_id:
+                try:
+                    await member.edit(mute=False)
+                except Exception as e:
+                    logging.warning("Impossible de demute %s: %s", member, e)
 
     def cog_unload(self) -> None:
         if self._reconnect_task and not self._reconnect_task.done():
