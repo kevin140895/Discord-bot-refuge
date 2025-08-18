@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 import config
+from config import XP_VIEWER_ROLE_ID
 from utils.rename_manager import rename_manager
 from utils.interactions import safe_respond
 from utils.metrics import measure
@@ -57,6 +58,9 @@ class StatsCog(commands.Cog):
 
     @app_commands.command(name="stats_refresh", description="Met à jour les salons de statistiques.")
     async def slash_stats_refresh(self, interaction: discord.Interaction) -> None:
+        if not any(r.id == XP_VIEWER_ROLE_ID for r in interaction.user.roles):
+            await safe_respond(interaction, "Accès refusé.", ephemeral=True)
+            return
         with measure("slash:stats_refresh"):
             await self.update_stats(interaction.guild)
             await safe_respond(interaction, "Statistiques mises à jour", ephemeral=True)
