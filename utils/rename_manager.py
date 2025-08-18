@@ -28,6 +28,11 @@ class _RenameManager:
         if self._worker is None:
             self._worker = asyncio.create_task(self._run())
 
+    def stop(self) -> None:
+        if self._worker is not None:
+            self._worker.cancel()
+            self._worker = None
+
     async def request(
         self, channel: discord.abc.GuildChannel, new_name: str
     ) -> None:
