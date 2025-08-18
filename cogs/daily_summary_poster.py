@@ -113,12 +113,21 @@ class DailySummaryPoster(commands.Cog):
         if not data:
             return
         summary = self._read_summary()
-        if summary.get("date") == data.get("date"):
-            return  # already posted
         channel = self.bot.get_channel(ACTIVITY_SUMMARY_CH)
         if not channel:
             logging.warning("[daily_summary] Salon %s introuvable", ACTIVITY_SUMMARY_CH)
             return
+
+        message_id = summary.get("message_id")
+        if summary.get("date") == data.get("date") and message_id:
+            try:
+                await channel.fetch_message(message_id)
+                return  # already posted and message exists
+            except discord.NotFound:
+                logging.warning(
+                    "[daily_summary] Message %s introuvable, re-publication", message_id
+                )
+
         message = self._build_message(data)
         msg = await channel.send(message)
         self._write_summary({"date": data.get("date"), "message_id": msg.id})
