@@ -3,6 +3,9 @@ import logging
 import os
 import time
 from typing import Dict
+from collections import Counter
+
+from utils.metrics import errors
 
 
 class TokenBucket:
@@ -44,6 +47,7 @@ class GlobalRateLimiter:
         self._task: asyncio.Task | None = None
         self._requests = 0
         self._total_wait = 0.0
+        self.errors: Counter[str] = errors
 
     def _get_bucket(self, name: str) -> TokenBucket:
         bucket = self.buckets.get(name)
@@ -89,5 +93,8 @@ class GlobalRateLimiter:
             self.logger.info(
                 "Limiter processed %d requests, avg wait %.3fs", self._requests, avg
             )
+            if self.errors:
+                self.logger.info("Errors: %s", dict(self.errors))
+                self.errors.clear()
             self._requests = 0
             self._total_wait = 0.0

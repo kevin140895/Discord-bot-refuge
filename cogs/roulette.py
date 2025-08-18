@@ -11,6 +11,7 @@ from discord.ext import commands, tasks
 from zoneinfo import ZoneInfo
 
 from utils.timewin import is_open_now, next_boundary_dt
+from utils.metrics import measure
 from storage.roulette_store import RouletteStore
 from .xp import award_xp
 
@@ -454,9 +455,10 @@ class RouletteCog(commands.Cog):
     )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def refresh_roulette(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await self._replace_poster_message()
-        await interaction.followup.send("✅ Message roulette rafraîchi.", ephemeral=True)
+        with measure("slash:roulette_refresh"):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            await self._replace_poster_message()
+            await interaction.followup.send("✅ Message roulette rafraîchi.", ephemeral=True)
 
     async def cog_load(self):
         try:
