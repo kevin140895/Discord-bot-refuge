@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from utils.rate_limit import GlobalRateLimiter
 from storage.xp_store import xp_store
 from utils.rename_manager import rename_manager
+from view import PlayerTypeView
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -23,6 +24,7 @@ intents.presences = True
 
 class RefugeBot(commands.Bot):
     async def setup_hook(self) -> None:
+        self.add_view(PlayerTypeView())
         await xp_store.start()
         extensions = [
             "cogs.role_reminder",
