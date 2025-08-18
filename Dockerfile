@@ -8,7 +8,7 @@ RUN apt-get update && \
     ffmpeg \
     libjpeg-dev \
     zlib1g-dev \
-    && apt-get clean
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Répertoire de travail dans le conteneur
 WORKDIR /app
