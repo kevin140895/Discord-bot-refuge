@@ -19,7 +19,7 @@ async def test_rename_channel_uses_config_delay(monkeypatch):
         delays.append(delay)
 
     monkeypatch.setattr(temp_vc.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(temp_vc, "safe_channel_edit", AsyncMock())
+    monkeypatch.setattr(temp_vc.rename_manager, "request", AsyncMock())
 
     with patch.object(temp_vc.tasks.Loop, "start", lambda self, *a, **k: None):
         cog = temp_vc.TempVCCog(bot)
@@ -31,4 +31,4 @@ async def test_rename_channel_uses_config_delay(monkeypatch):
     await task
 
     assert delays == [RENAME_DELAY]
-    temp_vc.safe_channel_edit.assert_awaited_once_with(channel, name="New")
+    temp_vc.rename_manager.request.assert_awaited_once_with(channel, "New")

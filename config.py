@@ -104,5 +104,31 @@ CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS: int = int(
 )
 """Intervalle minimal global entre les éditions de salons."""
 
+# ── Renommage des salons ────────────────────────────────────
+CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL: int = int(
+    os.getenv("CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL", "5")
+)
+"""Intervalle minimal entre deux renommages du même salon."""
+
+CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = int(
+    os.getenv("CHANNEL_RENAME_MIN_INTERVAL_GLOBAL", "2")
+)
+"""Intervalle minimal global entre les renommages de salons."""
+
+CHANNEL_RENAME_DEBOUNCE_SECONDS: int = int(
+    os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "3")
+)
+"""Délai appliqué avant le renommage d'un salon."""
+
+CHANNEL_RENAME_MAX_RETRIES: int = int(
+    os.getenv("CHANNEL_RENAME_MAX_RETRIES", "5")
+)
+"""Nombre maximum de tentatives de renommage en cas de 429."""
+
+CHANNEL_RENAME_BACKOFF_BASE: float = float(
+    os.getenv("CHANNEL_RENAME_BACKOFF_BASE", "2")
+)
+"""Base du délai exponentiel entre les tentatives de renommage."""
+
 # ── Propriétaire du bot ──────────────────────────────────────
 OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))

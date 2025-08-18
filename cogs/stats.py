@@ -3,7 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 import config
-from utils.discord_utils import safe_channel_edit
+from utils.rename_manager import rename_manager
 from utils.interactions import safe_respond
 from utils.metrics import measure
 
@@ -36,11 +36,17 @@ class StatsCog(commands.Cog):
             )
             channels = getattr(category, "channels", [])
             if len(channels) > 0:
-                await safe_channel_edit(channels[0], name=f"👥 Membres : {members}")
+                await rename_manager.request(
+                    channels[0], f"👥 Membres : {members}"
+                )
             if len(channels) > 1:
-                await safe_channel_edit(channels[1], name=f"🟢 En ligne : {online}")
+                await rename_manager.request(
+                    channels[1], f"🟢 En ligne : {online}"
+                )
             if len(channels) > 2:
-                await safe_channel_edit(channels[2], name=f"🔊 Voc : {voice}")
+                await rename_manager.request(
+                    channels[2], f"🔊 Voc : {voice}"
+                )
 
     @tasks.loop(minutes=1)
     async def refresh_stats(self) -> None:
