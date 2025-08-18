@@ -11,7 +11,7 @@ from discord.ext import commands, tasks
 
 from config import (
     DATA_DIR,
-    LOBBY_TEXT_CHANNEL,
+    ACTIVITY_SUMMARY_CH,
     MVP_ROLE_ID,
     TOP_MSG_ROLE_ID,
     TOP_VC_ROLE_ID,
@@ -172,7 +172,7 @@ class XPCog(commands.Cog):
                 await winners["msg"].add_roles(roles["msg"], reason="📜 Écrivain du Refuge")
             if winners["vc"] and roles["vc"]:
                 await winners["vc"].add_roles(roles["vc"], reason="🎤 Voix du Refuge")
-            channel = guild.get_channel(LOBBY_TEXT_CHANNEL)
+            channel = guild.get_channel(ACTIVITY_SUMMARY_CH)
             if channel:
                 await channel.send(
                     (
