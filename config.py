@@ -3,6 +3,22 @@ Modifiez les valeurs ci-dessous pour adapter le bot à votre serveur."""
 
 import os
 
+
+def _resolve_data_dir() -> str:
+    """Resolve the directory used for persistent storage.
+
+    Priority order:
+    1. ``DATA_DIR`` environment variable
+    2. ``/app/data`` (Railway default mount)
+    3. ``/data`` legacy path
+    """
+    env = os.getenv("DATA_DIR")
+    if env:
+        return env
+    if os.path.isdir("/app/data"):
+        return "/app/data"
+    return "/data"
+
 # ── Salons statistiques ───────────────────────────────────────
 STATS_CATEGORY_ID = 1406408038692294676  # Catégorie "📊 Statistiques"
 
@@ -70,8 +86,8 @@ ANNOUNCE_CHANNEL_ID: int = 1400552164979507263
 """Salon utilisé pour les annonces de la roulette."""
 
 # ── Persistance et I/O ───────────────────────────────────────
-DATA_DIR: str = os.getenv("DATA_DIR", "/data")
-"""Répertoire de stockage persistant (monté sur Railway)."""
+DATA_DIR: str = _resolve_data_dir()
+"""Répertoire de stockage persistant."""
 
 CHANNEL_EDIT_MIN_INTERVAL_SECONDS: int = int(
     os.getenv("CHANNEL_EDIT_MIN_INTERVAL_SECONDS", "180")

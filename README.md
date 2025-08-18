@@ -46,16 +46,18 @@ en dur dans le code.
 ## Données persistantes
 
 Certaines fonctionnalités (XP, roulette, salons temporaires…) écrivent des
-fichiers JSON pour conserver leur état.  Par défaut, ces fichiers sont
-stockés dans le dossier `/data`.  Vous pouvez modifier cet emplacement en
-définissant la variable d'environnement `DATA_DIR` :
+fichiers JSON pour conserver leur état. Par défaut, ces fichiers sont stockés
+dans le dossier `/app/data` si présent (montage Railway), sinon dans `/data`.
+Vous pouvez modifier cet emplacement en définissant la variable
+d'environnement `DATA_DIR` :
 
 ```bash
 export DATA_DIR=/chemin/vers/mes/données
 ```
 
 Assurez-vous que ce dossier existe et est accessible en lecture/écriture par
-le bot.
+le bot. Pour migrer un ancien déploiement utilisant `/data`, copiez vos fichiers
+vers `/app/data` ou définissez `DATA_DIR=/data`.
 
 Les salons vocaux temporaires sont listés dans `data/temp_vc_ids.json`. Ce
 fichier doit être conservé entre les redéploiements (volume monté ou dossier

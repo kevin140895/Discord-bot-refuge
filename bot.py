@@ -9,6 +9,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from utils.rate_limit import GlobalRateLimiter
+from storage.xp_store import xp_store
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -19,7 +20,31 @@ intents.voice_states = True
 intents.message_content = True
 intents.presences = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+class RefugeBot(commands.Bot):
+    async def setup_hook(self) -> None:
+        await xp_store.start()
+        extensions = [
+            "cogs.role_reminder",
+            "cogs.roulette",
+            "cogs.xp",
+            "cogs.temp_vc",
+            "cogs.misc",
+            "cogs.radio",
+            "cogs.stats",
+        ]
+        for ext in extensions:
+            try:
+                await self.load_extension(ext)
+            except Exception:
+                logging.exception("Failed to load extension %s", ext)
+        limiter.start()
+
+    async def close(self) -> None:
+        await xp_store.aclose()
+        await super().close()
+
+
+bot = RefugeBot(command_prefix="!", intents=intents)
 
 limiter = GlobalRateLimiter()
 _orig_request = bot.http.request
@@ -77,23 +102,6 @@ async def _limited_request(self, route, **kwargs):
 bot.http.request = types.MethodType(_limited_request, bot.http)
 
 
-@bot.event
-async def setup_hook() -> None:
-    extensions = [
-        "cogs.role_reminder",
-        "cogs.roulette",
-        "cogs.xp",
-        "cogs.temp_vc",
-        "cogs.misc",
-        "cogs.radio",
-        "cogs.stats",
-    ]
-    for ext in extensions:
-        try:
-            await bot.load_extension(ext)
-        except Exception:
-            logging.exception("Failed to load extension %s", ext)
-    limiter.start()
 
 
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN") or os.getenv("BOT_TOKEN")
