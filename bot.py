@@ -11,9 +11,13 @@ from dotenv import load_dotenv
 from utils.rate_limit import GlobalRateLimiter
 from storage.xp_store import xp_store
 from utils.rename_manager import rename_manager
+from utils.permanent_message import ensure_permanent_message
+from view import PlayerTypeView
+from config import CHANNEL_ROLES, DATA_DIR
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.info("[boot] DATA_DIR résolu: %s", DATA_DIR)
 
 intents = discord.Intents.default()
 intents.members = True
@@ -40,6 +44,10 @@ class RefugeBot(commands.Bot):
                 logging.exception("Failed to load extension %s", ext)
         limiter.start()
         await rename_manager.start()
+        self.add_view(PlayerTypeView())
+        await ensure_permanent_message(
+            self, CHANNEL_ROLES, "Quel type de joueur es-tu ?", lambda: (PlayerTypeView(), None)
+        )
 
     async def close(self) -> None:
         await xp_store.aclose()
