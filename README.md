@@ -67,6 +67,14 @@ démarrage.
 Le délai avant renommage de ces salons peut être ajusté via la constante
 `RENAME_DELAY` dans [`config.py`](./config.py).
 
+Le renommage effectif intervient après un délai total d'environ
+`RENAME_DELAY` + `CHANNEL_RENAME_DEBOUNCE_SECONDS`. Avec les valeurs par
+défaut (3 s et 2 s), le bot attend environ 5 s avant d'émettre la
+requête de renommage, tout en respectant les limites de l'API Discord
+(5 s entre deux renommages d'un même salon et 2 s globalement).
+Réduire ces valeurs diminue la latence mais augmente la consommation de
+ces limites.
+
 La fréquence de vérification des noms de ces salons est définie par la constante
 `TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
 
