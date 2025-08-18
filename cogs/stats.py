@@ -42,8 +42,9 @@ class StatsCog(commands.Cog):
             if len(channels) > 2:
                 await safe_channel_edit(channels[2], name=f"🔊 Voc : {voice}")
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(minutes=1)
     async def refresh_stats(self) -> None:
+        """Met à jour les statistiques du serveur chaque minute."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_stats(guild)
