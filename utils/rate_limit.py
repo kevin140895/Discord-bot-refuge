@@ -1,4 +1,4 @@
-import asyncio
+import asyncio  # required for asynchronous rate limiting
 import logging
 import os
 import time
