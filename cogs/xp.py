@@ -15,6 +15,7 @@ from discord.ext import commands, tasks
 from config import LOBBY_TEXT_CHANNEL, MVP_ROLE_ID, TOP_MSG_ROLE_ID, TOP_VC_ROLE_ID
 from utils.interactions import safe_respond
 from utils.persistence import atomic_write_json, schedule_checkpoint
+from utils.metrics import measure
 
 # Fichiers de persistance
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
@@ -316,58 +317,60 @@ class XPCog(commands.Cog):
 
     @app_commands.command(name="rang", description="Affiche ton niveau avec une carte graphique")
     async def rang(self, interaction: discord.Interaction) -> None:
-        try:
-            await interaction.response.defer(ephemeral=True, thinking=True)
-        except Exception:
-            pass
-        user_id = str(interaction.user.id)
-        async with XP_LOCK:
-            data = XP_CACHE.get(user_id)
-            if not data:
+        with measure("slash:rang"):
+            try:
+                await interaction.response.defer(ephemeral=True, thinking=True)
+            except Exception:
+                pass
+            user_id = str(interaction.user.id)
+            async with XP_LOCK:
+                data = XP_CACHE.get(user_id)
+                if not data:
+                    await interaction.followup.send(
+                        "Tu n'as pas encore de niveau... Commence à discuter !",
+                        ephemeral=True,
+                    )
+                    return
+                level = int(data.get("level", 0))
+                xp = int(data.get("xp", 0))
+                xp_next = (level + 1) ** 2 * 100
+            try:
+                image = await generate_rank_card(interaction.user, level, xp, xp_next)
+                file = discord.File(fp=image, filename="rank.png")
+                await interaction.followup.send(file=file, ephemeral=True)
+            except Exception as e:
+                logging.exception(f"/rang: exception inattendue: {e}")
                 await interaction.followup.send(
-                    "Tu n'as pas encore de niveau... Commence à discuter !",
+                    "❌ Une erreur est survenue pendant la génération de la carte.",
                     ephemeral=True,
                 )
-                return
-            level = int(data.get("level", 0))
-            xp = int(data.get("xp", 0))
-            xp_next = (level + 1) ** 2 * 100
-        try:
-            image = await generate_rank_card(interaction.user, level, xp, xp_next)
-            file = discord.File(fp=image, filename="rank.png")
-            await interaction.followup.send(file=file, ephemeral=True)
-        except Exception as e:
-            logging.exception(f"/rang: exception inattendue: {e}")
-            await interaction.followup.send(
-                "❌ Une erreur est survenue pendant la génération de la carte.",
-                ephemeral=True,
-            )
 
     @app_commands.command(name="xp_serveur", description="Affiche l'XP de tous les membres du serveur")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def xp_serveur(self, interaction: discord.Interaction) -> None:
-        async with XP_LOCK:
-            items = list(XP_CACHE.items())
-        if not items:
-            await safe_respond(interaction, "Aucune donnée XP.", ephemeral=True)
-            return
-        lines = []
-        for uid, data in sorted(items, key=lambda x: x[1].get("xp", 0), reverse=True):
-            member = interaction.guild.get_member(int(uid)) if interaction.guild else None
-            if not member:
-                continue
-            xp = int(data.get("xp", 0))
-            lvl = int(data.get("level", 0))
-            lines.append(f"{member.display_name} - {xp} XP (niveau {lvl})")
-        if not lines:
-            await safe_respond(interaction, "Aucun membre trouvé.", ephemeral=True)
-            return
-        report = "\n".join(lines)
-        if len(report) < 1900:
-            await safe_respond(interaction, f"```\n{report}\n```", ephemeral=True)
-        else:
-            file = discord.File(io.StringIO(report), filename="xp_serveur.txt")
-            await safe_respond(interaction, "📄 Liste XP en pièce jointe.", ephemeral=True, file=file)
+        with measure("slash:xp_serveur"):
+            async with XP_LOCK:
+                items = list(XP_CACHE.items())
+            if not items:
+                await safe_respond(interaction, "Aucune donnée XP.", ephemeral=True)
+                return
+            lines = []
+            for uid, data in sorted(items, key=lambda x: x[1].get("xp", 0), reverse=True):
+                member = interaction.guild.get_member(int(uid)) if interaction.guild else None
+                if not member:
+                    continue
+                xp = int(data.get("xp", 0))
+                lvl = int(data.get("level", 0))
+                lines.append(f"{member.display_name} - {xp} XP (niveau {lvl})")
+            if not lines:
+                await safe_respond(interaction, "Aucun membre trouvé.", ephemeral=True)
+                return
+            report = "\n".join(lines)
+            if len(report) < 1900:
+                await safe_respond(interaction, f"```\n{report}\n```", ephemeral=True)
+            else:
+                file = discord.File(io.StringIO(report), filename="xp_serveur.txt")
+                await safe_respond(interaction, "📄 Liste XP en pièce jointe.", ephemeral=True, file=file)
 
 async def setup(bot: commands.Bot) -> None:
     await xp_bootstrap_cache()
