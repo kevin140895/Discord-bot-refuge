@@ -44,6 +44,15 @@ class _RenameManager:
         else:
             self._pending[channel.id] = (channel, new_name)
             await self._queue.put(channel.id)
+            logging.debug(
+                "[rename_manager] queued rename %s -> %r", channel.id, new_name
+            )
+        if self._worker is None or self._worker.done():
+            logging.warning(
+                "[rename_manager] worker inactive; rename for %s -> %r may not run",
+                channel.id,
+                new_name,
+            )
 
     async def _run(self) -> None:
         while True:
