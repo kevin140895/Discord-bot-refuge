@@ -2,7 +2,6 @@
 import asyncio
 import json
 import logging
-import os
 import random
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from utils.metrics import measure
+from utils.persist import atomic_write_json
 from config import (
     REMINDER_CHANNEL_ID,
     ROLE_CHOICE_CHANNEL_ID,
@@ -68,17 +68,6 @@ def _read_json(path: str) -> Dict[str, Any]:
         return {}
 
 
-def _write_json(path: str, data: Dict[str, Any]):
-    _ensure_data_dir()
-    try:
-        Path(path).write_text(
-            json.dumps(data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    except Exception as e:
-        logging.error(f"[rolescan] Écriture JSON échouée pour {path}: {e}")
-
-
 def user_without_chosen_role(member: discord.Member) -> bool:
     """True si le membre n'a aucun rôle hors @everyone
     et hors IGNORED_ROLE_IDS."""
@@ -124,7 +113,13 @@ class RoleReminderCog(commands.Cog):
                 )
 
     def _save_state(self):
-        _write_json(ROLE_REMINDERS_FILE, self.reminders)
+        _ensure_data_dir()
+        try:
+            atomic_write_json(ROLE_REMINDERS_FILE, self.reminders)
+        except Exception as e:
+            logging.error(
+                f"[rolescan] Écriture JSON échouée pour {ROLE_REMINDERS_FILE}: {e}"
+            )
 
     # ── Loops ──
 
