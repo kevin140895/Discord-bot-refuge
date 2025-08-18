@@ -47,11 +47,12 @@ async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None
     """Safely edit a channel with rate limit protections."""
     lock = _CHANNEL_LOCKS.setdefault(channel.id, asyncio.Lock())
     async with lock:
-        await asyncio.sleep(_DEBOUNCE)
-
         if all(getattr(channel, k, None) == v for k, v in kwargs.items()):
             logging.info("[safe_channel_edit] no-op for %s", channel.id)
             return
+
+        if _DEBOUNCE > 0:
+            await asyncio.sleep(_DEBOUNCE)
 
         now = time.monotonic()
         last = _LAST_EDIT.get(channel.id, 0)
