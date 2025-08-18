@@ -35,19 +35,21 @@ class TempVCCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self._rename_tasks: Dict[int, asyncio.Task] = {}
+        self._last_names: Dict[int, str] = {}
 
-        if not TEMP_VC_IDS:
-            category = bot.get_channel(TEMP_VC_CATEGORY)
-            if isinstance(category, discord.CategoryChannel):
-                for ch in category.voice_channels:
-                    base = ch.name.split("•", 1)[0].strip()
-                    if TEMP_VC_NAME_RE.match(base):
-                        TEMP_VC_IDS.add(ch.id)
-                if TEMP_VC_IDS:
-                    save_temp_vc_ids(TEMP_VC_IDS)
+        getter = getattr(bot, "get_channel", lambda _id: None)
+        category = getter(TEMP_VC_CATEGORY)
+        if isinstance(category, discord.CategoryChannel):
+            for ch in category.voice_channels:
+                base = ch.name.split("•", 1)[0].strip()
+                if TEMP_VC_NAME_RE.match(base):
+                    TEMP_VC_IDS.add(ch.id)
+                    self._last_names[ch.id] = ch.name
+            if TEMP_VC_IDS:
+                save_temp_vc_ids(TEMP_VC_IDS)
 
         self.cleanup.start()
-        self._rename_tasks: Dict[int, asyncio.Task] = {}
 
     def cog_unload(self) -> None:
         self.cleanup.cancel()
@@ -125,6 +127,8 @@ class TempVCCog(commands.Cog):
                     return
                 except discord.HTTPException:
                     logging.exception("Renommage du salon %s échoué", channel.id)
+                else:
+                    self._last_names[channel.id] = new
         except asyncio.CancelledError:
             pass
         finally:
@@ -133,6 +137,13 @@ class TempVCCog(commands.Cog):
 
     async def _update_channel_name(self, channel: discord.VoiceChannel) -> None:
         """Programme ou reprogramme le renommage du salon après un délai."""
+        new = self._compute_channel_name(channel)
+        cached = self._last_names.get(channel.id)
+        if new is None:
+            return
+        if cached == new and channel.name == new:
+            return
+        self._last_names[channel.id] = new
         task = self._rename_tasks.get(channel.id)
         if task:
             task.cancel()
@@ -150,6 +161,7 @@ class TempVCCog(commands.Cog):
         channel = await category.create_voice_channel(base, user_limit=limit)
 
         TEMP_VC_IDS.add(channel.id)
+        self._last_names[channel.id] = channel.name
         save_temp_vc_ids(TEMP_VC_IDS)
         return channel
 
@@ -183,6 +195,7 @@ class TempVCCog(commands.Cog):
                     )
                 else:
                     TEMP_VC_IDS.discard(before.channel.id)
+                    self._last_names.pop(before.channel.id, None)
                     save_temp_vc_ids(TEMP_VC_IDS)
 
         # 3) Renommage sur changement d'état vocal

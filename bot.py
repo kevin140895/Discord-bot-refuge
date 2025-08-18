@@ -33,6 +33,10 @@ async def _limited_request(self, route, **kwargs):
     if method == "POST" and path.startswith("/channels") and path.endswith("/messages"):
         channel_id = path.split("/")[2]
         buckets.append(f"channel:{channel_id}")
+    if method == "PATCH" and path.startswith("/channels") and "/messages" not in path:
+        channel_id = path.split("/")[2]
+        buckets.append("channel_edit")
+        buckets.append(f"channel_edit:{channel_id}")
     if "reactions" in path:
         buckets.append("reactions")
     if "/members/" in path and "/roles/" in path:

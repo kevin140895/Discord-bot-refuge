@@ -11,6 +11,11 @@ _CHANNEL_LOCKS: dict[int, asyncio.Lock] = {}
 _LAST_EDIT: dict[int, float] = {}
 _MIN_INTERVAL = int(os.getenv("CHANNEL_EDIT_MIN_INTERVAL_SECONDS", "180"))
 _DEBOUNCE = int(os.getenv("CHANNEL_EDIT_DEBOUNCE_SECONDS", "15"))
+_GLOBAL_LOCK = asyncio.Lock()
+_LAST_GLOBAL_EDIT = 0.0
+_GLOBAL_MIN_INTERVAL = int(
+    os.getenv("CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS", "10")
+)
 
 async def ensure_channel_has_message(
     bot: commands.Bot,
@@ -45,6 +50,7 @@ async def ensure_channel_has_message(
 
 async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None:
     """Safely edit a channel with rate limit protections."""
+    global _LAST_GLOBAL_EDIT
     lock = _CHANNEL_LOCKS.setdefault(channel.id, asyncio.Lock())
     async with lock:
         if all(getattr(channel, k, None) == v for k, v in kwargs.items()):
@@ -63,26 +69,38 @@ async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None
             )
             await asyncio.sleep(wait)
 
-        try:
-            logging.debug(
-                "[safe_channel_edit] editing channel %s with %s", channel.id, kwargs
-            )
-            await channel.edit(**kwargs)
-        except discord.HTTPException as exc:
-            if exc.status == 429 and getattr(exc, "retry_after", None):
-                logging.warning(
-                    "[safe_channel_edit] rate limited on %s, retry in %.1fs",
+        async with _GLOBAL_LOCK:
+            now = time.monotonic()
+            gwait = _GLOBAL_MIN_INTERVAL - (now - _LAST_GLOBAL_EDIT)
+            if gwait > 0:
+                logging.debug(
+                    "[safe_channel_edit] global wait %.1fs before editing %s",
+                    gwait,
                     channel.id,
-                    exc.retry_after,
                 )
-                await asyncio.sleep(exc.retry_after)
-                try:
-                    await channel.edit(**kwargs)
-                except discord.HTTPException:
-                    logging.exception(
-                        "[safe_channel_edit] second edit failed for %s", channel.id
+                await asyncio.sleep(gwait)
+
+            try:
+                logging.debug(
+                    "[safe_channel_edit] editing channel %s with %s", channel.id, kwargs
+                )
+                await channel.edit(**kwargs)
+            except discord.HTTPException as exc:
+                if exc.status == 429 and getattr(exc, "retry_after", None):
+                    logging.warning(
+                        "[safe_channel_edit] rate limited on %s, retry in %.1fs",
+                        channel.id,
+                        exc.retry_after,
                     )
+                    await asyncio.sleep(exc.retry_after)
+                    try:
+                        await channel.edit(**kwargs)
+                    except discord.HTTPException:
+                        logging.exception(
+                            "[safe_channel_edit] second edit failed for %s", channel.id
+                        )
+                        raise
+                else:
                     raise
-            else:
-                raise
-        _LAST_EDIT[channel.id] = time.monotonic()
+            _LAST_EDIT[channel.id] = time.monotonic()
+            _LAST_GLOBAL_EDIT = _LAST_EDIT[channel.id]

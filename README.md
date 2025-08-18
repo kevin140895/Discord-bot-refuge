@@ -88,6 +88,8 @@ des salons, deux variables d'environnement permettent d'ajuster le rythme :
   deux éditions du même salon.
 - `CHANNEL_EDIT_DEBOUNCE_SECONDS` (défaut `15`) : délai d'agrégation avant
   d'appliquer les changements.
+- `CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS` (défaut `10`) : intervalle minimal
+  global entre deux éditions de salons.
 
 Ces variables peuvent être définies dans votre fichier `.env` (voir
 `.env.example`).
