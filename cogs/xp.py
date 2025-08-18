@@ -365,7 +365,7 @@ class XPCog(commands.Cog):
             if not lines:
                 await safe_respond(interaction, "Aucun membre trouvé.", ephemeral=True)
                 return
-            report = "\n".join(lines)
+            report = '\n'.join(lines)
             if len(report) < 1900:
                 await safe_respond(interaction, f"```\n{report}\n```", ephemeral=True)
             else:
