@@ -1,11 +1,8 @@
 import asyncio
 import io
-import json
 import logging
 import random
-import math
 from datetime import datetime, timezone, time, timedelta
-from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -19,48 +16,25 @@ from config import (
     TOP_VC_ROLE_ID,
 )
 from utils.interactions import safe_respond
-from utils.persistence import atomic_write_json, schedule_checkpoint
+from utils.persist import atomic_write_json, read_json_safe
+from utils.persistence import schedule_checkpoint
 from utils.metrics import measure
+from storage.xp_store import xp_store
 
 # Fichiers de persistance
-XP_FILE = f"{DATA_DIR}/data.json"
-BACKUP_FILE = f"{DATA_DIR}/backup.json"
 VOICE_TIMES_FILE = f"{DATA_DIR}/voice_times.json"
 DAILY_STATS_FILE = f"{DATA_DIR}/daily_stats.json"
 
 # Caches en mémoire
 voice_times: dict[str, datetime] = {}
-XP_CACHE: dict[str, dict] = {}
+XP_CACHE: dict[str, dict] = xp_store.data
 DAILY_STATS: dict[str, dict[str, dict[str, int]]] = {}
-XP_LOCK = asyncio.Lock()
+XP_LOCK = xp_store.lock
 DAILY_LOCK = asyncio.Lock()
 
-def ensure_data_dir() -> None:
-    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
-
-def _safe_read_json(path: str) -> dict:
-    p = Path(path)
-    if not p.exists():
-        return {}
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-
-def save_json(path: str, data: dict) -> None:
-    try:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(
-            json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
-        )
-    except Exception as e:
-        logging.error("❌ Écriture JSON échouée pour %s: %s", path, e)
-
-def load_json(path: str) -> dict:
-    return _safe_read_json(path)
 
 def load_voice_times() -> dict[str, datetime]:
-    data = load_json(VOICE_TIMES_FILE)
+    data = read_json_safe(VOICE_TIMES_FILE)
     out: dict[str, datetime] = {}
     for uid, iso in data.items():
         try:
@@ -70,94 +44,38 @@ def load_voice_times() -> dict[str, datetime]:
             continue
     return out
 
+
 async def save_voice_times_to_disk() -> None:
     serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
     await atomic_write_json(VOICE_TIMES_FILE, serializable)
 
+
 def load_daily_stats() -> dict:
-    return load_json(DAILY_STATS_FILE)
+    return read_json_safe(DAILY_STATS_FILE)
+
 
 async def save_daily_stats_to_disk() -> None:
     async with DAILY_LOCK:
         data = DAILY_STATS
     await atomic_write_json(DAILY_STATS_FILE, data)
 
-def _disk_load_xp() -> dict:
-    ensure_data_dir()
-    path = Path(XP_FILE)
-    backup_path = Path(BACKUP_FILE)
-    try:
-        if not path.exists():
-            if backup_path.exists():
-                data = _safe_read_json(BACKUP_FILE)
-                save_json(XP_FILE, data)
-                logging.info("📦 XP restauré depuis backup.json (fichier principal manquant).")
-                return data
-            save_json(XP_FILE, {})
-            logging.info("📁 Fichier XP créé (vide).")
-            return {}
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        logging.warning("⚠️ data.json corrompu, tentative de restauration depuis backup.json…")
-        if backup_path.exists():
-            try:
-                data = json.loads(backup_path.read_text(encoding="utf-8"))
-                save_json(XP_FILE, data)
-                logging.info("✅ Restauration réussie depuis backup.json.")
-                return data
-            except Exception as e:
-                logging.error(f"❌ Lecture backup impossible: {e}")
-        else:
-            logging.error("❌ Aucun backup disponible.")
-        return {}
-
-def _disk_save_xp(data: dict) -> None:
-    ensure_data_dir()
-    save_json(XP_FILE, data)
-    try:
-        Path(BACKUP_FILE).write_text(Path(XP_FILE).read_text(encoding="utf-8"), encoding="utf-8")
-    except Exception as e:
-        logging.error(f"❌ Écriture backup échouée: {e}")
 
 async def xp_bootstrap_cache() -> None:
-    global XP_CACHE, voice_times, DAILY_STATS
-    XP_CACHE = _disk_load_xp()
+    global XP_CACHE, voice_times, DAILY_STATS, XP_LOCK
+    XP_CACHE = xp_store.data
+    XP_LOCK = xp_store.lock
     voice_times = load_voice_times()
     DAILY_STATS = load_daily_stats()
     logging.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
-async def xp_flush_cache_to_disk() -> None:
-    async with XP_LOCK:
-        _disk_save_xp(XP_CACHE)
-        logging.info("💾 XP flush vers disque (%d utilisateurs).", len(XP_CACHE))
 
-def get_level(xp: int) -> int:
-    try:
-        return int(math.isqrt(xp // 100))
-    except Exception:
-        level = 0
-        while xp >= (level + 1) ** 2 * 100:
-            level += 1
-        return level
+async def xp_flush_cache_to_disk() -> None:
+    await xp_store.flush()
+    logging.info("💾 XP flush vers disque (%d utilisateurs).", len(xp_store.data))
 
 async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
-    """Ajoute `amount` d'XP à `user_id` et retourne (old_level, new_level, total_xp)."""
-    uid = str(user_id)
-    if amount <= 0:
-        async with XP_LOCK:
-            data = XP_CACHE.get(uid, {"xp": 0, "level": 0})
-            old_level = int(data.get("level", 0))
-            new_level = old_level
-            total_xp = int(data.get("xp", 0))
-            return old_level, new_level, total_xp
-    async with XP_LOCK:
-        user = XP_CACHE.setdefault(uid, {"xp": 0, "level": 0})
-        old_level = int(user.get("level", 0))
-        user["xp"] = int(user.get("xp", 0)) + int(amount)
-        new_level = get_level(int(user["xp"]))
-        if new_level > old_level:
-            user["level"] = new_level
-        return old_level, new_level, int(user["xp"])
+    """Ajoute ``amount`` d'XP à ``user_id`` via le :class:`XPStore`."""
+    return await xp_store.add_xp(user_id, amount)
 
 async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed: int):
     from PIL import Image, ImageDraw
