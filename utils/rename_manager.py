@@ -13,6 +13,8 @@ from config import (
     CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL,
 )
 
+from utils.metrics import errors
+
 
 class _RenameManager:
     def __init__(self) -> None:
@@ -77,9 +79,22 @@ class _RenameManager:
                         await asyncio.sleep(delay)
                         attempt += 1
                         continue
-                    logging.warning(
-                        "[rename_manager] edit failed for %s: %s", cid, exc
-                    )
+                    if exc.status == 403:
+                        logging.warning(
+                            "[rename_manager] permission insuffisante pour %s", cid
+                        )
+                    elif attempt:
+                        logging.warning(
+                            "[rename_manager] edit failed for %s after %d retries: %s",
+                            cid,
+                            attempt,
+                            exc,
+                        )
+                    else:
+                        logging.warning(
+                            "[rename_manager] edit failed for %s: %s", cid, exc
+                        )
+                    errors["rename_failed"] += 1
                     break
                 else:
                     latency = (time.monotonic() - start) * 1000
