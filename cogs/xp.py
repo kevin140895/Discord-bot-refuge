@@ -71,6 +71,7 @@ async def save_daily_stats_to_disk() -> None:
 
 async def xp_bootstrap_cache() -> None:
     global XP_CACHE, voice_times, DAILY_STATS, XP_LOCK
+    await xp_store.start()
     XP_CACHE = xp_store.data
     XP_LOCK = xp_store.lock
     voice_times = load_voice_times()
