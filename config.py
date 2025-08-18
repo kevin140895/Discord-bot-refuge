@@ -38,7 +38,7 @@ LEVEL_ROLE_REWARDS = {
 # ── Salons temporaires & radio ───────────────────────────────
 TEMP_VC_CATEGORY = 1400559884117999687
 TEMP_VC_LIMITS = {TEMP_VC_CATEGORY: 5}
-RENAME_DELAY = 5  # délai en secondes avant renommage des salons temporaires
+RENAME_DELAY = 3  # délai en secondes avant renommage des salons temporaires
 TEMP_VC_CHECK_INTERVAL_SECONDS = 30  # fréquence de vérification des noms
 
 LOBBY_VC_ID = 1405630965803520221
@@ -116,7 +116,7 @@ CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = int(
 """Intervalle minimal global entre les renommages de salons."""
 
 CHANNEL_RENAME_DEBOUNCE_SECONDS: int = int(
-    os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "3")
+    os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "2")
 )
 """Délai appliqué avant le renommage d'un salon."""
 
