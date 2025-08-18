@@ -35,6 +35,7 @@ class RefugeBot(commands.Bot):
             "cogs.misc",
             "cogs.radio",
             "cogs.stats",
+            "cogs.welcome",
         ]
         for ext in extensions:
             try:
