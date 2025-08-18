@@ -44,11 +44,14 @@ class RefugeBot(commands.Bot):
         limiter.start()
         await rename_manager.start()
         await channel_edit_manager.start()
+        self.error_counter_task = self.loop.create_task(reset_http_error_counter())
 
     async def close(self) -> None:
         rename_manager.stop()
         channel_edit_manager.stop()
         await xp_store.aclose()
+        if hasattr(self, "error_counter_task"):
+            self.error_counter_task.cancel()
         await super().close()
 
 
@@ -56,6 +59,17 @@ bot = RefugeBot(command_prefix="!", intents=intents)
 
 limiter = GlobalRateLimiter()
 _orig_request = bot.http.request
+
+http_error_counter = 0
+
+
+async def reset_http_error_counter() -> None:
+    global http_error_counter
+    while True:
+        await asyncio.sleep(600)
+        if http_error_counter:
+            logging.info("HTTP error counter reset from %d", http_error_counter)
+            http_error_counter = 0
 
 
 async def _limited_request(self, route, **kwargs):
@@ -87,6 +101,17 @@ async def _limited_request(self, route, **kwargs):
         try:
             return await _orig_request(route, **kwargs)
         except discord.HTTPException as e:
+            if e.status in {401, 403, 429}:
+                global http_error_counter
+                http_error_counter += 1
+                logging.warning("HTTP error count: %d", http_error_counter)
+                if http_error_counter >= 10000:
+                    logging.critical("HTTP error limit exceeded, shutting down bot")
+                    await bot.close()
+                    raise
+                if http_error_counter >= 9000:
+                    logging.error("HTTP error counter high; slowing down")
+                    await asyncio.sleep(60)
             if e.status == 429:
                 retry_after = 0.0
                 if e.response is not None:
