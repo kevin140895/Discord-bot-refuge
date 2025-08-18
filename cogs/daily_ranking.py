@@ -2,8 +2,10 @@ import logging
 import os
 from datetime import datetime, timedelta, time, timezone
 from typing import Dict, Any
+import json
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from config import (
@@ -11,7 +13,9 @@ from config import (
     MVP_ROLE_ID,
     TOP_MSG_ROLE_ID,
     TOP_VC_ROLE_ID,
+    XP_VIEWER_ROLE_ID,
 )
+from utils.interactions import safe_respond
 from utils.persist import read_json_safe, atomic_write_json, ensure_dir
 from .xp import DAILY_STATS, DAILY_LOCK, save_daily_stats_to_disk
 
@@ -144,6 +148,21 @@ class DailyRankingAndRoles(commands.Cog):
     @daily_task.before_loop
     async def before_daily_task(self) -> None:
         await self.bot.wait_until_ready()
+
+    @app_commands.command(name="test_classements", description="Prévisualise le classement du jour")
+    async def test_classements(self, interaction: discord.Interaction) -> None:
+        if not any(r.id == XP_VIEWER_ROLE_ID for r in getattr(interaction.user, "roles", [])):
+            await safe_respond(interaction, "Accès refusé.", ephemeral=True)
+            return
+        data = read_json_safe(DAILY_RANK_FILE)
+        if not data:
+            await safe_respond(interaction, "Aucun classement disponible.", ephemeral=True)
+            return
+        await safe_respond(
+            interaction,
+            f"```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```",
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - integration
