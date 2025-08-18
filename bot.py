@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import types
+import random
 
 import discord
 from discord.ext import commands
@@ -43,6 +44,8 @@ async def _limited_request(self, route, **kwargs):
     for bucket in buckets:
         await limiter.acquire(bucket=bucket)
 
+    max_attempts = 5
+    attempts = 0
     while True:
         try:
             return await _orig_request(route, **kwargs)
@@ -57,7 +60,12 @@ async def _limited_request(self, route, **kwargs):
                             retry_after = data.get("retry_after", 0)
                         except Exception:
                             pass
-                await asyncio.sleep(retry_after + 0.1)
+                await asyncio.sleep(
+                    retry_after + random.uniform(0.05, 0.25)
+                )
+                attempts += 1
+                if attempts >= max_attempts:
+                    raise
                 continue
             raise
 
