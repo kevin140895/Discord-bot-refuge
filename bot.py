@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from utils.rate_limit import GlobalRateLimiter
 from storage.xp_store import xp_store
 from utils.rename_manager import rename_manager
+from utils.channel_edit_manager import channel_edit_manager
 from view import PlayerTypeView
 
 load_dotenv(override=True)
@@ -42,9 +43,11 @@ class RefugeBot(commands.Bot):
                 logging.exception("Failed to load extension %s", ext)
         limiter.start()
         await rename_manager.start()
+        await channel_edit_manager.start()
 
     async def close(self) -> None:
         rename_manager.stop()
+        channel_edit_manager.stop()
         await xp_store.aclose()
         await super().close()
 
