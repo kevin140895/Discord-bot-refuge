@@ -47,7 +47,7 @@ def load_voice_times() -> dict[str, datetime]:
     for uid, iso in data.items():
         try:
             out[uid] = datetime.fromisoformat(iso)
-        except Exception as e:
+        except ValueError as e:
             logging.warning("Invalid voice time for user %s: %s", uid, e)
             continue
     return out
@@ -59,7 +59,7 @@ async def save_voice_times_to_disk() -> None:
         serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
         await asyncio.to_thread(atomic_write_json, VOICE_TIMES_FILE, serializable)
         logging.info("[xp] Voice times sauvegardés (%s)", VOICE_TIMES_FILE)
-    except Exception as e:
+    except OSError as e:
         logging.exception("[xp] Échec sauvegarde voice times: %s", e)
 
 
@@ -124,7 +124,7 @@ class XPCog(commands.Cog):
         await xp_flush_cache_to_disk()
         try:
             await save_voice_times_to_disk()
-        except Exception as e:
+        except OSError as e:
             logging.exception("[xp] auto_backup_xp: exception: %s", e)
         await save_daily_stats_to_disk()
         logging.info("🛟 Sauvegarde périodique effectuée.")
@@ -193,8 +193,14 @@ class XPCog(commands.Cog):
         with measure("slash:rang"):
             try:
                 await interaction.response.defer(ephemeral=True, thinking=True)
-            except Exception:
-                pass
+            except discord.Forbidden:
+                logging.warning("[xp] Permissions insuffisantes pour différer la réponse")
+            except discord.NotFound:
+                logging.warning("[xp] Interaction introuvable lors du defer")
+            except discord.HTTPException as e:
+                logging.error("[xp] Erreur HTTP lors du defer: %s", e)
+            except Exception as e:
+                logging.exception("[xp] Erreur inattendue lors du defer: %s", e)
             user_id = str(interaction.user.id)
             async with XP_LOCK:
                 data = XP_CACHE.get(user_id)
@@ -211,6 +217,26 @@ class XPCog(commands.Cog):
                 image = await generate_rank_card(interaction.user, level, xp, xp_next)
                 file = discord.File(fp=image, filename="rank.png")
                 await interaction.followup.send(file=file, ephemeral=True)
+            except discord.Forbidden:
+                logging.warning(
+                    "[xp] Permissions insuffisantes pour envoyer la carte de rang"
+                )
+                await interaction.followup.send(
+                    "❌ Permissions insuffisantes.", ephemeral=True
+                )
+            except discord.NotFound:
+                logging.warning(
+                    "[xp] Interaction ou ressource introuvable lors de l'envoi de la carte"
+                )
+                await interaction.followup.send(
+                    "❌ Ressource introuvable.", ephemeral=True
+                )
+            except discord.HTTPException as e:
+                logging.error(f"/rang: erreur HTTP lors de l'envoi de la carte: {e}")
+                await interaction.followup.send(
+                    "❌ Erreur HTTP lors de la génération de la carte.",
+                    ephemeral=True,
+                )
             except Exception as e:
                 logging.exception(f"/rang: exception inattendue: {e}")
                 await interaction.followup.send(

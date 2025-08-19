@@ -60,8 +60,18 @@ class MiscCog(commands.Cog):
         with measure("slash:purge"):
             try:
                 await interaction.response.defer(thinking=True, ephemeral=True)
+            except discord.Forbidden:
+                logging.warning(
+                    "Permissions insuffisantes pour différer la réponse de purge."
+                )
+            except discord.NotFound:
+                logging.warning(
+                    "Interaction de purge introuvable lors du defer."
+                )
+            except discord.HTTPException as e:
+                logging.error("Erreur HTTP lors du defer de purge: %s", e)
             except Exception as e:
-                logging.debug("purge defer failed: %s", e)
+                logging.exception("purge defer failed: %s", e)
             if interaction.user.id != OWNER_ID:
                 await interaction.followup.send("❌ Commande réservée au propriétaire.", ephemeral=True)
                 return
@@ -85,13 +95,27 @@ class MiscCog(commands.Cog):
                 return
             try:
                 if isinstance(ch, discord.TextChannel):
-                    deleted = await ch.purge(limit=nb, check=lambda m: not m.pinned, bulk=True)
+                    deleted = await ch.purge(
+                        limit=nb, check=lambda m: not m.pinned, bulk=True
+                    )
                     await interaction.followup.send(
                         f"🧹 {len(deleted)} messages supprimés.", ephemeral=True
                     )
                     return
+            except discord.Forbidden:
+                logging.warning(
+                    "Permissions insuffisantes pour la purge en masse."
+                )
+            except discord.NotFound:
+                logging.warning(
+                    "Salon ou messages introuvables pour la purge en masse."
+                )
+            except discord.HTTPException as e:
+                logging.warning("Purge bulk échouée (HTTP): %s", e)
             except Exception as e:
-                logging.warning(f"Purge bulk échouée, fallback lent. Raison: {e}")
+                logging.exception(
+                    "Purge bulk échouée, fallback lent. Raison: %s", e
+                )
             count = 0
             try:
                 async for msg in ch.history(limit=nb):
@@ -100,13 +124,48 @@ class MiscCog(commands.Cog):
                     try:
                         await msg.delete()
                         count += 1
+                    except discord.Forbidden:
+                        logging.warning(
+                            "Permissions insuffisantes pour supprimer un message %s",
+                            msg.id,
+                        )
+                    except discord.NotFound:
+                        logging.warning(
+                            "Message déjà supprimé: %s",
+                            msg.id,
+                        )
+                    except discord.HTTPException as ee:
+                        logging.error(
+                            "Erreur HTTP lors de la suppression d'un message: %s",
+                            ee,
+                        )
                     except Exception as ee:
-                        logging.error(f"Suppression d'un message échouée: {ee}")
+                        logging.exception(
+                            "Suppression d'un message échouée: %s",
+                            ee,
+                        )
                 await interaction.followup.send(
                     f"🧹 {count} messages supprimés (mode lent).", ephemeral=True
                 )
+            except discord.Forbidden:
+                logging.warning(
+                    "Permissions insuffisantes pour lire l'historique lors de la purge lente."
+                )
+                await interaction.followup.send(
+                    "❌ Impossible de supprimer les messages.", ephemeral=True
+                )
+            except discord.NotFound:
+                logging.warning("Salon introuvable lors de la purge lente.")
+                await interaction.followup.send(
+                    "❌ Impossible de supprimer les messages.", ephemeral=True
+                )
+            except discord.HTTPException as ee:
+                logging.error("Erreur HTTP lors de la purge lente: %s", ee)
+                await interaction.followup.send(
+                    "❌ Impossible de supprimer les messages.", ephemeral=True
+                )
             except Exception as ee:
-                logging.error(f"Erreur lors de la purge lente: {ee}")
+                logging.exception("Erreur inattendue lors de la purge lente: %s", ee)
                 await interaction.followup.send(
                     "❌ Impossible de supprimer les messages.", ephemeral=True
                 )

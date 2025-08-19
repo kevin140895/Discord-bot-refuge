@@ -26,8 +26,23 @@ class WelcomeCog(commands.Cog):
                     f"🕹️ Choisis ton rôle dans le salon <#{CHANNEL_ROLES}> pour accéder à toutes les sections.\n"
                     "Ravi de t’avoir parmi nous ! 🎮"
                 )
+            except discord.Forbidden:
+                logging.warning(
+                    "[welcome] Permissions insuffisantes pour envoyer le message de bienvenue"
+                )
+            except discord.NotFound:
+                logging.warning(
+                    "[welcome] Salon de bienvenue introuvable pour l'envoi du message"
+                )
+            except discord.HTTPException as e:
+                logging.error(
+                    "[welcome] Erreur HTTP lors de l'envoi du message de bienvenue: %s",
+                    e,
+                )
             except Exception:
-                logging.exception("[welcome] Échec d'envoi du message de bienvenue pour %s", member.id)
+                logging.exception(
+                    "[welcome] Échec d'envoi du message de bienvenue pour %s", member.id
+                )
 
 
 async def setup(bot: commands.Bot) -> None:

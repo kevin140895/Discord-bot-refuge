@@ -84,9 +84,28 @@ class DailyRankingAndRoles(commands.Cog):
             to_remove = [r for r in roles.values() if r and r in member.roles]
             if to_remove:
                 try:
-                    await member.remove_roles(*to_remove, reason="Réinitialisation des rôles journaliers")
+                    await member.remove_roles(
+                        *to_remove,
+                        reason="Réinitialisation des rôles journaliers",
+                    )
+                except discord.Forbidden:
+                    logging.warning(
+                        "[daily_ranking] Permissions insuffisantes pour retirer un rôle"
+                    )
+                except discord.NotFound:
+                    logging.warning(
+                        "[daily_ranking] Rôle ou membre introuvable lors du retrait"
+                    )
+                except discord.HTTPException as e:
+                    logging.error(
+                        "[daily_ranking] Erreur HTTP lors du retrait d'un rôle: %s",
+                        e,
+                    )
                 except Exception as e:  # pragma: no cover - just log
-                    logging.error("[daily_ranking] Retrait rôle échoué: %s", e)
+                    logging.exception(
+                        "[daily_ranking] Erreur inattendue lors du retrait d'un rôle: %s",
+                        e,
+                    )
         for key, uid in winners.items():
             role = roles.get(key)
             if not role or not uid:
@@ -95,10 +114,28 @@ class DailyRankingAndRoles(commands.Cog):
             if not member:
                 continue
             try:
-                await member.add_roles(role, reason="Attribution classement quotidien")
+                await member.add_roles(
+                    role, reason="Attribution classement quotidien"
+                )
                 logging.info("[daily_ranking] Rôle %s attribué à %s", role.id, uid)
+            except discord.Forbidden:
+                logging.warning(
+                    "[daily_ranking] Permissions insuffisantes pour attribuer un rôle"
+                )
+            except discord.NotFound:
+                logging.warning(
+                    "[daily_ranking] Rôle ou membre introuvable lors de l'attribution"
+                )
+            except discord.HTTPException as e:
+                logging.error(
+                    "[daily_ranking] Erreur HTTP lors de l'attribution du rôle: %s",
+                    e,
+                )
             except Exception as e:  # pragma: no cover
-                logging.error("[daily_ranking] Attribution rôle échouée: %s", e)
+                logging.exception(
+                    "[daily_ranking] Erreur inattendue lors de l'attribution du rôle: %s",
+                    e,
+                )
 
     # ── Computation ──────────────────────────────────────────
 
