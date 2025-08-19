@@ -19,6 +19,7 @@ from config import (
     ROULETTE_ROLE_ID as ROLE_ID,
     ROULETTE_CHANNEL_ID as CHANNEL_ID,
     DATA_DIR,
+    ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES,
 )
 
 PARIS_TZ = "Europe/Paris"
@@ -387,7 +388,7 @@ class RouletteCog(commands.Cog):
             logging.debug("Error ensuring state message: %s", e)
         await self._post_state_message(opened)
 
-    @tasks.loop(seconds=60.0)
+    @tasks.loop(minutes=ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES)
     async def boundary_watch_loop(self):
         try:
             enabled_now = is_open_now(PARIS_TZ, 10, 22)
