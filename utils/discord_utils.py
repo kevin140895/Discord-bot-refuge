@@ -1,3 +1,5 @@
+"""Helper functions for Discord channels and rate-limited edits."""
+
 import logging
 import discord
 from discord.ext import commands

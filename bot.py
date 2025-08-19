@@ -1,3 +1,5 @@
+"""Discord bot entry point configuring extensions, rate limits, and tasks."""
+
 import asyncio
 import logging
 import os
