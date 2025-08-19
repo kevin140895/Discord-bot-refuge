@@ -85,6 +85,11 @@ ROULETTE_ROLE_ID: int = 1405170057792979025
 ANNOUNCE_CHANNEL_ID: int = 1400552164979507263
 """Salon utilisé pour les annonces de la roulette."""
 
+ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
+    os.getenv("ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES", "5")
+)
+"""Intervalle en minutes entre deux vérifications de l'état de la roulette."""
+
 # ── Persistance et I/O ───────────────────────────────────────
 DATA_DIR: str = _resolve_data_dir()
 """Répertoire de stockage persistant."""

@@ -78,6 +78,9 @@ ces limites.
 La fréquence de vérification des noms de ces salons est définie par la constante
 `TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
 
+La vérification de l'état de la roulette est contrôlée par la constante
+`ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES` (5 minutes par défaut).
+
 ### Sauvegarde des sessions vocales
 
 Les heures d'entrée des membres en vocal sont stockées dans
