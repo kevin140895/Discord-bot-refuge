@@ -149,7 +149,11 @@ class XPCog(commands.Cog):
         if bucket.update_rate_limit():
             return
         amount = random.randint(5, 15)
-        await award_xp(message.author.id, amount)
+        old_lvl, new_lvl, total_xp = await award_xp(message.author.id, amount)
+        if new_lvl > old_lvl:
+            await self.bot.announce_level_up(
+                message.guild, message.author, old_lvl, new_lvl, total_xp
+            )
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -172,7 +176,11 @@ class XPCog(commands.Cog):
             if start is not None:
                 duration = now - start
                 xp_amount = int(duration.total_seconds() // 60)
-                await award_xp(member.id, xp_amount)
+                old_lvl, new_lvl, total_xp = await award_xp(member.id, xp_amount)
+                if new_lvl > old_lvl:
+                    await self.bot.announce_level_up(
+                        member.guild, member, old_lvl, new_lvl, total_xp
+                    )
                 # Statistiques quotidiennes (en secondes)
                 day = now.date().isoformat()
                 async with DAILY_LOCK:
