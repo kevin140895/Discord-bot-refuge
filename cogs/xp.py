@@ -21,8 +21,12 @@ from config import (
     DATA_DIR,
 )
 from utils.interactions import safe_respond
-from utils.persist import atomic_write_json, read_json_safe, ensure_dir
-from utils.persistence import schedule_checkpoint
+from utils.persistence import (
+    atomic_write_json_async,
+    read_json_safe,
+    ensure_dir,
+    schedule_checkpoint,
+)
 from utils.metrics import measure
 from storage.xp_store import xp_store
 
@@ -57,7 +61,7 @@ async def save_voice_times_to_disk() -> None:
     """Sauvegarde atomique des temps vocaux sans bloquer l'event loop."""
     try:
         serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
-        await asyncio.to_thread(atomic_write_json, VOICE_TIMES_FILE, serializable)
+        await atomic_write_json_async(VOICE_TIMES_FILE, serializable)
         logging.info("[xp] Voice times sauvegardés (%s)", VOICE_TIMES_FILE)
     except OSError as e:
         logging.exception("[xp] Échec sauvegarde voice times: %s", e)
@@ -70,7 +74,7 @@ def load_daily_stats() -> dict:
 async def save_daily_stats_to_disk() -> None:
     async with DAILY_LOCK:
         data = DAILY_STATS
-    await asyncio.to_thread(atomic_write_json, DAILY_STATS_FILE, data)
+    await atomic_write_json_async(DAILY_STATS_FILE, data)
 
 
 async def xp_bootstrap_cache() -> None:

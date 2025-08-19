@@ -11,7 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from utils.metrics import measure
-from utils.persist import atomic_write_json
+from utils.persistence import atomic_write_json
 from config import (
     REMINDER_CHANNEL_ID,
     ROLE_CHOICE_CHANNEL_ID,

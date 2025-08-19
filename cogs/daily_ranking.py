@@ -2,7 +2,7 @@
 
 Ce module calcule les gagnants quotidiens à partir des statistiques
 d'activité et persiste les résultats dans ``daily_ranking.json`` via
-``utils.persist``. Il lit et écrit également les statistiques
+``utils.persistence``. Il lit et écrit également les statistiques
 journalières partagées avec la cog XP.
 """
 
@@ -24,7 +24,7 @@ from config import (
     XP_VIEWER_ROLE_ID,
 )
 from utils.interactions import safe_respond
-from utils.persist import read_json_safe, atomic_write_json, ensure_dir
+from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 from .xp import DAILY_STATS, DAILY_LOCK, save_daily_stats_to_disk
 
 try:

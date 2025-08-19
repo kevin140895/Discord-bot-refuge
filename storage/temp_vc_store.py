@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Iterable, Set
 
 from config import DATA_DIR
-from utils.persist import atomic_write_json, read_json_safe
+from utils.persistence import atomic_write_json, read_json_safe
 
 DATA_FILE = Path(DATA_DIR) / "temp_vc_ids.json"
 

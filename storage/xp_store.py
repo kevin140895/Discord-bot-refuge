@@ -8,7 +8,7 @@ import contextlib
 from typing import Dict
 
 from config import DATA_DIR
-from utils.persist import ensure_dir, read_json_safe, atomic_write_json
+from utils.persistence import ensure_dir, read_json_safe, atomic_write_json_async
 
 # Legacy bots stored XP in ``data.json``. To maintain compatibility with
 # existing deployments that expect this filename, we default to writing XP
@@ -66,7 +66,7 @@ class XPStore:
 
     async def flush(self) -> None:
         async with self.lock:
-            await asyncio.to_thread(atomic_write_json, self.path, self.data)
+            await atomic_write_json_async(self.path, self.data)
             logging.info("XP sauvegardé (%d utilisateurs)", len(self.data))
 
     async def add_xp(self, user_id: int, amount: int) -> tuple[int, int, int]:

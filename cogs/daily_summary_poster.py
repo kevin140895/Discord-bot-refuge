@@ -20,7 +20,7 @@ from discord.ext import commands, tasks
 
 from config import ACTIVITY_SUMMARY_CH, DATA_DIR, XP_VIEWER_ROLE_ID
 from utils.interactions import safe_respond
-from utils.persist import read_json_safe, atomic_write_json, ensure_dir
+from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 
 try:
     from zoneinfo import ZoneInfo
