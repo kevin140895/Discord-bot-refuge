@@ -32,8 +32,29 @@ class RadioCog(commands.Cog):
         if self.voice is None or not self.voice.is_connected():
             try:
                 self.voice = await channel.connect(reconnect=True)
+            except discord.Forbidden:
+                logging.warning(
+                    "Permissions insuffisantes pour se connecter au salon radio %s",
+                    self.vc_id,
+                )
+                return
+            except discord.NotFound:
+                logging.warning(
+                    "Salon radio %s introuvable lors de la connexion",
+                    self.vc_id,
+                )
+                return
+            except discord.HTTPException as e:
+                logging.error(
+                    "Erreur HTTP lors de la connexion au salon radio: %s",
+                    e,
+                )
+                return
             except Exception as e:
-                logging.error("Connexion au salon radio échouée: %s", e)
+                logging.exception(
+                    "Connexion au salon radio échouée: %s",
+                    e,
+                )
                 return
         if self.voice and not self.voice.is_playing():
             source = discord.FFmpegPCMAudio(
@@ -76,14 +97,40 @@ class RadioCog(commands.Cog):
             if after.channel and after.channel.id == self.vc_id:
                 try:
                     await member.edit(mute=True)
+                except discord.Forbidden:
+                    logging.warning(
+                        "Permissions insuffisantes pour mute %s", member
+                    )
+                except discord.NotFound:
+                    logging.warning("Membre introuvable pour mute %s", member)
+                except discord.HTTPException as e:
+                    logging.error(
+                        "Erreur HTTP lors du mute de %s: %s", member, e
+                    )
                 except Exception as e:
-                    logging.warning("Impossible de mute %s: %s", member, e)
+                    logging.exception(
+                        "Impossible de mute %s: %s", member, e
+                    )
             # Leave radio channel -> unmute
             elif before.channel and before.channel.id == self.vc_id:
                 try:
                     await member.edit(mute=False)
+                except discord.Forbidden:
+                    logging.warning(
+                        "Permissions insuffisantes pour demute %s", member
+                    )
+                except discord.NotFound:
+                    logging.warning(
+                        "Membre introuvable pour demute %s", member
+                    )
+                except discord.HTTPException as e:
+                    logging.error(
+                        "Erreur HTTP lors du demute de %s: %s", member, e
+                    )
                 except Exception as e:
-                    logging.warning("Impossible de demute %s: %s", member, e)
+                    logging.exception(
+                        "Impossible de demute %s: %s", member, e
+                    )
 
     def cog_unload(self) -> None:
         if self._reconnect_task and not self._reconnect_task.done():
