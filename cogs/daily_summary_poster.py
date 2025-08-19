@@ -115,8 +115,16 @@ class DailySummaryPoster(commands.Cog):
         summary = self._read_summary()
         channel = self.bot.get_channel(ACTIVITY_SUMMARY_CH)
         if not channel:
-            logging.warning("[daily_summary] Salon %s introuvable", ACTIVITY_SUMMARY_CH)
-            return
+            try:
+                channel = await self.bot.fetch_channel(ACTIVITY_SUMMARY_CH)
+            except Exception:
+                logging.exception(
+                    "[daily_summary] Salon %s introuvable", ACTIVITY_SUMMARY_CH
+                )
+                self._write_summary(
+                    {"date": data.get("date"), "error": "channel_not_found"}
+                )
+                return
 
         message_id = summary.get("message_id")
         if summary.get("date") == data.get("date") and message_id:
