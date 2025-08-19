@@ -162,6 +162,11 @@ class XPCog(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ) -> None:
+        if member.bot:
+            uid = str(member.id)
+            voice_times.pop(uid, None)
+            await schedule_checkpoint(save_voice_times_to_disk)
+            return
         # Ignorer si l'utilisateur ne change pas réellement de salon
         if before.channel == after.channel:
             await schedule_checkpoint(save_voice_times_to_disk)
@@ -268,7 +273,7 @@ class XPCog(commands.Cog):
             lines = []
             for uid, data in sorted(items, key=lambda x: x[1].get("xp", 0), reverse=True):
                 member = interaction.guild.get_member(int(uid)) if interaction.guild else None
-                if not member:
+                if not member or member.bot:
                     continue
                 xp = int(data.get("xp", 0))
                 lvl = int(data.get("level", 0))
