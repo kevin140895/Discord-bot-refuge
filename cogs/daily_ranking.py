@@ -194,8 +194,12 @@ class DailyRankingAndRoles(commands.Cog):
     async def before_daily_task(self) -> None:
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="test_classements", description="Prévisualise le classement du jour")
-    async def test_classements(self, interaction: discord.Interaction) -> None:
+    @app_commands.command(
+        name="test_classement1", description="Prévisualise le classement du jour"
+    )
+    async def test_classement1(
+        self, interaction: discord.Interaction
+    ) -> None:
         if not any(r.id == XP_VIEWER_ROLE_ID for r in getattr(interaction.user, "roles", [])):
             await safe_respond(interaction, "Accès refusé.", ephemeral=True)
             return

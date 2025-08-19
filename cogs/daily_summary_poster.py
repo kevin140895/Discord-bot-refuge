@@ -150,8 +150,12 @@ class DailySummaryPoster(commands.Cog):
         await self._maybe_post(data)
 
     # ── Slash command -------------------------------------------------
-    @app_commands.command(name="test_classements", description="Prévisualise le message du jour")
-    async def test_classements(self, interaction: discord.Interaction) -> None:
+    @app_commands.command(
+        name="test_classement2", description="Prévisualise le message du jour"
+    )
+    async def test_classement2(
+        self, interaction: discord.Interaction
+    ) -> None:
         if not any(r.id == XP_VIEWER_ROLE_ID for r in getattr(interaction.user, "roles", [])):
             await safe_respond(interaction, "Accès refusé.", ephemeral=True)
             return

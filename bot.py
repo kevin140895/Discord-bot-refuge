@@ -65,6 +65,8 @@ class RefugeBot(commands.Bot):
             "cogs.radio",
             "cogs.stats",
             "cogs.welcome",
+            "cogs.daily_ranking",
+            "cogs.daily_summary_poster",
         ]
         for ext in extensions:
             try:
