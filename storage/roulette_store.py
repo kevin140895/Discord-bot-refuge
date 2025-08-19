@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from utils.persist import atomic_write_json
+
 
 class RouletteStore:
     def __init__(self, data_dir: str):
@@ -22,8 +24,7 @@ class RouletteStore:
 
     def _save(self):
         try:
-            with self.data_file.open("w", encoding="utf-8") as f:
-                json.dump(self.data, f, indent=2, ensure_ascii=False)
+            atomic_write_json(self.data_file, self.data)
         except Exception as e:
             logging.error("[RouletteStore] Écriture échouée pour %s: %s", self.data_file, e)
 
