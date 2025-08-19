@@ -80,12 +80,12 @@ async def test_roles_reapplied_after_restart():
 
 
 @pytest.mark.asyncio
-async def test_test_classements_permission_and_ephemeral():
+async def test_test_classement1_permission_and_ephemeral():
     cog = DailyRankingAndRoles.__new__(DailyRankingAndRoles)
     cog.bot = SimpleNamespace()
 
     interaction = SimpleNamespace(user=SimpleNamespace(roles=[]))
-    command = DailyRankingAndRoles.test_classements
+    command = DailyRankingAndRoles.test_classement1
     with patch("cogs.daily_ranking.safe_respond", new_callable=AsyncMock) as respond:
         await command.callback(cog, interaction)
     respond.assert_awaited_once_with(interaction, "Accès refusé.", ephemeral=True)
