@@ -31,14 +31,19 @@ async def announce_level_up(
     channel = guild.get_channel(config.LEVEL_UP_CHANNEL)
     if channel is None:
         return
+
     embed = discord.Embed(
-        title="🎉 Niveau atteint !",
+        title="🌟 Bravo aventurier du Refuge !",
         description=(
-            f"{user.mention} passe du niveau {old_lvl} au niveau {new_lvl}!"
+            f"**{user.display_name}** vient de franchir une étape importante ! 🎉\n\n"
+            f"{user.mention} est passé du **niveau {old_lvl}** ➝ **niveau {new_lvl}**.\n"
+            "Continue ton aventure et montre ta valeur parmi la communauté du Refuge 💪"
         ),
         color=discord.Color.green(),
     )
-    embed.set_footer(text=f"XP total : {total_xp}")
+    embed.set_footer(text=f"XP total accumulé : {total_xp}")
+    embed.set_thumbnail(url=user.display_avatar.url)
+
     await channel.send(embed=embed)
 
 intents = discord.Intents.default()
