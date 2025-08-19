@@ -96,8 +96,31 @@ class PlayerTypeView(discord.ui.View):
                 ephemeral=True,
             )
 
-        except Exception as e:  # pragma: no cover - log pour débogage
-            logging.error(f"Erreur set_platform {label}: {e}")
+        except discord.Forbidden:
+            logging.warning(
+                f"Permissions insuffisantes pour définir la plateforme {label}"
+            )
+            await interaction.response.send_message(
+                "❌ Permissions insuffisantes pour modifier tes rôles.",
+                ephemeral=True,
+            )
+        except discord.NotFound:
+            logging.warning(
+                f"Rôle ou membre introuvable lors de la définition de {label}"
+            )
+            await interaction.response.send_message(
+                "❌ Rôle ou membre introuvable.", ephemeral=True
+            )
+        except discord.HTTPException as e:
+            logging.error(
+                f"Erreur HTTP lors de la définition de la plateforme {label}: {e}"
+            )
+            await interaction.response.send_message(
+                "❌ Erreur lors de la modification des rôles.",
+                ephemeral=True,
+            )
+        except Exception as e:  # pragma: no cover - cas inattendu
+            logging.exception(f"Erreur inattendue set_platform {label}: {e}")
             await interaction.response.send_message(
                 "❌ Impossible de modifier tes rôles.", ephemeral=True
             )
@@ -130,8 +153,31 @@ class PlayerTypeView(discord.ui.View):
                 await interaction.response.send_message(
                     f"🔔 Rôle **{label}** ajouté.", ephemeral=True
                 )
-        except Exception as e:  # pragma: no cover - log pour débogage
-            logging.error(f"Erreur toggle rôle {label}: {e}")
+        except discord.Forbidden:
+            logging.warning(
+                f"Permissions insuffisantes pour modifier le rôle {label}"
+            )
+            await interaction.response.send_message(
+                "❌ Permissions insuffisantes pour modifier tes rôles.",
+                ephemeral=True,
+            )
+        except discord.NotFound:
+            logging.warning(
+                f"Rôle ou membre introuvable lors de la modification de {label}"
+            )
+            await interaction.response.send_message(
+                "❌ Rôle ou membre introuvable.", ephemeral=True
+            )
+        except discord.HTTPException as e:
+            logging.error(
+                f"Erreur HTTP lors de la modification du rôle {label}: {e}"
+            )
+            await interaction.response.send_message(
+                "❌ Erreur lors de la modification des rôles.",
+                ephemeral=True,
+            )
+        except Exception as e:  # pragma: no cover - cas inattendu
+            logging.exception(f"Erreur inattendue toggle rôle {label}: {e}")
             await interaction.response.send_message(
                 "❌ Impossible de modifier tes rôles.", ephemeral=True
             )
