@@ -1,3 +1,5 @@
+"""Queues and throttles channel edits to respect Discord rate limits."""
+
 import asyncio
 import logging
 import time

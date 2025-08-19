@@ -1,3 +1,5 @@
+"""Persistent XP storage with debounced and periodic disk flushes."""
+
 import asyncio
 import logging
 import math

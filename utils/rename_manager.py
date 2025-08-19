@@ -1,3 +1,5 @@
+"""Handles queued channel rename operations with rate limiting and retries."""
+
 import asyncio
 import logging
 import time
