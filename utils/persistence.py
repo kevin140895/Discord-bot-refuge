@@ -4,30 +4,77 @@ import os
 import tempfile
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Union
+from typing import Any, Awaitable, Callable
+
+__all__ = [
+    "ensure_dir",
+    "read_json_safe",
+    "atomic_write_json",
+    "atomic_write_json_async",
+    "schedule_checkpoint",
+]
 
 _write_lock = asyncio.Lock()
 
-async def atomic_write_json(path: Union[str, os.PathLike[str]], data: Any) -> None:
-    """Write ``data`` to ``path`` atomically without blocking the event loop."""
-    dest = Path(path)
-    dest.parent.mkdir(parents=True, exist_ok=True)
 
-    async with _write_lock:
-        def _write() -> None:
-            fd, tmp_path = tempfile.mkstemp(dir=str(dest.parent))
+def ensure_dir(path: str | os.PathLike[str]) -> None:
+    """Ensure that ``path`` exists as a directory."""
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def read_json_safe(path: str | os.PathLike[str]) -> dict:
+    """Read JSON data from ``path``.
+
+    If the file is missing or corrupted, attempt to read from ``path`` with
+    ``.bak`` appended. Returns an empty dict on failure.
+    """
+    p = Path(path)
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        bak = p.with_suffix(p.suffix + ".bak")
+        try:
+            return json.loads(bak.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+
+def atomic_write_json(path: str | os.PathLike[str], data: Any) -> None:
+    """Atomically write ``data`` to ``path`` and keep a ``.bak`` backup.
+
+    This function blocks; use :func:`atomic_write_json_async` in async code.
+    """
+    dest = Path(path)
+    ensure_dir(dest.parent)
+    backup = dest.with_suffix(dest.suffix + ".bak")
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(dest.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        if dest.exists():
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_path, dest)
-            finally:
-                try:
-                    os.remove(tmp_path)
-                except FileNotFoundError:
-                    pass
-        await asyncio.to_thread(_write)
+                os.replace(dest, backup)
+            except Exception:
+                logging.exception("Failed to rotate backup for %s", dest)
+        os.replace(tmp_path, dest)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass
+
+
+async def atomic_write_json_async(path: str | os.PathLike[str], data: Any) -> None:
+    """Asynchronously write JSON data using :func:`atomic_write_json`.
+
+    The write is executed in a thread and serialized with a lock to avoid
+    concurrent writes.
+    """
+    async with _write_lock:
+        await asyncio.to_thread(atomic_write_json, path, data)
 
 
 _checkpoint_lock = asyncio.Lock()
@@ -68,3 +115,4 @@ async def schedule_checkpoint(
                 _checkpoint_task = None
 
         _checkpoint_task = asyncio.create_task(_run())
+
