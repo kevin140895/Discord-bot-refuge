@@ -27,6 +27,8 @@ class XPStore:
         self._periodic_task: asyncio.Task | None = None
 
     async def start(self) -> None:
+        if self._periodic_task and not self._periodic_task.done():
+            return
         ensure_dir(DATA_DIR)
         self.data = read_json_safe(self.path)
         logging.info("DATA_DIR=%s", DATA_DIR)
