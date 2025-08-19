@@ -69,13 +69,18 @@ async def test_update_stats_changes_channel_names(monkeypatch):
 
     bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
     cog = StatsCog(bot)
-    cog.refresh_stats.cancel()
+    cog.refresh_members.cancel()
+    cog.refresh_activity.cancel()
 
-    await cog.update_stats(guild)
+    await cog.update_members(guild)
+    await cog.update_online(guild)
+    await cog.update_voice(guild)
 
     members = sum(1 for m in guild.members if not m.bot)
     assert ch1.name == f"👥 Membres : {members}"
-    online = sum(1 for m in guild.members if not m.bot and m.status != discord.Status.offline)
+    online = sum(
+        1 for m in guild.members if not m.bot and m.status != discord.Status.offline
+    )
     assert ch2.name == f"🟢 En ligne : {online}"
     voice = sum(len([m for m in vc.members if not m.bot]) for vc in guild.voice_channels)
     assert ch3.name == f"🔊 Voc : {voice}"
