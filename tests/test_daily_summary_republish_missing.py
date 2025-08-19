@@ -1,4 +1,4 @@
-import discord
+import discord  # Needed for NotFound exception
 import pytest
 from discord.ext import commands
 from unittest import mock
