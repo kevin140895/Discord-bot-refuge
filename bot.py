@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+import config
 from utils.rate_limit import GlobalRateLimiter
 from storage.xp_store import xp_store
 from utils.rename_manager import rename_manager
@@ -18,6 +19,27 @@ from view import PlayerTypeView
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+async def announce_level_up(
+    guild: discord.Guild,
+    user: discord.abc.User,
+    old_lvl: int,
+    new_lvl: int,
+    total_xp: int,
+) -> None:
+    """Annonce la montée de niveau d'un utilisateur dans un salon dédié."""
+    channel = guild.get_channel(config.LEVEL_UP_CHANNEL)
+    if channel is None:
+        return
+    embed = discord.Embed(
+        title="🎉 Niveau atteint !",
+        description=(
+            f"{user.mention} passe du niveau {old_lvl} au niveau {new_lvl}!"
+        ),
+        color=discord.Color.green(),
+    )
+    embed.set_footer(text=f"XP total : {total_xp}")
+    await channel.send(embed=embed)
 
 intents = discord.Intents.default()
 intents.members = True
@@ -59,6 +81,7 @@ class RefugeBot(commands.Bot):
 
 
 bot = RefugeBot(command_prefix="!", intents=intents)
+bot.announce_level_up = announce_level_up
 
 limiter = GlobalRateLimiter()
 _orig_request = bot.http.request
