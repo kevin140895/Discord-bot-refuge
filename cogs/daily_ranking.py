@@ -1,4 +1,4 @@
-"""Gestion du classement quotidien et attribution des rôles associés.
+"""Gestion du classement quotidien.
 
 Ce module calcule les gagnants quotidiens à partir des statistiques
 d'activité et persiste les résultats dans ``daily_ranking.json`` via
@@ -16,13 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import (
-    DATA_DIR,
-    MVP_ROLE_ID,
-    TOP_MSG_ROLE_ID,
-    TOP_VC_ROLE_ID,
-    XP_VIEWER_ROLE_ID,
-)
+from config import DATA_DIR, XP_VIEWER_ROLE_ID
 from utils.interactions import safe_respond
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 from .xp import DAILY_STATS, DAILY_LOCK, save_daily_stats_to_disk
@@ -40,19 +34,14 @@ ensure_dir(DATA_DIR)
 
 
 class DailyRankingAndRoles(commands.Cog):
-    """Calcul et attribution des classements quotidiens."""
+    """Calcul et persistance des classements quotidiens."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.daily_task.start()
-        self.bot.loop.create_task(self._startup_apply())
 
     def cog_unload(self) -> None:
         self.daily_task.cancel()
-
-    async def _startup_apply(self) -> None:
-        await self.bot.wait_until_ready()
-        await self._apply_roles_from_file()
 
     # ── Persistence helpers ──────────────────────────────────
 
@@ -61,81 +50,6 @@ class DailyRankingAndRoles(commands.Cog):
 
     def _write_persistence(self, data: Dict[str, Any]) -> None:
         atomic_write_json(DAILY_RANK_FILE, data)
-
-    # ── Roles management ─────────────────────────────────────
-
-    async def _apply_roles_from_file(self) -> None:
-        data = self._read_persistence()
-        winners = data.get("winners") if data else {}
-        if winners:
-            logging.info("[daily_ranking] Réapplication des rôles pour %s", data.get("date"))
-            await self._reset_and_assign(winners)
-
-    async def _reset_and_assign(self, winners: Dict[str, int | None]) -> None:
-        guild = self.bot.guilds[0] if self.bot.guilds else None
-        if not guild:
-            return
-        roles = {
-            "mvp": guild.get_role(MVP_ROLE_ID),
-            "msg": guild.get_role(TOP_MSG_ROLE_ID),
-            "vc": guild.get_role(TOP_VC_ROLE_ID),
-        }
-        for member in guild.members:
-            to_remove = [r for r in roles.values() if r and r in member.roles]
-            if to_remove:
-                try:
-                    await member.remove_roles(
-                        *to_remove,
-                        reason="Réinitialisation des rôles journaliers",
-                    )
-                except discord.Forbidden:
-                    logging.warning(
-                        "[daily_ranking] Permissions insuffisantes pour retirer un rôle"
-                    )
-                except discord.NotFound:
-                    logging.warning(
-                        "[daily_ranking] Rôle ou membre introuvable lors du retrait"
-                    )
-                except discord.HTTPException as e:
-                    logging.error(
-                        "[daily_ranking] Erreur HTTP lors du retrait d'un rôle: %s",
-                        e,
-                    )
-                except Exception as e:  # pragma: no cover - just log
-                    logging.exception(
-                        "[daily_ranking] Erreur inattendue lors du retrait d'un rôle: %s",
-                        e,
-                    )
-        for key, uid in winners.items():
-            role = roles.get(key)
-            if not role or not uid:
-                continue
-            member = guild.get_member(int(uid))
-            if not member:
-                continue
-            try:
-                await member.add_roles(
-                    role, reason="Attribution classement quotidien"
-                )
-                logging.info("[daily_ranking] Rôle %s attribué à %s", role.id, uid)
-            except discord.Forbidden:
-                logging.warning(
-                    "[daily_ranking] Permissions insuffisantes pour attribuer un rôle"
-                )
-            except discord.NotFound:
-                logging.warning(
-                    "[daily_ranking] Rôle ou membre introuvable lors de l'attribution"
-                )
-            except discord.HTTPException as e:
-                logging.error(
-                    "[daily_ranking] Erreur HTTP lors de l'attribution du rôle: %s",
-                    e,
-                )
-            except Exception as e:  # pragma: no cover
-                logging.exception(
-                    "[daily_ranking] Erreur inattendue lors de l'attribution du rôle: %s",
-                    e,
-                )
 
     # ── Computation ──────────────────────────────────────────
 
@@ -158,7 +72,12 @@ class DailyRankingAndRoles(commands.Cog):
             for uid, data in vc_sorted[:3]
         ]
         top_mvp = [
-            {"id": int(uid), "score": round(score((uid, data)), 2)}
+            {
+                "id": int(uid),
+                "score": round(score((uid, data)), 2),
+                "messages": int(data.get("messages", 0)),
+                "voice": int(data.get("voice", 0) // 60),
+            }
             for uid, data in mvp_sorted[:3]
         ]
 
@@ -187,8 +106,7 @@ class DailyRankingAndRoles(commands.Cog):
         ranking["date"] = day
         self._write_persistence(ranking)
         await save_daily_stats_to_disk()
-        await self._reset_and_assign(ranking["winners"])
-        logging.info("[daily_ranking] Classement %s sauvegardé et rôles attribués", day)
+        logging.info("[daily_ranking] Classement %s sauvegardé", day)
 
     @daily_task.before_loop
     async def before_daily_task(self) -> None:

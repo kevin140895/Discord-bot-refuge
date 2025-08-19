@@ -1,15 +1,10 @@
-import json
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-from cogs.daily_ranking import DailyRankingAndRoles
-from config import MVP_ROLE_ID, TOP_MSG_ROLE_ID, TOP_VC_ROLE_ID, XP_VIEWER_ROLE_ID
+from cogs.daily_awards import DailyAwards
+from config import MVP_ROLE_ID, WRITER_ROLE_ID, VOICE_ROLE_ID, XP_VIEWER_ROLE_ID
 
 
 class DummyRole:
@@ -48,10 +43,10 @@ class DummyGuild:
 
 
 @pytest.mark.asyncio
-async def test_roles_reapplied_after_restart():
+async def test_roles_reassigned():
     mvp = DummyRole(MVP_ROLE_ID)
-    msg = DummyRole(TOP_MSG_ROLE_ID)
-    vc = DummyRole(TOP_VC_ROLE_ID)
+    msg = DummyRole(WRITER_ROLE_ID)
+    vc = DummyRole(VOICE_ROLE_ID)
 
     winner_mvp = DummyMember(1)
     winner_msg = DummyMember(2)
@@ -60,15 +55,14 @@ async def test_roles_reapplied_after_restart():
 
     guild = DummyGuild(
         [winner_mvp, winner_msg, winner_vc, other],
-        {MVP_ROLE_ID: mvp, TOP_MSG_ROLE_ID: msg, TOP_VC_ROLE_ID: vc},
+        {MVP_ROLE_ID: mvp, WRITER_ROLE_ID: msg, VOICE_ROLE_ID: vc},
     )
 
-    cog = DailyRankingAndRoles.__new__(DailyRankingAndRoles)
+    cog = DailyAwards.__new__(DailyAwards)
     cog.bot = SimpleNamespace(guilds=[guild])
 
     winners = {"mvp": winner_mvp.id, "msg": winner_msg.id, "vc": winner_vc.id}
-    with patch.object(DailyRankingAndRoles, "_read_persistence", return_value={"winners": winners}):
-        await DailyRankingAndRoles._apply_roles_from_file(cog)
+    await DailyAwards._reset_and_assign(cog, winners)
 
     assert mvp in winner_mvp.roles
     assert msg in winner_msg.roles
@@ -80,23 +74,32 @@ async def test_roles_reapplied_after_restart():
 
 
 @pytest.mark.asyncio
-async def test_test_classement1_permission_and_ephemeral():
-    cog = DailyRankingAndRoles.__new__(DailyRankingAndRoles)
-    cog.bot = SimpleNamespace()
+async def test_test_classements_permission_and_send():
+    cog = DailyAwards.__new__(DailyAwards)
+    cog.bot = SimpleNamespace(get_channel=lambda _id: None)
 
     interaction = SimpleNamespace(user=SimpleNamespace(roles=[]))
-    command = DailyRankingAndRoles.test_classement1
-    with patch("cogs.daily_ranking.safe_respond", new_callable=AsyncMock) as respond:
+    command = DailyAwards.test_classements
+    with patch("cogs.daily_awards.safe_respond", new_callable=AsyncMock) as respond:
         await command.callback(cog, interaction)
     respond.assert_awaited_once_with(interaction, "Accès refusé.", ephemeral=True)
 
     viewer_role = SimpleNamespace(id=XP_VIEWER_ROLE_ID)
     interaction = SimpleNamespace(user=SimpleNamespace(roles=[viewer_role]))
-    data = {"foo": "bar"}
-    with patch("cogs.daily_ranking.safe_respond", new_callable=AsyncMock) as respond, \
-         patch("cogs.daily_ranking.read_json_safe", return_value=data):
+    data = {
+        "top3": {
+            "mvp": [{"id": 1, "score": 1, "messages": 1, "voice": 1}],
+            "msg": [{"id": 2, "count": 5}],
+            "vc": [{"id": 3, "minutes": 10}],
+        },
+        "winners": {"mvp": 1, "msg": 2, "vc": 3},
+        "date": "2024-01-01",
+    }
+    channel = SimpleNamespace(send=AsyncMock())
+    cog.bot.get_channel = lambda _id: channel
+    with patch("cogs.daily_awards.safe_respond", new_callable=AsyncMock) as respond, \
+        patch("cogs.daily_awards.read_json_safe", return_value=data), \
+        patch.object(DailyAwards, "_build_message", new=AsyncMock(return_value="msg")):
         await command.callback(cog, interaction)
+    channel.send.assert_awaited_once_with("msg")
     respond.assert_awaited()
-    args, kwargs = respond.await_args
-    assert kwargs["ephemeral"] is True
-    assert json.dumps(data, indent=2, ensure_ascii=False) in args[1]
