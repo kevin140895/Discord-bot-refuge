@@ -5,6 +5,7 @@ import logging
 import os
 import types
 import random
+import time
 
 import discord
 from discord.ext import commands
@@ -16,6 +17,7 @@ from storage.xp_store import xp_store
 from utils.rename_manager import rename_manager
 from utils.channel_edit_manager import channel_edit_manager
 from view import PlayerTypeView
+from utils.api_meter import api_meter, APICallCtx
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -68,6 +70,7 @@ class RefugeBot(commands.Bot):
             "cogs.daily_ranking",
             "cogs.daily_summary_poster",
             "cogs.daily_awards",
+            "cogs.api_stats",
         ]
         for ext in extensions:
             try:
@@ -77,6 +80,7 @@ class RefugeBot(commands.Bot):
         limiter.start()
         await rename_manager.start()
         await channel_edit_manager.start()
+        await api_meter.start(self)
         self.error_counter_task = self.loop.create_task(reset_http_error_counter())
 
     async def close(self) -> None:
@@ -132,9 +136,17 @@ async def _limited_request(self, route, **kwargs):
     max_attempts = 5
     attempts = 0
     while True:
+        start = time.perf_counter()
+        status = 0
+        retry_ms = 0
+        error_code = None
         try:
-            return await _orig_request(route, **kwargs)
+            data = await _orig_request(route, **kwargs)
+            status = 200
+            return data
         except discord.HTTPException as e:
+            status = e.status
+            error_code = getattr(e, "code", None)
             if e.status in {401, 403, 429}:
                 global http_error_counter
                 http_error_counter += 1
@@ -156,17 +168,91 @@ async def _limited_request(self, route, **kwargs):
                             retry_after = data.get("retry_after", 0)
                         except Exception:
                             pass
-                await asyncio.sleep(
-                    retry_after + random.uniform(0.05, 0.25)
-                )
+                retry_ms = int(retry_after * 1000)
+                await asyncio.sleep(retry_after + random.uniform(0.05, 0.25))
                 attempts += 1
+                api_meter.record_call(APICallCtx(
+                    lib="discord.py",
+                    method=method,
+                    route=path,
+                    major_param=next(iter(route.major_parameters), None),
+                    status=status,
+                    duration_ms=int((time.perf_counter() - start) * 1000),
+                    retry_after_ms=retry_ms,
+                    bucket=getattr(route, "bucket", None),
+                    ratelimit_remaining=None,
+                    ratelimit_reset=None,
+                    error_code=error_code,
+                    size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
+                ))
                 if attempts >= max_attempts:
                     raise
                 continue
+            api_meter.record_call(APICallCtx(
+                lib="discord.py",
+                method=method,
+                route=path,
+                major_param=next(iter(route.major_parameters), None),
+                status=status,
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                retry_after_ms=retry_ms,
+                bucket=getattr(route, "bucket", None),
+                ratelimit_remaining=None,
+                ratelimit_reset=None,
+                error_code=error_code,
+                size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
+            ))
             raise
+        except Exception:
+            api_meter.record_call(APICallCtx(
+                lib="discord.py",
+                method=method,
+                route=path,
+                major_param=next(iter(route.major_parameters), None),
+                status=status,
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                retry_after_ms=retry_ms,
+                bucket=getattr(route, "bucket", None),
+                ratelimit_remaining=None,
+                ratelimit_reset=None,
+                error_code=error_code,
+                size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
+            ))
+            raise
+        finally:
+            if status == 200:
+                api_meter.record_call(APICallCtx(
+                    lib="discord.py",
+                    method=method,
+                    route=path,
+                    major_param=next(iter(route.major_parameters), None),
+                    status=status,
+                    duration_ms=int((time.perf_counter() - start) * 1000),
+                    retry_after_ms=retry_ms,
+                    bucket=getattr(route, "bucket", None),
+                    ratelimit_remaining=None,
+                    ratelimit_reset=None,
+                    error_code=error_code,
+                    size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
+                ))
 
 
 bot.http.request = types.MethodType(_limited_request, bot.http)
+
+
+@bot.before_invoke
+async def _set_api_context(ctx: commands.Context) -> None:
+    cog = ctx.cog.__class__.__name__ if ctx.cog else None
+    command = ctx.command.qualified_name if ctx.command else None
+    api_meter.set_context(cog, command)
+
+
+@bot.tree.interaction_check
+async def _set_api_context_slash(interaction: discord.Interaction) -> bool:
+    cmd = interaction.command.name if interaction.command else None
+    cog = getattr(interaction.command, "cog_name", None)
+    api_meter.set_context(cog, cmd)
+    return True
 
 
 

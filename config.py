@@ -141,3 +141,11 @@ CHANNEL_RENAME_BACKOFF_BASE: float = float(
 
 # ── Propriétaire du bot ──────────────────────────────────────
 OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
+
+# ── API Metering ──────────────────────────────────────────────
+BOT_ALERTS_CHANNEL_ID: int = int(os.getenv("BOT_ALERTS_CHANNEL_ID", "0"))
+API_BUDGET_PER_10MIN: int = int(os.getenv("API_BUDGET_PER_10MIN", "10000"))
+API_SOFT_LIMIT_PCT: float = float(os.getenv("API_SOFT_LIMIT_PCT", "85"))
+API_HARD_LIMIT_PCT: float = float(os.getenv("API_HARD_LIMIT_PCT", "95"))
+API_SLOW_CALL_MS: int = int(os.getenv("API_SLOW_CALL_MS", "1000"))
+API_REPORT_INTERVAL_MIN: int = int(os.getenv("API_REPORT_INTERVAL_MIN", "1"))
