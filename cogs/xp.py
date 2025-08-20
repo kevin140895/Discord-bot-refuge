@@ -19,6 +19,7 @@ from discord.ext import commands, tasks
 
 from config import (
     DATA_DIR,
+    ANNOUNCE_CHANNEL_ID,
 )
 from utils.interactions import safe_respond
 from utils.persistence import (
@@ -191,7 +192,25 @@ class XPCog(commands.Cog):
                     d = DAILY_STATS.setdefault(day, {})
                     u = d.setdefault(uid, {"messages": 0, "voice": 0})
                     u["voice"] = int(u.get("voice", 0)) + int(duration.total_seconds())
+                    should_thank = (
+                        after.channel is None
+                        and u["voice"] >= 2 * 3600
+                        and not u.get("voice_thanked")
+                    )
+                    if should_thank:
+                        u["voice_thanked"] = True
                 await schedule_checkpoint(save_daily_stats_to_disk)
+                if should_thank:
+                    channel = member.guild.get_channel(ANNOUNCE_CHANNEL_ID)
+                    if channel is not None:
+                        await channel.send(
+                            (
+                                f"🎧✨ Merci à toi {member.mention} !\n"
+                                "Tu viens de passer plus de 2h en vocal dans Le Refuge 🕑\n"
+                                "Ta présence fait vivre la communauté et rend nos moments encore plus agréables 🙌\n\n"
+                                "Continue à partager ces instants avec nous"
+                            )
+                        )
 
         # Connexion à un nouveau salon
         if after.channel is not None:
