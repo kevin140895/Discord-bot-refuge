@@ -12,7 +12,7 @@ from config import RADIO_MUTED_ROLE_ID, RADIO_VC_ID
 
 
 @pytest.mark.asyncio
-async def test_member_with_muted_role_gets_muted_when_joining_radio():
+async def test_member_with_muted_role_not_muted_when_joining_radio():
     bot = SimpleNamespace(user=SimpleNamespace(id=1), loop=asyncio.get_event_loop())
     member = SimpleNamespace(
         id=2,
@@ -25,14 +25,13 @@ async def test_member_with_muted_role_gets_muted_when_joining_radio():
     cog = RadioCog(bot)
     await cog.on_voice_state_update(member, before, after)
 
-    member.edit.assert_awaited_once()
-    assert member.edit.await_args.kwargs["mute"] is True
+    member.edit.assert_not_awaited()
 
     # no cleanup needed
 
 
 @pytest.mark.asyncio
-async def test_member_unmuted_when_leaving_radio():
+async def test_member_with_muted_role_not_unmuted_when_leaving_radio():
     bot = SimpleNamespace(user=SimpleNamespace(id=1), loop=asyncio.get_event_loop())
     member = SimpleNamespace(
         id=2,
@@ -45,8 +44,7 @@ async def test_member_unmuted_when_leaving_radio():
     cog = RadioCog(bot)
     await cog.on_voice_state_update(member, before, after)
 
-    member.edit.assert_awaited_once()
-    assert member.edit.await_args.kwargs["mute"] is False
+    member.edit.assert_not_awaited()
 
     # no cleanup needed
 

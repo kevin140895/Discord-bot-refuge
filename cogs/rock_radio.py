@@ -5,7 +5,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-from config import RADIO_MUTED_ROLE_ID, ROCK_RADIO_STREAM_URL, ROCK_RADIO_VC_ID
+from config import ROCK_RADIO_STREAM_URL, ROCK_RADIO_VC_ID
 
 FFMPEG_BEFORE = "-fflags nobuffer -probesize 32k"
 FFMPEG_OPTIONS = "-filter:a loudnorm"
@@ -110,45 +110,10 @@ class RockRadioCog(commands.Cog):
                 )
             return
 
-        if any(role.id == RADIO_MUTED_ROLE_ID for role in member.roles):
-            # Join rock radio channel -> mute
-            if after.channel and after.channel.id == self.vc_id:
-                try:
-                    await member.edit(mute=True)
-                except discord.Forbidden:
-                    logging.warning(
-                        "Permissions insuffisantes pour mute %s", member
-                    )
-                except discord.NotFound:
-                    logging.warning("Membre introuvable pour mute %s", member)
-                except discord.HTTPException as e:
-                    logging.error(
-                        "Erreur HTTP lors du mute de %s: %s", member, e
-                    )
-                except Exception as e:
-                    logging.exception(
-                        "Impossible de mute %s: %s", member, e
-                    )
-            # Leave rock radio channel -> unmute
-            elif before.channel and before.channel.id == self.vc_id:
-                try:
-                    await member.edit(mute=False)
-                except discord.Forbidden:
-                    logging.warning(
-                        "Permissions insuffisantes pour demute %s", member
-                    )
-                except discord.NotFound:
-                    logging.warning(
-                        "Membre introuvable pour demute %s", member
-                    )
-                except discord.HTTPException as e:
-                    logging.error(
-                        "Erreur HTTP lors du demute de %s: %s", member, e
-                    )
-                except Exception as e:
-                    logging.exception(
-                        "Impossible de demute %s: %s", member, e
-                    )
+        # Previously, members with a specific role were automatically muted when
+        # joining the rock radio channel and unmuted when leaving it. This logic
+        # has been removed so the bot no longer alters member voice states based
+        # on their roles.
 
     def cog_unload(self) -> None:
         if self._reconnect_task and not self._reconnect_task.done():
