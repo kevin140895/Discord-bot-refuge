@@ -37,6 +37,6 @@ async def test_radio_24_command_restores_default(monkeypatch):
 
     assert cog.stream_url == RADIO_STREAM_URL
     assert cog._previous_stream is None
-    rename_mock.assert_awaited_once_with(channel, "📻.Radio-HipHop")
+    rename_mock.assert_awaited_once_with(channel, "📻・Radio-HipHop")
     cog._connect_and_play.assert_awaited_once()
     interaction.response.send_message.assert_awaited_once()
