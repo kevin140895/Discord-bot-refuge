@@ -117,6 +117,23 @@ class RadioCog(commands.Cog):
             await rename_manager.request(channel, "rap")
         await interaction.response.send_message("Radio changée pour rap")
 
+    @app_commands.command(
+        name="radio_24", description="Revenir sur l'ancienne radio 24/7"
+    )
+    @app_commands.checks.cooldown(1, 3600, key=lambda i: i.user.id)
+    async def radio_24(self, interaction: discord.Interaction) -> None:
+        channel = self.bot.get_channel(self.vc_id)
+        self.stream_url = RADIO_STREAM_URL
+        self._previous_stream = None
+        if self.voice and self.voice.is_playing():
+            self.voice.stop()
+        await self._connect_and_play()
+        if isinstance(channel, discord.VoiceChannel) and self._original_name:
+            await rename_manager.request(channel, self._original_name)
+        await interaction.response.send_message(
+            "Radio changée pour la station 24/7"
+        )
+
     @commands.Cog.listener()
     async def on_voice_state_update(
         self,
