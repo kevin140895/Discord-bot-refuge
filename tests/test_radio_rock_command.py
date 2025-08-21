@@ -35,7 +35,7 @@ async def test_radio_rock_command_toggles_stream(monkeypatch):
 
     assert cog.stream_url == ROCK_RADIO_STREAM_URL
     assert cog._previous_stream == RADIO_STREAM_URL
-    rename_mock.assert_awaited_once_with(channel, "☢️ .Radio-Rock")
+    rename_mock.assert_awaited_once_with(channel, "☢️・Radio-Rock")
     interaction.response.send_message.assert_awaited_once()
 
     interaction.response.send_message.reset_mock()
@@ -45,5 +45,5 @@ async def test_radio_rock_command_toggles_stream(monkeypatch):
 
     assert cog.stream_url == RADIO_STREAM_URL
     assert cog._previous_stream is None
-    rename_mock.assert_awaited_once_with(channel, "📻.Radio-HipHop")
+    rename_mock.assert_awaited_once_with(channel, "📻・Radio-HipHop")
     interaction.response.send_message.assert_awaited_once()

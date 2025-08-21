@@ -95,11 +95,11 @@ class RadioCog(commands.Cog):
         self, channel: discord.VoiceChannel, stream_url: str
     ) -> None:
         if stream_url == RADIO_RAP_STREAM_URL:
-            await rename_manager.request(channel, "rap")
+            await rename_manager.request(channel, "🔘・Radio-Rap")
         elif stream_url == ROCK_RADIO_STREAM_URL:
-            await rename_manager.request(channel, "☢️ .Radio-Rock")
+            await rename_manager.request(channel, "☢️・Radio-Rock")
         elif stream_url == RADIO_STREAM_URL:
-            await rename_manager.request(channel, "📻.Radio-HipHop")
+            await rename_manager.request(channel, "📻・Radio-HipHop")
         else:
             if self._original_name:
                 await rename_manager.request(channel, self._original_name)
