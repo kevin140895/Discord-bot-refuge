@@ -38,9 +38,18 @@ class RockRadioCog(commands.Cog):
         if not isinstance(channel, discord.VoiceChannel):
             logging.warning("Salon rock radio %s introuvable", self.vc_id)
             return
-        if self.voice is None or not self.voice.is_connected():
+        needs_connection = self.voice is None or not self.voice.is_connected()
+        needs_move = (
+            self.voice is not None
+            and self.voice.is_connected()
+            and getattr(self.voice.channel, "id", None) != self.vc_id
+        )
+        if needs_connection or needs_move:
             try:
-                self.voice = await channel.connect(reconnect=True)
+                if needs_move:
+                    await self.voice.move_to(channel)
+                else:
+                    self.voice = await channel.connect(reconnect=True)
             except discord.Forbidden:
                 logging.warning(
                     "Permissions insuffisantes pour se connecter au salon rock radio %s",
