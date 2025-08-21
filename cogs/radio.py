@@ -28,6 +28,7 @@ class RadioCog(commands.Cog):
         self.voice: Optional[discord.VoiceClient] = None
         self._reconnect_task: Optional[asyncio.Task] = None
         self._original_name: Optional[str] = None
+        self._previous_stream: Optional[str] = None
 
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
@@ -92,11 +93,26 @@ class RadioCog(commands.Cog):
     @app_commands.command(name="radio_rap", description="Basculer la radio sur le flux rap")
     @app_commands.checks.cooldown(1, 3600, key=lambda i: i.user.id)
     async def radio_rap(self, interaction: discord.Interaction) -> None:
+        channel = self.bot.get_channel(self.vc_id)
+
+        if self.stream_url == RADIO_RAP_STREAM_URL and self._previous_stream:
+            self.stream_url = self._previous_stream
+            self._previous_stream = None
+            if self.voice and self.voice.is_playing():
+                self.voice.stop()
+            await self._connect_and_play()
+            if isinstance(channel, discord.VoiceChannel) and self._original_name:
+                await rename_manager.request(channel, self._original_name)
+            await interaction.response.send_message(
+                "Radio changée pour la station précédente"
+            )
+            return
+
+        self._previous_stream = self.stream_url
         self.stream_url = RADIO_RAP_STREAM_URL
         if self.voice and self.voice.is_playing():
             self.voice.stop()
         await self._connect_and_play()
-        channel = self.bot.get_channel(self.vc_id)
         if isinstance(channel, discord.VoiceChannel):
             await rename_manager.request(channel, "rap")
         await interaction.response.send_message("Radio changée pour rap")
