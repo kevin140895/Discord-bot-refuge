@@ -7,7 +7,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import (
-    RADIO_MUTED_ROLE_ID,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
     RADIO_VC_ID,
@@ -189,45 +188,10 @@ class RadioCog(commands.Cog):
                 )
             return
 
-        if any(role.id == RADIO_MUTED_ROLE_ID for role in member.roles):
-            # Join radio channel -> mute
-            if after.channel and after.channel.id == self.vc_id:
-                try:
-                    await member.edit(mute=True)
-                except discord.Forbidden:
-                    logging.warning(
-                        "Permissions insuffisantes pour mute %s", member
-                    )
-                except discord.NotFound:
-                    logging.warning("Membre introuvable pour mute %s", member)
-                except discord.HTTPException as e:
-                    logging.error(
-                        "Erreur HTTP lors du mute de %s: %s", member, e
-                    )
-                except Exception as e:
-                    logging.exception(
-                        "Impossible de mute %s: %s", member, e
-                    )
-            # Leave radio channel -> unmute
-            elif before.channel and before.channel.id == self.vc_id:
-                try:
-                    await member.edit(mute=False)
-                except discord.Forbidden:
-                    logging.warning(
-                        "Permissions insuffisantes pour demute %s", member
-                    )
-                except discord.NotFound:
-                    logging.warning(
-                        "Membre introuvable pour demute %s", member
-                    )
-                except discord.HTTPException as e:
-                    logging.error(
-                        "Erreur HTTP lors du demute de %s: %s", member, e
-                    )
-                except Exception as e:
-                    logging.exception(
-                        "Impossible de demute %s: %s", member, e
-                    )
+        # Previously, members with a specific role were automatically muted when
+        # joining the radio channel and unmuted when leaving it. This behaviour
+        # has been removed to ensure that the bot no longer alters voice states
+        # based on a role.
 
     def cog_unload(self) -> None:
         if self._reconnect_task and not self._reconnect_task.done():
