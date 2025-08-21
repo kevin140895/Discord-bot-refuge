@@ -98,6 +98,8 @@ class RadioCog(commands.Cog):
             await rename_manager.request(channel, "rap")
         elif stream_url == ROCK_RADIO_STREAM_URL:
             await rename_manager.request(channel, "☢️ .Radio-Rock")
+        elif stream_url == RADIO_STREAM_URL:
+            await rename_manager.request(channel, "📻.Radio-HipHop")
         else:
             if self._original_name:
                 await rename_manager.request(channel, self._original_name)
