@@ -65,6 +65,7 @@ class RefugeBot(commands.Bot):
             "cogs.temp_vc",
             "cogs.misc",
             "cogs.radio",
+            "cogs.rock_radio",
             "cogs.stats",
             "cogs.welcome",
             "cogs.daily_ranking",
