@@ -3,9 +3,16 @@ import logging
 from typing import Optional
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
-from config import RADIO_MUTED_ROLE_ID, RADIO_STREAM_URL, RADIO_VC_ID
+from config import (
+    RADIO_MUTED_ROLE_ID,
+    RADIO_RAP_STREAM_URL,
+    RADIO_STREAM_URL,
+    RADIO_VC_ID,
+)
+from utils.rename_manager import rename_manager
 
 FFMPEG_BEFORE = "-fflags nobuffer -probesize 32k"
 FFMPEG_OPTIONS = "-filter:a loudnorm"
@@ -20,6 +27,7 @@ class RadioCog(commands.Cog):
         self.stream_url: Optional[str] = RADIO_STREAM_URL
         self.voice: Optional[discord.VoiceClient] = None
         self._reconnect_task: Optional[asyncio.Task] = None
+        self._original_name: Optional[str] = None
 
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
@@ -76,7 +84,22 @@ class RadioCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
+        channel = self.bot.get_channel(self.vc_id)
+        if isinstance(channel, discord.VoiceChannel):
+            self._original_name = channel.name
         await self._connect_and_play()
+
+    @app_commands.command(name="radio_rap", description="Basculer la radio sur le flux rap")
+    @app_commands.checks.cooldown(1, 3600, key=lambda i: i.user.id)
+    async def radio_rap(self, interaction: discord.Interaction) -> None:
+        self.stream_url = RADIO_RAP_STREAM_URL
+        if self.voice and self.voice.is_playing():
+            self.voice.stop()
+        await self._connect_and_play()
+        channel = self.bot.get_channel(self.vc_id)
+        if isinstance(channel, discord.VoiceChannel):
+            await rename_manager.request(channel, "rap")
+        await interaction.response.send_message("Radio changée pour rap")
 
     @commands.Cog.listener()
     async def on_voice_state_update(

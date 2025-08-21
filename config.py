@@ -47,6 +47,7 @@ RADIO_MUTED_ROLE_ID = 1403510368340410550
 RADIO_STREAM_URL = os.getenv(
     "RADIO_STREAM_URL", "http://stream.laut.fm/englishrap"
 )
+RADIO_RAP_STREAM_URL = "https://stream.laut.fm/24-7-rap"
 
 # ── Divers ───────────────────────────────────────────────────
 XP_VIEWER_ROLE_ID = 1403510368340410550
