@@ -83,6 +83,7 @@ class RefugeBot(commands.Bot):
         await channel_edit_manager.start()
         await api_meter.start(self)
         self.error_counter_task = self.loop.create_task(reset_http_error_counter())
+        await self.tree.sync()
 
     async def close(self) -> None:
         rename_manager.stop()
