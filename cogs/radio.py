@@ -92,14 +92,26 @@ class RadioCog(commands.Cog):
     @app_commands.command(name="radio_rap", description="Basculer la radio sur le flux rap")
     @app_commands.checks.cooldown(1, 3600, key=lambda i: i.user.id)
     async def radio_rap(self, interaction: discord.Interaction) -> None:
-        self.stream_url = RADIO_RAP_STREAM_URL
-        if self.voice and self.voice.is_playing():
-            self.voice.stop()
-        await self._connect_and_play()
-        channel = self.bot.get_channel(self.vc_id)
-        if isinstance(channel, discord.VoiceChannel):
-            await rename_manager.request(channel, "rap")
-        await interaction.response.send_message("Radio changée pour rap")
+        if self.stream_url == RADIO_RAP_STREAM_URL:
+            self.stream_url = RADIO_STREAM_URL
+            if self.voice and self.voice.is_playing():
+                self.voice.stop()
+            await self._connect_and_play()
+            channel = self.bot.get_channel(self.vc_id)
+            if isinstance(channel, discord.VoiceChannel) and self._original_name:
+                await rename_manager.request(channel, self._original_name)
+            await interaction.response.send_message(
+                "Radio remise sur la station d'origine"
+            )
+        else:
+            self.stream_url = RADIO_RAP_STREAM_URL
+            if self.voice and self.voice.is_playing():
+                self.voice.stop()
+            await self._connect_and_play()
+            channel = self.bot.get_channel(self.vc_id)
+            if isinstance(channel, discord.VoiceChannel):
+                await rename_manager.request(channel, "rap")
+            await interaction.response.send_message("Radio changée pour rap")
 
     @commands.Cog.listener()
     async def on_voice_state_update(
