@@ -21,6 +21,10 @@ class RockRadioCog(commands.Cog):
         self.voice: Optional[discord.VoiceClient] = None
         self._reconnect_task: Optional[asyncio.Task] = None
 
+    async def cog_load(self) -> None:
+        if self.bot.is_ready():
+            await self._connect_and_play()
+
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
             logging.warning("ROCK_RADIO_STREAM_URL non défini")
