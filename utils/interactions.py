@@ -2,7 +2,7 @@ import logging
 
 import discord
 
-async def safe_respond(inter: discord.Interaction, content=None, **kwargs):
+async def safe_respond(inter: discord.Interaction, content=None, **kwargs) -> None:
     """Safely respond to an interaction.
 
     If the initial response has already been sent, uses followup instead.
@@ -21,3 +21,4 @@ async def safe_respond(inter: discord.Interaction, content=None, **kwargs):
         pass
     except Exception as e:
         logging.error(f"Réponse interaction échouée: {e}")
+
