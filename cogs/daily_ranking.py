@@ -6,6 +6,7 @@ d'activité et persiste les résultats dans ``daily_ranking.json`` via
 journalières partagées avec la cog XP.
 """
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, time, timezone
@@ -14,7 +15,7 @@ import json
 
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 from config import DATA_DIR, XP_VIEWER_ROLE_ID
 from utils.interactions import safe_respond
@@ -38,10 +39,10 @@ class DailyRankingAndRoles(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.daily_task.start()
+        self._task = self.bot.loop.create_task(self._scheduler())
 
     def cog_unload(self) -> None:
-        self.daily_task.cancel()
+        self._task.cancel()
 
     # ── Persistence helpers ──────────────────────────────────
 
@@ -90,9 +91,17 @@ class DailyRankingAndRoles(commands.Cog):
 
     # ── Main task ───────────────────────────────────────────
 
-    @tasks.loop(time=time(hour=0, tzinfo=PARIS_TZ))
-    async def daily_task(self) -> None:
+    async def _scheduler(self) -> None:
         await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            now = datetime.now(PARIS_TZ)
+            target = datetime.combine(now.date(), time(hour=0, tzinfo=PARIS_TZ))
+            if now >= target:
+                target += timedelta(days=1)
+            await asyncio.sleep((target - now).total_seconds())
+            await self._run_daily_task()
+
+    async def _run_daily_task(self) -> None:
         now = datetime.now(PARIS_TZ)
         day = (now - timedelta(days=1)).date().isoformat()
         logging.info("[daily_ranking] Calcul du classement pour %s", day)
@@ -107,10 +116,6 @@ class DailyRankingAndRoles(commands.Cog):
         self._write_persistence(ranking)
         await save_daily_stats_to_disk()
         logging.info("[daily_ranking] Classement %s sauvegardé", day)
-
-    @daily_task.before_loop
-    async def before_daily_task(self) -> None:
-        await self.bot.wait_until_ready()
 
     @app_commands.command(
         name="test_classement1", description="Prévisualise le classement du jour"

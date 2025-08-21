@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from datetime import time, timezone
+from datetime import datetime, timedelta, time, timezone
 from typing import Any, Dict
 
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 from config import (
     AWARD_ANNOUNCE_CHANNEL_ID,
@@ -50,13 +51,14 @@ class DailyAwards(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self._task = None
         if ENABLE_DAILY_AWARDS:
-            self.daily_task.start()
+            self._task = self.bot.loop.create_task(self._scheduler())
             self.bot.loop.create_task(self._startup_check())
 
     def cog_unload(self) -> None:  # pragma: no cover - cleanup
-        if self.daily_task.is_running():
-            self.daily_task.cancel()
+        if self._task:
+            self._task.cancel()
 
     # ── Persistence helpers ──────────────────────────────────
     def _read_state(self) -> Dict[str, Any]:
@@ -204,15 +206,18 @@ class DailyAwards(commands.Cog):
         logging.info("[daily_awards] Annonce %s publiée", date)
 
     # ── Tasks ────────────────────────────────────────────────
-    @tasks.loop(time=time(hour=0, minute=3, tzinfo=PARIS_TZ))
-    async def daily_task(self) -> None:
+    async def _scheduler(self) -> None:
         await self.bot.wait_until_ready()
-        data = read_json_safe(DAILY_RANK_FILE)
-        await self._maybe_award(data)
-
-    @daily_task.before_loop
-    async def before_daily_task(self) -> None:  # pragma: no cover - scheduler hook
-        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            now = datetime.now(PARIS_TZ)
+            target = datetime.combine(
+                now.date(), time(hour=0, minute=3, tzinfo=PARIS_TZ)
+            )
+            if now >= target:
+                target += timedelta(days=1)
+            await asyncio.sleep((target - now).total_seconds())
+            data = read_json_safe(DAILY_RANK_FILE)
+            await self._maybe_award(data)
 
     async def _startup_check(self) -> None:
         await self.bot.wait_until_ready()
