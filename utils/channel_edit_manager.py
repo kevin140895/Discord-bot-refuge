@@ -28,9 +28,13 @@ class _ChannelEditManager:
         if self._worker is None:
             self._worker = asyncio.create_task(self._run())
 
-    def stop(self) -> None:
+    async def aclose(self) -> None:
         if self._worker is not None:
             self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
             self._worker = None
 
     async def request(self, channel: discord.abc.GuildChannel, **kwargs) -> None:
