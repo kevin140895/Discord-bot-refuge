@@ -55,7 +55,7 @@ async def test_voice_channel_created_when_positive_rsvp(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_no_voice_channel_without_rsvp(monkeypatch):
+async def test_voice_channel_created_without_rsvp(monkeypatch):
     EVENTS.clear()
     now = datetime.now(timezone.utc)
     evt = GameEvent(
@@ -72,9 +72,10 @@ async def test_no_voice_channel_without_rsvp(monkeypatch):
 
     member_creator = SimpleNamespace(id=42, display_name="Alice", send=AsyncMock())
     members = {42: member_creator}
+    vc = SimpleNamespace(id=999, members=[], mention="<#999>")
     guild = SimpleNamespace(
         get_member=lambda uid: members.get(uid),
-        create_voice_channel=AsyncMock(),
+        create_voice_channel=AsyncMock(return_value=vc),
         get_channel=lambda cid: None,
     )
     bot = SimpleNamespace(get_guild=lambda gid: guild, add_view=lambda *a, **k: None)
@@ -86,6 +87,6 @@ async def test_no_voice_channel_without_rsvp(monkeypatch):
     with patch("cogs.game_events.save_event", AsyncMock()):
         await cog._process_event(evt, now)
 
-    guild.create_voice_channel.assert_not_awaited()
-    assert evt.voice_channel_id is None
-    assert evt.state == "scheduled"
+    guild.create_voice_channel.assert_awaited_once()
+    assert evt.voice_channel_id == vc.id
+    assert evt.state == "waiting"

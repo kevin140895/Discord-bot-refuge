@@ -132,25 +132,24 @@ class GameEventsCog(commands.Cog):
             return
         # T-10 minutes: création salon vocal et DMs
         if evt.state == "scheduled" and now >= evt.time - timedelta(minutes=10):
-            if any(s in {"yes", "maybe"} for s in evt.rsvps.values()):
-                creator = guild.get_member(evt.creator_id)
-                name = f"👥 {creator.display_name if creator else 'Joueur'}・{evt.game_name}"
-                vc = await guild.create_voice_channel(name)
-                set_voice_channel(evt, vc.id)
-                await save_event(evt)
-                for uid, status in evt.rsvps.items():
-                    if status in {"yes", "maybe"}:
-                        member = guild.get_member(int(uid))
-                        if member:
-                            try:
-                                await member.send(
-                                    f"{evt.game_name} commence dans 10 minutes !"
-                                )
-                            except discord.HTTPException:
-                                logging.info("[game] DM refusé pour %s", uid)
-                evt.state = "waiting"
-                await save_event(evt)
-                logging.info("[game] Salon vocal créé pour %s", evt.id)
+            creator = guild.get_member(evt.creator_id)
+            name = f"👥 {creator.display_name if creator else 'Joueur'}・{evt.game_name}"
+            vc = await guild.create_voice_channel(name)
+            set_voice_channel(evt, vc.id)
+            await save_event(evt)
+            for uid, status in evt.rsvps.items():
+                if status in {"yes", "maybe"}:
+                    member = guild.get_member(int(uid))
+                    if member:
+                        try:
+                            await member.send(
+                                f"{evt.game_name} commence dans 10 minutes !"
+                            )
+                        except discord.HTTPException:
+                            logging.info("[game] DM refusé pour %s", uid)
+            evt.state = "waiting"
+            await save_event(evt)
+            logging.info("[game] Salon vocal créé pour %s", evt.id)
         # À l'heure H: annonce ou annulation
         if evt.state in {"scheduled", "waiting"} and now >= evt.time:
             if any(s in {"yes", "maybe"} for s in evt.rsvps.values()):
