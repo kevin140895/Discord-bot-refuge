@@ -182,3 +182,77 @@ class PlayerTypeView(discord.ui.View):
                 "❌ Impossible de modifier tes rôles.", ephemeral=True
             )
 
+
+class RSVPView(discord.ui.View):
+    """Boutons RSVP pour les événements de jeu."""
+
+    def __init__(self, event_id: str) -> None:
+        super().__init__(timeout=None)
+        self.event_id = event_id
+
+        yes = discord.ui.Button(
+            label="✅ Je viens",
+            style=discord.ButtonStyle.success,
+            custom_id=f"rsvp:{event_id}:yes",
+        )
+        maybe = discord.ui.Button(
+            label="🤔 Peut-être",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"rsvp:{event_id}:maybe",
+        )
+        no = discord.ui.Button(
+            label="❌ Je passe",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"rsvp:{event_id}:no",
+        )
+        yes.callback = self._yes
+        maybe.callback = self._maybe
+        no.callback = self._no
+        self.add_item(yes)
+        self.add_item(maybe)
+        self.add_item(no)
+
+    async def _handle(self, interaction: discord.Interaction, status: str) -> None:
+        from utils.game_events import EVENTS, save_event
+        from cogs.xp import award_xp
+
+        evt = EVENTS.get(self.event_id)
+        if not evt:
+            await interaction.response.send_message(
+                "❌ Événement introuvable.", ephemeral=True
+            )
+            return
+        uid = str(interaction.user.id)
+        evt.rsvps[uid] = status
+        bonus = False
+        if status == "yes" and not evt.first_bonus:
+            if sum(1 for s in evt.rsvps.values() if s == "yes") == 1:
+                evt.first_bonus = True
+                bonus = True
+                try:
+                    await award_xp(interaction.user.id, 50)
+                    logging.info("[game] Bonus XP pour %s", interaction.user.id)
+                except Exception:
+                    logging.exception("[game] Échec attribution bonus XP")
+        await save_event(evt)
+        msg = {
+            "yes": "Tu participes ✅",
+            "maybe": "Tu es peut-être 🤔",
+            "no": "Participation annulée ❌",
+        }.get(status, "Statut mis à jour")
+        if bonus:
+            msg += " (+50 XP)"
+        try:
+            await interaction.response.send_message(msg, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
+    async def _yes(self, interaction: discord.Interaction) -> None:
+        await self._handle(interaction, "yes")
+
+    async def _maybe(self, interaction: discord.Interaction) -> None:
+        await self._handle(interaction, "maybe")
+
+    async def _no(self, interaction: discord.Interaction) -> None:
+        await self._handle(interaction, "no")
+

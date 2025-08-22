@@ -30,6 +30,7 @@ from utils.persistence import (
 )
 from utils.metrics import measure
 from storage.xp_store import xp_store
+from utils.game_events import get_multiplier, record_participant
 
 # Fichiers de persistance
 VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
@@ -185,6 +186,11 @@ class XPCog(commands.Cog):
             if start is not None:
                 duration = now - start
                 xp_amount = int(duration.total_seconds() // 60)
+                if before.channel is not None:
+                    mult = get_multiplier(before.channel.id, member.id)
+                    if mult != 1.0:
+                        xp_amount = int(xp_amount * mult)
+                        record_participant(before.channel.id, member.id)
                 old_lvl, new_lvl, total_xp = await award_xp(member.id, xp_amount)
                 if new_lvl > old_lvl:
                     await self.bot.announce_level_up(
