@@ -19,6 +19,7 @@ async def test_move_to_rock_channel_when_connected_elsewhere(monkeypatch):
         pass
 
     monkeypatch.setattr("cogs.rock_radio.discord.VoiceChannel", DummyVoiceChannel)
+    monkeypatch.setattr("utils.voice.discord.VoiceChannel", DummyVoiceChannel)
     channel = DummyVoiceChannel(id=ROCK_RADIO_VC_ID)
     bot = SimpleNamespace(
         loop=loop,
