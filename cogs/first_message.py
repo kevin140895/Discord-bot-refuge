@@ -32,6 +32,7 @@ class FirstMessageCog(commands.Cog):
         self.bot = bot
         self.first_message_claimed: bool = True
         self.winner_id: int | None = None
+        self.claimed_at: datetime | None = None
         self._lock = asyncio.Lock()
         self._load_state()
         self.daily_reset.start()
@@ -45,26 +46,40 @@ class FirstMessageCog(commands.Cog):
         """Charge l'état depuis le stockage persistant."""
         data = read_json_safe(FIRST_WIN_FILE)
         self.winner_id = data.get("winner_id")
-        stored_date = data.get("date")
+        claimed_at_raw = data.get("claimed_at")
+        try:
+            self.claimed_at = (
+                datetime.fromisoformat(claimed_at_raw) if claimed_at_raw else None
+            )
+        except ValueError:
+            self.claimed_at = None
+
         now = datetime.now()
-        today = now.date().isoformat()
-        if now.time() >= time(hour=8):
-            if stored_date == today:
-                self.first_message_claimed = self.winner_id is not None
-            else:
-                self._reset_state()
-        else:
+        if now.time() < time(hour=8):
+            # Le challenge n'est actif qu'après 8h.
             self.first_message_claimed = True
+            return
+
+        if self.claimed_at and self.claimed_at.date() == now.date():
+            # Récompense déjà attribuée aujourd'hui.
+            self.first_message_claimed = True
+        else:
+            self._reset_state()
 
     async def _save_state(self) -> None:
         """Sauvegarde l'état actuel dans le fichier JSON."""
-        payload = {"date": date.today().isoformat(), "winner_id": self.winner_id}
+        payload = {
+            "date": date.today().isoformat(),
+            "winner_id": self.winner_id,
+            "claimed_at": self.claimed_at.isoformat() if self.claimed_at else None,
+        }
         await atomic_write_json_async(FIRST_WIN_FILE, payload)
 
     def _reset_state(self) -> None:
         """Réinitialise le challenge pour une nouvelle journée."""
         self.first_message_claimed = False
         self.winner_id = None
+        self.claimed_at = None
         asyncio.create_task(self._save_state())
         logging.info("[FirstMessage] Challenge réinitialisé")
 
@@ -92,6 +107,7 @@ class FirstMessageCog(commands.Cog):
                 return
             self.first_message_claimed = True
             self.winner_id = message.author.id
+            self.claimed_at = datetime.now()
         old_lvl, new_lvl, total_xp = await xp_store.add_xp(message.author.id, 1000)
         if new_lvl > old_lvl:
             await self.bot.announce_level_up(
