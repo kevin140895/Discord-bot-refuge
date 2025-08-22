@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import discord
 import inspect
@@ -250,8 +251,14 @@ class APIMeter:
     async def aclose(self) -> None:
         if self.writer_task:
             self.writer_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.writer_task
+            self.writer_task = None
         if self.summary_task:
             self.summary_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.summary_task
+            self.summary_task = None
 
 
 # Global instance
