@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from config import TEMP_VC_CATEGORY
 from utils.interactions import safe_respond
 from view import RSVPView
 from utils.game_events import (
@@ -134,7 +135,8 @@ class GameEventsCog(commands.Cog):
         if evt.state == "scheduled" and now >= evt.time - timedelta(minutes=10):
             creator = guild.get_member(evt.creator_id)
             name = f"👥 {creator.display_name if creator else 'Joueur'}・{evt.game_name}"
-            vc = await guild.create_voice_channel(name)
+            category = guild.get_channel(TEMP_VC_CATEGORY)
+            vc = await guild.create_voice_channel(name, category=category)
             set_voice_channel(evt, vc.id)
             await save_event(evt)
             for uid, status in evt.rsvps.items():
