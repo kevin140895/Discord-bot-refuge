@@ -107,6 +107,32 @@ ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
 DATA_DIR: str = _resolve_data_dir()
 """Répertoire de stockage persistant."""
 
+# ── Double XP vocal ───────────────────────────────────────────
+XP_DOUBLE_VOICE_SESSIONS_PER_DAY: int = int(
+    os.getenv("XP_DOUBLE_VOICE_SESSIONS_PER_DAY", "2")
+)
+"""Nombre maximum de sessions Double XP vocal par jour."""
+
+XP_DOUBLE_VOICE_DURATION_MINUTES: int = int(
+    os.getenv("XP_DOUBLE_VOICE_DURATION_MINUTES", "60")
+)
+"""Durée d'une session Double XP vocal en minutes."""
+
+XP_DOUBLE_VOICE_START_HOUR: int = int(
+    os.getenv("XP_DOUBLE_VOICE_START_HOUR", "10")
+)
+"""Heure de début minimale pour une session (Europe/Paris)."""
+
+XP_DOUBLE_VOICE_END_HOUR: int = int(
+    os.getenv("XP_DOUBLE_VOICE_END_HOUR", "23")
+)
+"""Heure de début maximale pour une session (Europe/Paris)."""
+
+XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID: int = int(
+    os.getenv("XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID", str(ANNOUNCE_CHANNEL_ID))
+)
+"""Salon où sont annoncées les sessions Double XP vocal."""
+
 # ── Jeux organisés ────────────────────────────────────────────
 GAMES_DATA_DIR: str = os.getenv("GAMES_DATA_DIR", "/app/data/games")
 """Répertoire de persistance des événements de jeu."""
