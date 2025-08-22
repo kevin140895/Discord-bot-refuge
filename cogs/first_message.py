@@ -126,13 +126,13 @@ class FirstMessageCog(commands.Cog):
             self.first_message_claimed = True
             self.winner_id = message.author.id
             self.claimed_at = datetime.now()
-        old_lvl, new_lvl, total_xp = await xp_store.add_xp(message.author.id, 1000)
+        old_lvl, new_lvl, total_xp = await xp_store.add_xp(message.author.id, 400)
         if new_lvl > old_lvl:
             await self.bot.announce_level_up(
                 message.guild, message.author, old_lvl, new_lvl, total_xp
             )
         await message.channel.send(
-            f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 1000 XP !",
+            f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 400 XP !",
         )
         await self._save_state()
         logging.info(
