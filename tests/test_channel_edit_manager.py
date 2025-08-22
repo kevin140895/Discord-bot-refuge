@@ -18,7 +18,7 @@ async def edit_manager(monkeypatch):
     try:
         yield mgr
     finally:
-        mgr.stop()
+        await mgr.aclose()
 
 
 @pytest.mark.asyncio

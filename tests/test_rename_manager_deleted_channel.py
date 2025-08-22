@@ -34,7 +34,7 @@ async def test_skip_when_channel_deleted(monkeypatch, caplog):
 
     await rm.request(channel, "new")
     await rm._queue.join()
-    rm.stop()
+    await rm.aclose()
 
     assert called is False
     assert any(

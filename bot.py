@@ -90,8 +90,8 @@ class RefugeBot(commands.Bot):
         await self.tree.sync()
 
     async def close(self) -> None:
-        rename_manager.stop()
-        channel_edit_manager.stop()
+        await rename_manager.aclose()
+        await channel_edit_manager.aclose()
         await xp_store.aclose()
         if hasattr(self, "error_counter_task"):
             self.error_counter_task.cancel()
