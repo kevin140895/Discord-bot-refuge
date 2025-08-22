@@ -34,12 +34,21 @@ class FirstMessageCog(commands.Cog):
         self.winner_id: int | None = None
         self.claimed_at: datetime | None = None
         self._lock = asyncio.Lock()
+        self._save_task: asyncio.Task | None = None
         self._load_state()
         self.daily_reset.start()
 
     def cog_unload(self) -> None:
         """Annule les tâches lorsque le cog est déchargé."""
         self.daily_reset.cancel()
+        if self._save_task is not None:
+            if self._save_task.done():
+                try:
+                    self._save_task.result()
+                except Exception:  # pragma: no cover - logging
+                    logging.exception("[FirstMessage] Échec de la sauvegarde d'état")
+            else:
+                self._save_task.cancel()
 
     # ── State management ────────────────────────────────────
     def _load_state(self) -> None:
@@ -80,8 +89,17 @@ class FirstMessageCog(commands.Cog):
         self.first_message_claimed = False
         self.winner_id = None
         self.claimed_at = None
-        asyncio.create_task(self._save_state())
+        task = asyncio.create_task(self._save_state(), name="first_message_save")
+        task.add_done_callback(self._handle_save_task_result)
+        self._save_task = task
         logging.info("[FirstMessage] Challenge réinitialisé")
+
+    def _handle_save_task_result(self, task: asyncio.Task) -> None:
+        """Log les erreurs potentielles de la tâche de sauvegarde."""
+        try:
+            task.result()
+        except Exception:  # pragma: no cover - logging
+            logging.exception("[FirstMessage] Erreur lors de la sauvegarde de l'état")
 
     # ── Tasks ────────────────────────────────────────────────
     @tasks.loop(time=time(hour=8))
