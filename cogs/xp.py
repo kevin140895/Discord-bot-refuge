@@ -11,7 +11,7 @@ import io
 import logging
 import os
 import random
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
