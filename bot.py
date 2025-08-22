@@ -107,6 +107,35 @@ _orig_request = bot.http.request
 http_error_counter = 0
 
 
+def _record_api_call(
+    route: discord.http.Route,
+    method: str,
+    path: str,
+    status: int,
+    start: float,
+    retry_ms: int,
+    error_code: int | None,
+    data: bytes | str | None,
+) -> None:
+    """Enregistre l'appel API dans ``api_meter``."""
+    api_meter.record_call(
+        APICallCtx(
+            lib="discord.py",
+            method=method,
+            route=path,
+            major_param=next(iter(route.major_parameters), None),
+            status=status,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            retry_after_ms=retry_ms,
+            bucket=getattr(route, "bucket", None),
+            ratelimit_remaining=None,
+            ratelimit_reset=None,
+            error_code=error_code,
+            size_bytes=len(data) if data else 0,
+        )
+    )
+
+
 async def reset_http_error_counter() -> None:
     global http_error_counter
     while True:
@@ -177,70 +206,54 @@ async def _limited_request(self, route, **kwargs):
                 retry_ms = int(retry_after * 1000)
                 await asyncio.sleep(retry_after + random.uniform(0.05, 0.25))
                 attempts += 1
-                api_meter.record_call(APICallCtx(
-                    lib="discord.py",
-                    method=method,
-                    route=path,
-                    major_param=next(iter(route.major_parameters), None),
-                    status=status,
-                    duration_ms=int((time.perf_counter() - start) * 1000),
-                    retry_after_ms=retry_ms,
-                    bucket=getattr(route, "bucket", None),
-                    ratelimit_remaining=None,
-                    ratelimit_reset=None,
-                    error_code=error_code,
-                    size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
-                ))
+                _record_api_call(
+                    route,
+                    method,
+                    path,
+                    status,
+                    start,
+                    retry_ms,
+                    error_code,
+                    kwargs.get("data"),
+                )
                 if attempts >= max_attempts:
                     raise
                 continue
-            api_meter.record_call(APICallCtx(
-                lib="discord.py",
-                method=method,
-                route=path,
-                major_param=next(iter(route.major_parameters), None),
-                status=status,
-                duration_ms=int((time.perf_counter() - start) * 1000),
-                retry_after_ms=retry_ms,
-                bucket=getattr(route, "bucket", None),
-                ratelimit_remaining=None,
-                ratelimit_reset=None,
-                error_code=error_code,
-                size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
-            ))
+            _record_api_call(
+                route,
+                method,
+                path,
+                status,
+                start,
+                retry_ms,
+                error_code,
+                kwargs.get("data"),
+            )
             raise
         except Exception:
-            api_meter.record_call(APICallCtx(
-                lib="discord.py",
-                method=method,
-                route=path,
-                major_param=next(iter(route.major_parameters), None),
-                status=status,
-                duration_ms=int((time.perf_counter() - start) * 1000),
-                retry_after_ms=retry_ms,
-                bucket=getattr(route, "bucket", None),
-                ratelimit_remaining=None,
-                ratelimit_reset=None,
-                error_code=error_code,
-                size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
-            ))
+            _record_api_call(
+                route,
+                method,
+                path,
+                status,
+                start,
+                retry_ms,
+                error_code,
+                kwargs.get("data"),
+            )
             raise
         finally:
             if status == 200:
-                api_meter.record_call(APICallCtx(
-                    lib="discord.py",
-                    method=method,
-                    route=path,
-                    major_param=next(iter(route.major_parameters), None),
-                    status=status,
-                    duration_ms=int((time.perf_counter() - start) * 1000),
-                    retry_after_ms=retry_ms,
-                    bucket=getattr(route, "bucket", None),
-                    ratelimit_remaining=None,
-                    ratelimit_reset=None,
-                    error_code=error_code,
-                    size_bytes=len(kwargs.get("data", b"")) if kwargs.get("data") else 0,
-                ))
+                _record_api_call(
+                    route,
+                    method,
+                    path,
+                    status,
+                    start,
+                    retry_ms,
+                    error_code,
+                    kwargs.get("data"),
+                )
 
 
 bot.http.request = types.MethodType(_limited_request, bot.http)
