@@ -62,6 +62,7 @@ class RefugeBot(commands.Bot):
             "cogs.role_reminder",
             "cogs.roulette",
             "cogs.xp",
+            "cogs.first_message",
             "cogs.temp_vc",
             "cogs.misc",
             "cogs.radio",
