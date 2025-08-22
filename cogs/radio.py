@@ -28,6 +28,13 @@ class RadioCog(commands.Cog):
         self._original_name: Optional[str] = None
         self._previous_stream: Optional[str] = None
 
+        if rename_manager._worker is None:
+            async def _ensure_rename_worker() -> None:
+                await rename_manager.start()
+                logging.info("[radio] rename_manager worker démarré")
+
+            asyncio.create_task(_ensure_rename_worker())
+
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
             logging.warning("RADIO_STREAM_URL non défini")
