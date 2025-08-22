@@ -45,9 +45,11 @@ LOBBY_VC_ID = 1405630965803520221
 RADIO_VC_ID = 1405695147114758245
 RADIO_MUTED_ROLE_ID = 1403510368340410550
 RADIO_STREAM_URL = os.getenv(
-    "RADIO_STREAM_URL", "http://stream.laut.fm/englishrap"
+    "RADIO_STREAM_URL",
+    "https://n08.radiojar.com/2b5w4a2kb?rj-ttl=5&rj-tok=AAABmNHaVWAAm4GDT5xyXjsi5A",
 )
 RADIO_RAP_STREAM_URL = "https://stream.laut.fm/24-7-rap"
+RADIO_RAP_FR_STREAM_URL = "http://icecast.radiofrance.fr/mouvrapfr-midfi.mp3"
 
 ROCK_RADIO_VC_ID = 1408081503707074650
 ROCK_RADIO_STREAM_URL = os.getenv(
