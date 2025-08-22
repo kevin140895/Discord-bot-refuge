@@ -52,7 +52,7 @@ RADIO_RAP_STREAM_URL = "https://stream.laut.fm/24-7-rap"
 ROCK_RADIO_VC_ID = 1408081503707074650
 ROCK_RADIO_STREAM_URL = os.getenv(
     "ROCK_RADIO_STREAM_URL",
-    "http://stream.laut.fm/rocks",
+    "http://stream.radioparadise.com/rock-192",
 )
 
 # ── Divers ───────────────────────────────────────────────────
