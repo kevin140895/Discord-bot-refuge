@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """API call metering and JSONL logging."""
+
+from __future__ import annotations
 
 import asyncio
 import contextvars
@@ -21,8 +21,8 @@ import config
 from utils.persistence import ensure_dir
 
 # Context variable used to propagate command information
-api_context: contextvars.ContextVar[Dict[str, str]] = contextvars.ContextVar(
-    "api_context", default={}
+api_context: contextvars.ContextVar[Dict[str, str] | None] = contextvars.ContextVar(
+    "api_context", default=None
 )
 
 
@@ -68,7 +68,7 @@ class APIMeter:
         api_context.set({"cog": cog or "", "command": command or ""})
 
     def _apply_context(self, data: Dict[str, Any]) -> None:
-        ctx = api_context.get()
+        ctx = api_context.get() or {}
         data.setdefault("cog", ctx.get("cog") or None)
         data.setdefault("command", ctx.get("command") or None)
         if not data.get("caller"):
