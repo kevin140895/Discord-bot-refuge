@@ -12,9 +12,8 @@ import logging
 import os
 import random
 from datetime import date, datetime, time, timedelta
-from typing import List
+from typing import List, Dict, Any
 
-import discord
 from discord.ext import commands, tasks
 
 from config import (
@@ -42,11 +41,24 @@ ensure_dir(DATA_DIR)
 
 
 def _read_state() -> dict:
-    return read_json_safe(STATE_FILE)
+    """Read persisted state from disk.
+
+    Retourne un dictionnaire vide en cas d'erreur et journalise
+    l'exception.
+    """
+    try:
+        return read_json_safe(STATE_FILE)
+    except Exception:  # pragma: no cover - unexpected error
+        logging.exception("[double_xp] failed to read state file")
+        return {}
 
 
 async def _write_state(data: dict) -> None:
-    await atomic_write_json_async(STATE_FILE, data)
+    """Persist ``data`` to disk and log failures."""
+    try:
+        await atomic_write_json_async(STATE_FILE, data)
+    except Exception:  # pragma: no cover - disk errors
+        logging.exception("[double_xp] failed to write state file")
 
 
 def _random_sessions() -> List[str]:
@@ -64,6 +76,7 @@ def _random_sessions() -> List[str]:
 
 
 def _hm_to_dt(hm: str, day: date) -> datetime:
+    """Convertit une heure ``HH:MM`` en :class:`datetime` pour ``day``."""
     h, m = map(int, hm.split(":"))
     return datetime.combine(day, time(hour=h, minute=m, tzinfo=PARIS_TZ))
 
@@ -72,10 +85,12 @@ class DoubleVoiceXP(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._tasks: List[asyncio.Task] = []
+        self.state: Dict[str, Any] = {}
         self.daily_planner.start()
         self.bot.loop.create_task(self._startup())
 
     async def _startup(self) -> None:
+        """Attendre le démarrage du bot et préparer les sessions du jour."""
         await self.bot.wait_until_ready()
         await self._prepare_today()
 
@@ -93,34 +108,83 @@ class DoubleVoiceXP(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _prepare_today(self, force: bool = False) -> None:
+        """Lire/initialiser l'état du jour puis planifier ou reprendre les sessions."""
+
         today = datetime.now(PARIS_TZ).date()
         state = _read_state()
         if force or state.get("date") != today.isoformat():
-            sessions = _random_sessions()
+            sessions = [
+                {"hm": hm, "started": False, "end": None, "ended": False}
+                for hm in _random_sessions()
+            ]
             state = {"date": today.isoformat(), "sessions": sessions}
             await _write_state(state)
-        sessions = state.get("sessions", [])
-        for hm in sessions:
-            dt = _hm_to_dt(hm, today)
-            self._schedule_session(dt)
+        else:
+            sessions = state.get("sessions", [])
+            if sessions and isinstance(sessions[0], str):  # rétro-compatibilité
+                sessions = [
+                    {"hm": hm, "started": False, "end": None, "ended": False}
+                    for hm in sessions
+                ]
+                state["sessions"] = sessions
+                await _write_state(state)
 
-    def _schedule_session(self, dt: datetime) -> None:
+        self.state = state
+        now = datetime.now(PARIS_TZ)
+        for sess in sessions:
+            dt = _hm_to_dt(sess["hm"], today)
+            if sess.get("started") and not sess.get("ended"):
+                end_iso = sess.get("end")
+                if end_iso:
+                    end_dt = datetime.fromisoformat(end_iso)
+                    if end_dt > now:
+                        self._resume_session(sess, (end_dt - now).total_seconds())
+                    else:
+                        await self._end_session(sess, announce=False)
+            else:
+                self._schedule_session(dt, sess)
+
+    def _schedule_session(self, dt: datetime, session: Dict[str, Any]) -> None:
+        """Planifier ``session`` pour démarrer à ``dt``."""
         end_dt = dt + timedelta(minutes=XP_DOUBLE_VOICE_DURATION_MINUTES)
         now = datetime.now(PARIS_TZ)
         if end_dt <= now:
             return
         delay = max(0, (dt - now).total_seconds())
-        task = self.bot.loop.create_task(self._run_session(delay))
+        task = self.bot.loop.create_task(self._run_session(session, delay))
         self._tasks.append(task)
 
-    async def _run_session(self, delay: float) -> None:
-        await asyncio.sleep(delay)
-        await self._start_session()
-        await asyncio.sleep(XP_DOUBLE_VOICE_DURATION_MINUTES * 60)
-        await self._end_session()
-
-    async def _start_session(self) -> None:
+    def _resume_session(self, session: Dict[str, Any], delay: float) -> None:
+        """Reprendre une session déjà démarrée et programmée pour se terminer."""
         set_voice_bonus(True)
+        task = self.bot.loop.create_task(self._finish_session(session, delay))
+        self._tasks.append(task)
+
+    async def _finish_session(self, session: Dict[str, Any], delay: float) -> None:
+        await asyncio.sleep(delay)
+        await self._end_session(session)
+
+    async def _run_session(self, session: Dict[str, Any], delay: float) -> None:
+        """Attendre ``delay`` secondes puis exécuter ``session``."""
+        await asyncio.sleep(delay)
+        await self._start_session(session)
+        await asyncio.sleep(XP_DOUBLE_VOICE_DURATION_MINUTES * 60)
+        await self._end_session(session)
+
+    async def _start_session(self, session: Dict[str, Any]) -> None:
+        """Activer le bonus et annoncer le début de ``session``."""
+        if session.get("started"):
+            return
+        session["started"] = True
+        end_dt = datetime.now(PARIS_TZ) + timedelta(
+            minutes=XP_DOUBLE_VOICE_DURATION_MINUTES
+        )
+        session["end"] = end_dt.isoformat()
+        await _write_state(self.state)
+        set_voice_bonus(True)
+        logging.info(
+            "[double_xp] session started at %s", end_dt.isoformat()
+        )
         channel = self.bot.get_channel(XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID)
         if channel:
             try:
@@ -130,10 +194,18 @@ class DoubleVoiceXP(commands.Cog):
             except Exception as e:  # pragma: no cover - network errors
                 logging.warning("[double_xp] Failed to send start message: %s", e)
 
-    async def _end_session(self) -> None:
+    async def _end_session(
+        self, session: Dict[str, Any], announce: bool = True
+    ) -> None:
+        """Désactiver le bonus et annoncer la fin de ``session``."""
+        if session.get("ended"):
+            return
+        session["ended"] = True
+        await _write_state(self.state)
         set_voice_bonus(False)
+        logging.info("[double_xp] session ended")
         channel = self.bot.get_channel(XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID)
-        if channel:
+        if announce and channel:
             try:
                 await channel.send(
                     "✅ La session Double XP vocale est terminée pour aujourd’hui, merci à ceux qui étaient présents !"
