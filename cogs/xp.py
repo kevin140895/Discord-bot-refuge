@@ -96,19 +96,23 @@ async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
     return await xp_store.add_xp(user_id, amount)
 
 async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed: int):
-    from PIL import Image, ImageDraw
-    img = Image.new("RGB", (460, 140), color=(30, 41, 59))
-    draw = ImageDraw.Draw(img)
-    draw.text((16, 14), f"{user.name} — Niveau {level}", fill=(255, 255, 255))
-    draw.text((16, 52), f"XP: {xp} / {xp_needed}", fill=(220, 220, 220))
-    bar_x, bar_y, bar_w, bar_h = 16, 90, 428, 22
-    draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], fill=(71, 85, 105))
-    ratio = max(0.0, min(1.0, xp / max(1, xp_needed)))
-    draw.rectangle([bar_x, bar_y, bar_x + int(bar_w * ratio), bar_y + bar_h], fill=(34, 197, 94))
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    buffer.seek(0)
-    return buffer
+    def _draw() -> io.BytesIO:
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (460, 140), color=(30, 41, 59))
+        draw = ImageDraw.Draw(img)
+        draw.text((16, 14), f"{user.name} — Niveau {level}", fill=(255, 255, 255))
+        draw.text((16, 52), f"XP: {xp} / {xp_needed}", fill=(220, 220, 220))
+        bar_x, bar_y, bar_w, bar_h = 16, 90, 428, 22
+        draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], fill=(71, 85, 105))
+        ratio = max(0.0, min(1.0, xp / max(1, xp_needed)))
+        draw.rectangle([bar_x, bar_y, bar_x + int(bar_w * ratio), bar_y + bar_h], fill=(34, 197, 94))
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+        return buffer
+
+    return await asyncio.to_thread(_draw)
 
 class XPCog(commands.Cog):
     """Fonctionnalités liées à l'XP."""

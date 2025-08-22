@@ -73,11 +73,13 @@ class RefugeBot(commands.Bot):
             "cogs.daily_awards",
             "cogs.api_stats",
         ]
-        for ext in extensions:
+        async def _load(ext: str) -> None:
             try:
                 await self.load_extension(ext)
             except Exception:
                 logging.exception("Failed to load extension %s", ext)
+
+        await asyncio.gather(*(_load(ext) for ext in extensions))
         limiter.start()
         await rename_manager.start()
         await channel_edit_manager.start()
