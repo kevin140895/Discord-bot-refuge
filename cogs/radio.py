@@ -33,6 +33,11 @@ class RadioCog(commands.Cog):
             logging.warning("RADIO_STREAM_URL non défini")
             return
         channel = self.bot.get_channel(self.vc_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(self.vc_id)
+            except discord.HTTPException:
+                channel = None
         if not isinstance(channel, discord.VoiceChannel):
             logging.warning("Salon radio %s introuvable", self.vc_id)
             return

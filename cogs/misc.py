@@ -25,6 +25,13 @@ class MiscCog(commands.Cog):
     @app_commands.checks.has_permissions(manage_guild=True)
     async def type_joueur(self, interaction: discord.Interaction) -> None:
         with measure("slash:type_joueur"):
+            if interaction.guild is None:
+                await safe_respond(
+                    interaction,
+                    "Commande utilisable uniquement sur un serveur.",
+                    ephemeral=True,
+                )
+                return
             await safe_respond(
                 interaction,
                 f"Les boutons ont été postés dans <#{CHANNEL_ROLES}> 😉",
@@ -38,7 +45,13 @@ class MiscCog(commands.Cog):
     @app_commands.describe(question="La question à poser")
     async def sondage(self, interaction: discord.Interaction, question: str) -> None:
         with measure("slash:sondage"):
-            msg = await interaction.channel.send(
+            ch = interaction.channel
+            if ch is None:
+                await safe_respond(
+                    interaction, "Salon introuvable.", ephemeral=True
+                )
+                return
+            msg = await ch.send(
                 f"📊 **{question}**\n> ✅ = Oui   ❌ = Non\n_Posé par {interaction.user.mention}_"
             )
             await msg.add_reaction("✅")
