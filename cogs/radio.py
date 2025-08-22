@@ -13,9 +13,7 @@ from config import (
     ROCK_RADIO_STREAM_URL,
 )
 from utils.rename_manager import rename_manager
-
-FFMPEG_BEFORE = "-fflags nobuffer -probesize 32k"
-FFMPEG_OPTIONS = "-filter:a loudnorm"
+from utils.audio import FFMPEG_BEFORE, FFMPEG_OPTIONS
 
 
 class RadioCog(commands.Cog):
