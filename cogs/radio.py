@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import (
+    RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
     RADIO_VC_ID,
@@ -66,6 +67,8 @@ class RadioCog(commands.Cog):
             await rename_manager.request(channel, "🔘・Radio-Rap")
         elif stream_url == ROCK_RADIO_STREAM_URL:
             await rename_manager.request(channel, "☢️・Radio-Rock")
+        elif stream_url == RADIO_RAP_FR_STREAM_URL:
+            await rename_manager.request(channel, "🔴・Radio-RapFR")
         elif stream_url == RADIO_STREAM_URL:
             await rename_manager.request(channel, "📻・Radio-HipHop")
         else:
@@ -123,6 +126,34 @@ class RadioCog(commands.Cog):
         if isinstance(channel, discord.VoiceChannel):
             await self._rename_for_stream(channel, ROCK_RADIO_STREAM_URL)
         await interaction.response.send_message("Radio changée pour rock")
+
+    @app_commands.command(
+        name="radio_rapfr", description="Basculer la radio sur le flux rap français"
+    )
+    async def radio_rapfr(self, interaction: discord.Interaction) -> None:
+        channel = self.bot.get_channel(self.vc_id)
+
+        if self.stream_url == RADIO_RAP_FR_STREAM_URL and self._previous_stream:
+            self.stream_url = self._previous_stream
+            self._previous_stream = None
+            if self.voice and self.voice.is_playing():
+                self.voice.stop()
+            await self._connect_and_play()
+            if isinstance(channel, discord.VoiceChannel):
+                await self._rename_for_stream(channel, self.stream_url)
+            await interaction.response.send_message(
+                "Radio changée pour la station précédente"
+            )
+            return
+
+        self._previous_stream = self.stream_url
+        self.stream_url = RADIO_RAP_FR_STREAM_URL
+        if self.voice and self.voice.is_playing():
+            self.voice.stop()
+        await self._connect_and_play()
+        if isinstance(channel, discord.VoiceChannel):
+            await self._rename_for_stream(channel, RADIO_RAP_FR_STREAM_URL)
+        await interaction.response.send_message("Radio changée pour rap français")
 
     @app_commands.command(
         name="radio_24", description="Revenir sur l'ancienne radio 24/7"
