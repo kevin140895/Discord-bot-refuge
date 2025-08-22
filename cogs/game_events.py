@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -189,7 +188,12 @@ class GameEventsCog(commands.Cog):
                 await save_event(evt)
                 logging.info("[game] Événement %s annulé", evt.id)
         # Fin de session quand le vocal est vide
-        if evt.state == "running" and evt.voice_channel_id:
+        if (
+            evt.state == "running"
+            and evt.voice_channel_id
+            and evt.started_at
+            and now - evt.started_at > timedelta(minutes=5)
+        ):
             vc = guild.get_channel(evt.voice_channel_id)
             if not isinstance(vc, discord.VoiceChannel) or not vc.members:
                 duration = int((now - (evt.started_at or now)).total_seconds() // 60)
