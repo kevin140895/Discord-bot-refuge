@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import discord
 import inspect
 import json
 import logging
@@ -227,11 +228,16 @@ class APIMeter:
         self.logger.log(level, message)
         if notify and self.bot and config.BOT_ALERTS_CHANNEL_ID:
             channel = self.bot.get_channel(config.BOT_ALERTS_CHANNEL_ID)
-            if channel is not None:
+            if isinstance(channel, (discord.TextChannel, discord.Thread)):
                 try:
                     await channel.send(f"⚠️ {message}")
                 except Exception:
                     self.logger.exception("failed to send alert message")
+            else:
+                self.logger.warning(
+                    "Alerts channel %s missing or not messageable",
+                    config.BOT_ALERTS_CHANNEL_ID,
+                )
 
     # ------------------------------------------------------------------
     async def start(self, bot: Any) -> None:
