@@ -125,6 +125,23 @@ class XPCog(commands.Cog):
             1, 60.0, commands.BucketType.user
         )
 
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        now = datetime.now(timezone.utc)
+        active: set[str] = set()
+        for guild in self.bot.guilds:
+            for channel in guild.voice_channels:
+                for member in channel.members:
+                    if member.bot:
+                        continue
+                    uid = str(member.id)
+                    active.add(uid)
+                    voice_times.setdefault(uid, now)
+        for uid in list(voice_times.keys()):
+            if uid not in active:
+                voice_times.pop(uid, None)
+        await schedule_checkpoint(save_voice_times_to_disk)
+
     def cog_unload(self) -> None:
         self.auto_backup_xp.cancel()
 
