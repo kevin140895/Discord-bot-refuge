@@ -291,9 +291,7 @@ class RouletteCog(commands.Cog):
             await self._ensure_poster_message()
         except Exception as err:
             logging.warning("[Roulette] Init failed: %s", err)
-        self.boundary_watch_loop.start()
-        self.roulette_poster_watchdog.start()
-        self.roles_cleanup_loop.start()
+        self.maintenance_loop.start()
 
     async def _post_state_message(self, opened: bool):
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
@@ -389,7 +387,8 @@ class RouletteCog(commands.Cog):
         await self._post_state_message(opened)
 
     @tasks.loop(minutes=ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES)
-    async def boundary_watch_loop(self):
+    async def maintenance_loop(self):
+        # Vérification des horaires d'ouverture
         try:
             enabled_now = is_open_now(PARIS_TZ, 10, 22)
             if (
@@ -401,32 +400,29 @@ class RouletteCog(commands.Cog):
                 await self._post_state_message(enabled_now)
                 self._last_announced_state = enabled_now
         except Exception as e:
-            logging.error("[Roulette] boundary_watch_loop erreur: %s", e)
+            logging.error("[Roulette] maintenance_loop boundary erreur: %s", e)
 
-    @tasks.loop(minutes=5.0)
-    async def roulette_poster_watchdog(self):
+        # Surveillance du message de la roulette
         try:
             poster = self.store.get_poster()
             if not poster:
                 await self._replace_poster_message()
-                return
-            ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
-            if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-                await self._replace_poster_message()
-                return
-            try:
-                await ch.fetch_message(int(poster.get("message_id", 0)))
-            except discord.NotFound:
-                await self._replace_poster_message()
+            else:
+                ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
+                if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+                    await self._replace_poster_message()
+                else:
+                    try:
+                        await ch.fetch_message(int(poster.get("message_id", 0)))
+                    except discord.NotFound:
+                        await self._replace_poster_message()
         except Exception as e:
-            logging.error(f"[Roulette] roulette_poster_watchdog erreur: {e}")
+            logging.error(f"[Roulette] maintenance_loop poster erreur: {e}")
 
-    @tasks.loop(minutes=5.0)
-    async def roles_cleanup_loop(self):
+        # Nettoyage des rôles temporaires
         try:
             assignments = self.store.get_all_role_assignments()
             now = datetime.now(self.tz)
-            # Iterate over a copy to avoid RuntimeError: dictionary changed size during iteration
             for uid, data in list(assignments.items()):
                 try:
                     exp = datetime.fromisoformat(data.get("expires_at", "")).astimezone(self.tz)
@@ -442,10 +438,14 @@ class RouletteCog(commands.Cog):
                             try:
                                 await member.remove_roles(role, reason="Roulette rôle expiré")
                             except Exception as e:
-                                logging.error("[Roulette] roles_cleanup_loop remove_roles erreur: %s", e)
+                                logging.error("[Roulette] maintenance_loop remove_roles erreur: %s", e)
                     self.store.clear_role_assignment(uid)
         except Exception as e:
-            logging.error(f"[Roulette] roles_cleanup_loop erreur: {e}")
+            logging.error(f"[Roulette] maintenance_loop roles erreur: {e}")
+
+    @maintenance_loop.before_loop
+    async def before_maintenance_loop(self):
+        await self.bot.wait_until_ready()
 
     # ── Slash command admin ──
     group = app_commands.Group(
@@ -472,9 +472,7 @@ class RouletteCog(commands.Cog):
         self.bot.loop.create_task(self._init_after_ready())
 
     async def cog_unload(self):
-        self.boundary_watch_loop.cancel()
-        self.roulette_poster_watchdog.cancel()
-        self.roles_cleanup_loop.cancel()
+        self.maintenance_loop.cancel()
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(RouletteCog(bot))
