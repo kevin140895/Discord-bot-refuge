@@ -13,7 +13,7 @@ from config import (
     ROCK_RADIO_STREAM_URL,
 )
 from utils.rename_manager import rename_manager
-from utils.audio import FFMPEG_BEFORE, FFMPEG_OPTIONS
+from utils.voice import ensure_voice, play_stream
 
 
 class RadioCog(commands.Cog):
@@ -32,49 +32,8 @@ class RadioCog(commands.Cog):
         if not self.stream_url:
             logging.warning("RADIO_STREAM_URL non défini")
             return
-        channel = self.bot.get_channel(self.vc_id)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(self.vc_id)
-            except discord.HTTPException:
-                channel = None
-        if not isinstance(channel, discord.VoiceChannel):
-            logging.warning("Salon radio %s introuvable", self.vc_id)
-            return
-        if self.voice is None or not self.voice.is_connected():
-            try:
-                self.voice = await channel.connect(reconnect=True)
-            except discord.Forbidden:
-                logging.warning(
-                    "Permissions insuffisantes pour se connecter au salon radio %s",
-                    self.vc_id,
-                )
-                return
-            except discord.NotFound:
-                logging.warning(
-                    "Salon radio %s introuvable lors de la connexion",
-                    self.vc_id,
-                )
-                return
-            except discord.HTTPException as e:
-                logging.error(
-                    "Erreur HTTP lors de la connexion au salon radio: %s",
-                    e,
-                )
-                return
-            except Exception as e:
-                logging.exception(
-                    "Connexion au salon radio échouée: %s",
-                    e,
-                )
-                return
-        if self.voice and not self.voice.is_playing():
-            source = discord.FFmpegPCMAudio(
-                self.stream_url,
-                before_options=FFMPEG_BEFORE,
-                options=FFMPEG_OPTIONS,
-            )
-            self.voice.play(source, after=self._after_play)
+        self.voice = await ensure_voice(self.bot, self.vc_id, self.voice)
+        play_stream(self.voice, self.stream_url, after=self._after_play)
 
     def _after_play(self, error: Optional[Exception]) -> None:
         if error:

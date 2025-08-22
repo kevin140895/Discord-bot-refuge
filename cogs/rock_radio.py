@@ -6,7 +6,7 @@ import discord
 from discord.ext import commands
 
 from config import ROCK_RADIO_STREAM_URL, ROCK_RADIO_VC_ID
-from utils.audio import FFMPEG_BEFORE, FFMPEG_OPTIONS
+from utils.voice import ensure_voice, play_stream
 
 
 class RockRadioCog(commands.Cog):
@@ -27,58 +27,8 @@ class RockRadioCog(commands.Cog):
         if not self.stream_url:
             logging.warning("ROCK_RADIO_STREAM_URL non défini")
             return
-        channel = self.bot.get_channel(self.vc_id)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(self.vc_id)
-            except discord.HTTPException:
-                channel = None
-        if not isinstance(channel, discord.VoiceChannel):
-            logging.warning("Salon rock radio %s introuvable", self.vc_id)
-            return
-        needs_connection = self.voice is None or not self.voice.is_connected()
-        needs_move = (
-            self.voice is not None
-            and self.voice.is_connected()
-            and getattr(self.voice.channel, "id", None) != self.vc_id
-        )
-        if needs_connection or needs_move:
-            try:
-                if needs_move:
-                    await self.voice.move_to(channel)
-                else:
-                    self.voice = await channel.connect(reconnect=True)
-            except discord.Forbidden:
-                logging.warning(
-                    "Permissions insuffisantes pour se connecter au salon rock radio %s",
-                    self.vc_id,
-                )
-                return
-            except discord.NotFound:
-                logging.warning(
-                    "Salon rock radio %s introuvable lors de la connexion",
-                    self.vc_id,
-                )
-                return
-            except discord.HTTPException as e:
-                logging.error(
-                    "Erreur HTTP lors de la connexion au salon rock radio: %s",
-                    e,
-                )
-                return
-            except Exception as e:
-                logging.exception(
-                    "Connexion au salon rock radio échouée: %s",
-                    e,
-                )
-                return
-        if self.voice and not self.voice.is_playing():
-            source = discord.FFmpegPCMAudio(
-                self.stream_url,
-                before_options=FFMPEG_BEFORE,
-                options=FFMPEG_OPTIONS,
-            )
-            self.voice.play(source, after=self._after_play)
+        self.voice = await ensure_voice(self.bot, self.vc_id, self.voice)
+        play_stream(self.voice, self.stream_url, after=self._after_play)
 
     def _after_play(self, error: Optional[Exception]) -> None:
         if error:
