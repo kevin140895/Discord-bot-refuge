@@ -107,6 +107,10 @@ ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
 DATA_DIR: str = _resolve_data_dir()
 """Répertoire de stockage persistant."""
 
+# ── Jeux organisés ────────────────────────────────────────────
+GAMES_DATA_DIR: str = os.getenv("GAMES_DATA_DIR", "/app/data/games")
+"""Répertoire de persistance des événements de jeu."""
+
 CHANNEL_EDIT_MIN_INTERVAL_SECONDS: int = int(
     os.getenv("CHANNEL_EDIT_MIN_INTERVAL_SECONDS", "180")
 )

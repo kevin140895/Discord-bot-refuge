@@ -73,6 +73,7 @@ class RefugeBot(commands.Bot):
             "cogs.daily_summary_poster",
             "cogs.daily_awards",
             "cogs.api_stats",
+            "cogs.game_events",
         ]
         async def _load(ext: str) -> None:
             try:
