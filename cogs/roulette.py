@@ -37,6 +37,109 @@ class RouletteView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
+    async def _single_spin(
+        self,
+        interaction: discord.Interaction,
+        cog: "RouletteCog",
+        free: bool = False,
+    ) -> None:
+        gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
+        try:
+            old_lvl, new_lvl, total_xp = await award_xp(
+                interaction.user.id,
+                gain,
+            )
+        except Exception as e:
+            logging.exception("[Roulette] award_xp a échoué: %s", e)
+            await interaction.followup.send(
+                "❌ Erreur interne (XP). Réessaie plus tard.",
+                ephemeral=True,
+            )
+            return
+
+        uid = str(interaction.user.id)
+        role_given = False
+        expires_at_txt = None
+        if gain == 500 and ROLE_ID and interaction.guild:
+            guild = interaction.guild
+            role = guild.get_role(ROLE_ID)
+            me = guild.me or guild.get_member(cog.bot.user.id)  # type: ignore
+            if role and me and me.guild_permissions.manage_roles:
+                try:
+                    if role < me.top_role:
+                        await interaction.user.add_roles(
+                            role,
+                            reason="Roulette (gagnant 500 XP)",
+                        )
+                        role_given = True
+                        expires_at = (
+                            datetime.now(cog.tz) + timedelta(hours=24)
+                        )
+                        expires_at_txt = _fmt(expires_at)
+                        cog.store.upsert_role_assignment(
+                            user_id=uid,
+                            guild_id=str(guild.id),
+                            role_id=str(role.id),
+                            expires_at=expires_at.isoformat(),
+                        )
+                except Exception as e:
+                    logging.error("[Roulette] add_roles échec: %s", e)
+        if not free:
+            cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
+
+        msg = f"🎰 Résultat : **{gain} XP**."
+        if gain == 0:
+            msg += "\n😅 Pas de chance cette fois…"
+        elif gain == 5:
+            msg += "\n🔹 Un petit bonus, c'est toujours ça !"
+        elif gain == 50:
+            msg += "\n🔸 Beau tirage !"
+        else:
+            msg += "\n💎 **Jackpot !**"
+            if role_given and expires_at_txt:
+                msg += (
+                    "\n🎖️ Tu reçois le rôle "
+                    f"**{WINNER_ROLE_NAME}** pendant **24h** "
+                    f"(jusqu’au **{expires_at_txt}**)."
+                )
+
+            ch = cog.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+            if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                try:
+                    embed = discord.Embed(
+                        title="🎉 Jackpot !",
+                        description=(
+                            f"{interaction.user.mention} a gagné **500 XP** à la roulette !"
+                        ),
+                        color=0xFFD700,
+                    )
+                    embed.set_image(url=WIN_GIF_URL)
+                    await ch.send(embed=embed)
+                except Exception as e:
+                    logging.error("[Roulette] Échec annonce gagnant: %s", e)
+
+        try:
+            announce = getattr(cog.bot, "announce_level_up", None)
+            if announce and new_lvl > old_lvl:
+                await announce(
+                    interaction.guild,
+                    interaction.user,
+                    old_lvl,
+                    new_lvl,
+                    total_xp,
+                )
+        except Exception as e:
+            logging.error("[Roulette] announce_level_up échouée: %s", e)
+
+        spin_embed = discord.Embed(title="🎰 La roulette tourne…")
+        spin_embed.set_image(url=SPIN_GIF_URL)
+        spin_msg = await interaction.followup.send(
+            embed=spin_embed,
+            ephemeral=True,
+        )
+        await asyncio.sleep(5)
+        await spin_msg.edit(content=msg, embed=None)
+
     @discord.ui.button(
         label="🎰 Roulette",
         style=discord.ButtonStyle.success,
@@ -86,99 +189,13 @@ class RouletteView(discord.ui.View):
                 ephemeral=True
             )
 
-        gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
-        try:
-            old_lvl, new_lvl, total_xp = await award_xp(
-                interaction.user.id,
-                gain,
-            )
-        except Exception as e:
-            logging.exception("[Roulette] award_xp a échoué: %s", e)
-            return await interaction.response.send_message(
-                "❌ Erreur interne (XP). Réessaie plus tard.",
-                ephemeral=True,
-            )
-
-        role_given = False
-        expires_at_txt = None
-        if gain == 500 and ROLE_ID and interaction.guild:
-            guild = interaction.guild
-            role = guild.get_role(ROLE_ID)
-            me = guild.me or guild.get_member(cog.bot.user.id)  # type: ignore
-            if role and me and me.guild_permissions.manage_roles:
-                try:
-                    if role < me.top_role:
-                        await interaction.user.add_roles(
-                            role,
-                            reason="Roulette (gagnant 500 XP)",
-                        )
-                        role_given = True
-                        expires_at = (
-                            datetime.now(cog.tz) + timedelta(hours=24)
-                        )
-                        expires_at_txt = _fmt(expires_at)
-                        cog.store.upsert_role_assignment(
-                            user_id=uid,
-                            guild_id=str(guild.id),
-                            role_id=str(role.id),
-                            expires_at=expires_at.isoformat()
-                        )
-                except Exception as e:
-                    logging.error("[Roulette] add_roles échec: %s", e)
-        cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
-        msg = f"🎰 Résultat : **{gain} XP**."
-        if gain == 0:
-            msg += "\n😅 Pas de chance cette fois…"
-        elif gain == 5:
-            msg += "\n🔹 Un petit bonus, c'est toujours ça !"
-        elif gain == 50:
-            msg += "\n🔸 Beau tirage !"
-        else:
-            msg += "\n💎 **Jackpot !**"
-            if role_given and expires_at_txt:
-                msg += (
-                    "\n🎖️ Tu reçois le rôle "
-                    f"**{WINNER_ROLE_NAME}** pendant **24h** "
-                    f"(jusqu’au **{expires_at_txt}**)."
-                )
-
-            ch = cog.bot.get_channel(ANNOUNCE_CHANNEL_ID)
-            if isinstance(ch, (discord.TextChannel, discord.Thread)):
-                try:
-                    embed = discord.Embed(
-                        title="🎉 Jackpot !",
-                        description=(
-                            f"{interaction.user.mention} a gagné **500 XP** à la roulette !"
-                        ),
-                        color=0xFFD700,
-                    )
-                    embed.set_image(url=WIN_GIF_URL)
-                    await ch.send(embed=embed)
-                except Exception as e:
-                    logging.error("[Roulette] Échec annonce gagnant: %s", e)
-
-        try:
-            announce = getattr(cog.bot, "announce_level_up", None)
-            if announce and new_lvl > old_lvl:
-                await announce(
-                    interaction.guild,
-                    interaction.user,
-                    old_lvl,
-                    new_lvl,
-                    total_xp,
-                )
-        except Exception as e:
-            logging.error("[Roulette] announce_level_up échouée: %s", e)
-
         await interaction.response.defer(ephemeral=True)
-        spin_embed = discord.Embed(title="🎰 La roulette tourne…")
-        spin_embed.set_image(url=SPIN_GIF_URL)
-        spin_msg = await interaction.followup.send(
-            embed=spin_embed,
+        await self._single_spin(interaction, cog)
+        await interaction.followup.send(
+            "Olà, tu dis rien à Leonzo mais en ce moment je m’en fou royalement, je refais jouer. Pas besoin de dire wallah regarde 🤙👇",
             ephemeral=True,
         )
-        await asyncio.sleep(5)
-        await spin_msg.edit(content=msg, embed=None)
+        await self._single_spin(interaction, cog, free=True)
 
 
 class RouletteCog(commands.Cog):
