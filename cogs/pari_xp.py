@@ -238,6 +238,11 @@ class RouletteRefugeCog(commands.Cog):
         return f"x{outcome}".replace(".", "_")
 
     def _result_message(self, amount: int, net: int, outcome: Any) -> str:
+        """Message to display after a spin.
+
+        Double XP and ticket outcomes are placeholders; they have no gameplay
+        effect and are only communicated to the user.
+        """
         if outcome == "jackpot":
             return "🎉 Super Jackpot ! Tu gagnes 1000 XP !"
         if outcome == "double":
