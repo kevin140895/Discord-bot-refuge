@@ -43,6 +43,22 @@ ROLE_PC = 123456789012345678  # ID du rôle PC de votre serveur
 `bot.py` et `view.py` importent ces constantes afin d'éviter toute valeur
 en dur dans le code.
 
+## Variables d'environnement
+
+Un fichier d'exemple [`.env.example`](./.env.example) regroupe les variables
+essentielles pour exécuter le bot :
+
+- `DISCORD_TOKEN` : jeton du bot fourni par le [Portail développeur Discord](https://discord.com/developers/applications).
+- `GUILD_ID` : identifiant du serveur Discord principal.
+- `OWNER_ID` : identifiant du propriétaire du bot.
+- `TZ` : fuseau horaire du processus (défaut : `Europe/Paris`).
+- `DATA_DIR` : répertoire de stockage persistant pour les données.
+- `CHANNEL_EDIT_MIN_INTERVAL_SECONDS` : intervalle minimal entre deux éditions du même salon.
+- `CHANNEL_EDIT_DEBOUNCE_SECONDS` : délai d'agrégation avant l'édition d'un salon.
+- `VOICE_CP_DEBOUNCE_SECONDS` : délai avant la sauvegarde des sessions vocales.
+
+Adaptez ces valeurs selon votre déploiement avant de lancer le bot.
+
 ## Données persistantes
 
 Certaines fonctionnalités (XP, roulette, salons temporaires…) écrivent des
