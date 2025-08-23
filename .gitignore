@@ -4,8 +4,11 @@ __pycache__/
 venv/
 
 # Local data and JSON files
-data/
+data/*
 *.json
+# Allow committing Roulette Refuge data
+!data/pari_xp/
+!data/pari_xp/*.json
 
 # Secret files
 /app/data/*
