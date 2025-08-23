@@ -285,7 +285,7 @@ class RouletteRefugeCog(commands.Cog):
             embed.add_field(name="Plus gros gain", value=f"<@{biggest[0]}> {biggest[1]} XP", inline=False)
         embed.add_field(name="Total misé", value=f"{total_bet} XP")
         embed.add_field(name="Total redistribué", value=f"{total_net} XP")
-        await channel send(embed=embed)
+        await channel.send(embed=embed)
 
     # -------------------------- Tasks --------------------------
     @tasks.loop(minutes=1)
