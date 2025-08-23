@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import ROULETTE_CHANNEL_ID as PARIS_XP_CHANNEL_ID, DATA_DIR
+from config import PARIS_XP_CHANNEL_ID, DATA_DIR
 from storage.roulette_xp_store import RouletteXPStore
 from .xp import award_xp
 
