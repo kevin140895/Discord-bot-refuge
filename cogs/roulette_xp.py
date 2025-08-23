@@ -39,7 +39,7 @@ class RouletteXPCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.store = RouletteXPStore(DATA_DIR)
+        self.store = RouletteXPStore(DATA_DIR, "roulette_xp")
         self.round: RouletteRound | None = None
 
     @commands.Cog.listener()

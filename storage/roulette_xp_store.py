@@ -9,8 +9,8 @@ from utils.persist import atomic_write_json
 
 
 class RouletteXPStore:
-    def __init__(self, data_dir: str) -> None:
-        self.data_file = Path(data_dir) / "roulette_xp.json"
+    def __init__(self, data_dir: str, filename: str = "roulette_xp") -> None:
+        self.data_file = Path(data_dir) / f"{filename}.json"
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         self._load()
 
