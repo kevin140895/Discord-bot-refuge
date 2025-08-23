@@ -11,7 +11,7 @@ import io
 import logging
 import os
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import discord
 from discord import app_commands
@@ -94,8 +94,30 @@ async def xp_flush_cache_to_disk() -> None:
     logging.info("💾 XP flush vers disque (%d utilisateurs).", len(xp_store.data))
 
 async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
-    """Ajoute ``amount`` d'XP à ``user_id`` via le :class:`XPStore`."""
+    """Ajoute ``amount`` d'XP à ``user_id`` via le :class:`XPStore`.
+
+    Si l'utilisateur bénéficie d'un bonus temporaire « Double XP »,
+    le gain est doublé et le bonus est consommé automatiquement à
+    l'expiration.
+    """
+    now = datetime.now(timezone.utc)
+    boost_exp = XP_BOOSTS.get(str(user_id))
+    if boost_exp:
+        if boost_exp > now:
+            amount *= 2
+        else:
+            XP_BOOSTS.pop(str(user_id), None)
     return await xp_store.add_xp(user_id, amount)
+
+
+XP_BOOSTS: dict[str, datetime] = {}
+
+
+def add_xp_boost(user_id: int, duration_minutes: int) -> None:
+    """Active un bonus Double XP pour ``user_id`` pendant ``duration_minutes``."""
+    XP_BOOSTS[str(user_id)] = datetime.now(timezone.utc) + timedelta(
+        minutes=duration_minutes
+    )
 
 async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed: int):
     def _draw() -> io.BytesIO:
