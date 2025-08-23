@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from utils.timewin import is_open_now, next_boundary_dt
 from utils.metrics import measure
 from storage.roulette_store import RouletteStore
-from .xp import award_xp
+from .xp import award_xp, add_xp_boost
 from config import (
     ANNOUNCE_CHANNEL_ID,
     ROLE_NOTIFICATION as NOTIF_ROLE_ID,
@@ -24,8 +24,20 @@ from config import (
 
 PARIS_TZ = "Europe/Paris"
 WINNER_ROLE_NAME = "🏆 Gagnant Roulette"
-REWARDS = [0, 5, 50, 500]
-WEIGHTS = [40, 40, 18, 2]
+# Répartition des gains (total 1000)
+REWARDS = [
+    0,
+    5,
+    20,
+    50,
+    100,
+    500,
+    1000,
+    "ticket",
+    "double_xp",
+    "shared_xp",
+]
+WEIGHTS = [300, 250, 150, 100, 50, 10, 5, 50, 30, 55]
 SPIN_GIF_URL = "https://media.tenor.com/ZzOaGh2sg2AAAAAi/roulette-spin.gif"
 WIN_GIF_URL = "https://media.tenor.com/XwI-iYdkfVIAAAAi/lottery-winner.gif"
 
@@ -44,79 +56,136 @@ class RouletteView(discord.ui.View):
         free: bool = False,
     ) -> None:
         gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
-        try:
-            old_lvl, new_lvl, total_xp = await award_xp(
-                interaction.user.id,
-                gain,
-            )
-        except Exception as e:
-            logging.exception("[Roulette] award_xp a échoué: %s", e)
-            await interaction.followup.send(
-                "❌ Erreur interne (XP). Réessaie plus tard.",
-                ephemeral=True,
-            )
-            return
-
         uid = str(interaction.user.id)
         role_given = False
         expires_at_txt = None
-        if gain == 500 and ROLE_ID and interaction.guild:
-            guild = interaction.guild
-            role = guild.get_role(ROLE_ID)
-            me = guild.me or guild.get_member(cog.bot.user.id)  # type: ignore
-            if role and me and me.guild_permissions.manage_roles:
-                try:
-                    if role < me.top_role:
-                        await interaction.user.add_roles(
-                            role,
-                            reason="Roulette (gagnant 500 XP)",
-                        )
-                        role_given = True
-                        expires_at = (
-                            datetime.now(cog.tz) + timedelta(hours=24)
-                        )
-                        expires_at_txt = _fmt(expires_at)
-                        cog.store.upsert_role_assignment(
-                            user_id=uid,
-                            guild_id=str(guild.id),
-                            role_id=str(role.id),
-                            expires_at=expires_at.isoformat(),
-                        )
-                except Exception as e:
-                    logging.error("[Roulette] add_roles échec: %s", e)
-        if not free:
-            cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
+        old_lvl = new_lvl = total_xp = 0
 
-        msg = f"🎰 Résultat : **{gain} XP**."
-        if gain == 0:
-            msg += "\n😅 Pas de chance cette fois…"
-        elif gain == 5:
-            msg += "\n🔹 Un petit bonus, c'est toujours ça !"
-        elif gain == 50:
-            msg += "\n🔸 Beau tirage !"
-        else:
-            msg += "\n💎 **Jackpot !**"
-            if role_given and expires_at_txt:
-                msg += (
-                    "\n🎖️ Tu reçois le rôle "
-                    f"**{WINNER_ROLE_NAME}** pendant **24h** "
-                    f"(jusqu’au **{expires_at_txt}**)."
+        if gain == "ticket":
+            if not free:
+                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
+            msg = "🎟️ Ticket gratuit ! Tu peux rejouer immédiatement."
+        elif gain == "double_xp":
+            if not free:
+                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
+            add_xp_boost(interaction.user.id, 60)
+            msg = "⚡ Double XP activé pour toi pendant 1h !"
+        elif gain == "shared_xp":
+            if not free:
+                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
+            other = None
+            if interaction.guild:
+                pool = [
+                    m
+                    for vc in interaction.guild.voice_channels
+                    for m in vc.members
+                    if not m.bot and m.id != interaction.user.id
+                ]
+                if pool:
+                    other = random.choice(pool)
+            try:
+                old_lvl, new_lvl, total_xp = await award_xp(
+                    interaction.user.id, 50
                 )
-
-            ch = cog.bot.get_channel(ANNOUNCE_CHANNEL_ID)
-            if isinstance(ch, (discord.TextChannel, discord.Thread)):
+            except Exception as e:
+                logging.exception("[Roulette] award_xp a échoué: %s", e)
+                await interaction.followup.send(
+                    "❌ Erreur interne (XP). Réessaie plus tard.",
+                    ephemeral=True,
+                )
+                return
+            if other:
                 try:
-                    embed = discord.Embed(
-                        title="🎉 Jackpot !",
-                        description=(
-                            f"{interaction.user.mention} a gagné **500 XP** à la roulette !"
-                        ),
-                        color=0xFFD700,
-                    )
-                    embed.set_image(url=WIN_GIF_URL)
-                    await ch.send(embed=embed)
+                    await award_xp(other.id, 50)
                 except Exception as e:
-                    logging.error("[Roulette] Échec annonce gagnant: %s", e)
+                    logging.exception("[Roulette] award_xp (shared) échec: %s", e)
+            if other:
+                msg = (
+                    f"🤝 XP partagé ! Toi et {other.mention} gagnez chacun 50 XP."
+                )
+            else:
+                msg = (
+                    "🤝 XP partagé… mais personne en vocal. Tu gagnes 50 XP !"
+                )
+        else:
+            # Gain d'XP classique
+            try:
+                old_lvl, new_lvl, total_xp = await award_xp(
+                    interaction.user.id, gain
+                )
+            except Exception as e:
+                logging.exception("[Roulette] award_xp a échoué: %s", e)
+                await interaction.followup.send(
+                    "❌ Erreur interne (XP). Réessaie plus tard.",
+                    ephemeral=True,
+                )
+                return
+
+            if gain == 1000 and ROLE_ID and interaction.guild:
+                guild = interaction.guild
+                role = guild.get_role(ROLE_ID)
+                me = guild.me or guild.get_member(cog.bot.user.id)  # type: ignore
+                if role and me and me.guild_permissions.manage_roles:
+                    try:
+                        if role < me.top_role:
+                            await interaction.user.add_roles(
+                                role, reason="Roulette (gagnant 1000 XP)"
+                            )
+                            role_given = True
+                            expires_at = (
+                                datetime.now(cog.tz) + timedelta(hours=24)
+                            )
+                            expires_at_txt = _fmt(expires_at)
+                            cog.store.upsert_role_assignment(
+                                user_id=uid,
+                                guild_id=str(guild.id),
+                                role_id=str(role.id),
+                                expires_at=expires_at.isoformat(),
+                            )
+                    except Exception as e:
+                        logging.error("[Roulette] add_roles échec: %s", e)
+            if not free:
+                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
+
+            msg = f"🎰 Résultat : **{gain} XP**."
+            if gain == 0:
+                msg += "\n😅 Pas de chance cette fois…"
+            elif gain == 5:
+                msg += "\n🔹 Un petit bonus, c'est toujours ça !"
+            elif gain == 20:
+                msg += "\n🎯 Pas mal !"
+            elif gain == 50:
+                msg += "\n🔸 Beau tirage !"
+            elif gain == 100:
+                msg += "\n🎉 Super gain !"
+            elif gain == 500:
+                msg += "\n💰 **Jackpot intermédiaire !**"
+            else:  # 1000
+                msg += "\n💎 **Super Jackpot !**"
+                if role_given and expires_at_txt:
+                    msg += (
+                        "\n🎖️ Tu reçois le rôle "
+                        f"**{WINNER_ROLE_NAME}** pendant **24h** "
+                        f"(jusqu’au **{expires_at_txt}**)."
+                    )
+
+            if gain >= 500:
+                ch = cog.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+                if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                    try:
+                        embed = discord.Embed(
+                            title="🎉 Jackpot !",
+                            description=(
+                                f"{interaction.user.mention} a gagné **{gain} XP** à la roulette !"
+                            ),
+                            color=0xFFD700,
+                        )
+                        embed.set_image(url=WIN_GIF_URL)
+                        await ch.send(embed=embed)
+                    except Exception as e:
+                        logging.error(
+                            "[Roulette] Échec annonce gagnant: %s", e
+                        )
 
         try:
             announce = getattr(cog.bot, "announce_level_up", None)
@@ -139,6 +208,9 @@ class RouletteView(discord.ui.View):
         )
         await asyncio.sleep(5)
         await spin_msg.edit(content=msg, embed=None)
+
+        if gain == "ticket":
+            await self._single_spin(interaction, cog, free=True)
 
     @discord.ui.button(
         label="🎰 Roulette",
@@ -191,11 +263,6 @@ class RouletteView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
         await self._single_spin(interaction, cog)
-        await interaction.followup.send(
-            "Olà, tu dis rien à Leonzo mais en ce moment je m’en fou royalement, je refais jouer. Pas besoin de dire wallah regarde 🤙👇",
-            ephemeral=True,
-        )
-        await self._single_spin(interaction, cog, free=True)
 
 
 class RouletteCog(commands.Cog):
@@ -217,12 +284,13 @@ class RouletteCog(commands.Cog):
             title="🎰 Roulette",
             description=(
                 f"{desc_state}\n\n"
-                "Clique pour tenter ta chance : 0 / 5 / 50 / **500** XP.\n"
+                "0 / 5 / 20 / 50 / 100 / 500 / **1000** XP\n"
+                "🎟️ Ticket gratuit • ⚡ Double XP (1h) • 🤝 XP partagé\n"
                 f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant "
-                "**24h** si tu gagnes **500 XP**.\n"
+                "**24h** si tu gagnes le **Super Jackpot**.\n"
                 "🗓️ **Une seule tentative par jour.**"
             ),
-            color=color
+            color=color,
         )
 
     async def _delete_old_poster_message(self):
@@ -349,20 +417,36 @@ class RouletteCog(commands.Cog):
             allowed = None
             if opened:
                 content = (
-                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant "
-                    "— vous pouvez jouer jusqu’à **22:00**."
+                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant — vous pouvez jouer jusqu’à **22:00**."
                 )
                 allowed = discord.AllowedMentions(roles=True)
-            embed = discord.Embed(
-                title=f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}",
-                description=(
-                    "✅ La roulette est **ouverte** de **10:00 à 22:00** "
-                    "(Europe/Paris)." if opened else
-                    "⛔ La roulette est **fermée**. "
-                    "Rendez-vous **demain à 10:00** (Europe/Paris) !"
-                ),
-                color=0x2ECC71 if opened else 0xED4245,
-            )
+            if opened:
+                title = "🎰 Bienvenue à la Roulette du Refuge ! 🎰"
+                description = (
+                    "Place tes mises et laisse tourner la roue... qui sait où elle s’arrêtera ?\n\n"
+                    "💎 Super Jackpot → +1000 XP (ultra rare – 0,1% de chance !)\n"
+                    "⚡ Double XP (1h) → booste tes gains pendant 1h chrono !\n"
+                    "🎟️ Ticket gratuit → un tirage offert par la maison.\n"
+                    "🤝 XP partagé → toi + un joueur aléatoire en vocal gagnez chacun +50 XP.\n\n"
+                    "🎯 Gains classiques :\n"
+                    "0️⃣ Perdu… la maison gagne 💀\n"
+                    "5️⃣ Petit lot – 5 XP 🪙\n"
+                    "2️⃣0️⃣ Bonus – 20 XP 🎯\n"
+                    "5️⃣0️⃣ Gain sympa – 50 XP 💵\n"
+                    "1️⃣0️⃣0️⃣ Belle prise – 100 XP 💸\n"
+                    "5️⃣0️⃣0️⃣ JACKPOT intermédiaire – 500 XP 💰\n\n"
+                    "🏆 Gagnant Roulette est attribué pendant 24h si tu gagnes le **Super Jackpot**\n\n"
+                    "Bonne chance, et que la roue tourne en ta faveur !"
+                )
+                color = 0x2ECC71
+            else:
+                title = "🎰 Casino du Refuge fermé ! 🎰"
+                description = (
+                    "💡 Les néons s’éteignent… ⛔\n"
+                    "À demain pour de nouvelles mises et, peut-être, le gros lot 💰."
+                )
+                color = 0xED4245
+            embed = discord.Embed(title=title, description=description, color=color)
             msg = await ch.send(
                 content=content,
                 embed=embed,
