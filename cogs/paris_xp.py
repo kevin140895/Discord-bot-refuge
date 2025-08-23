@@ -7,8 +7,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import ROULETTE_CHANNEL_ID as PARIS_XP_CHANNEL_ID, DATA_DIR
-from storage.roulette_xp_store import RouletteXPStore
+from config import PARIS_XP_CHANNEL_ID, DATA_DIR
+from storage.paris_xp_store import ParisXPStore
 from .xp import award_xp
 
 
@@ -39,7 +39,7 @@ class ParisXPCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.store = RouletteXPStore(DATA_DIR)
+        self.store = ParisXPStore(DATA_DIR)
         self.round: ParisXPRound | None = None
 
     @commands.Cog.listener()
@@ -78,11 +78,6 @@ class ParisXPCog(commands.Cog):
         stats = self.store.get_month()
         month = datetime.now().strftime("%B %Y")
         players = stats["players"]
-        winners = sorted(
-            ((uid, p["net"]) for uid, p in players.items() if p["net"] > 0),
-            key=lambda x: x[1],
-            reverse=True,
-        )[:3]
         losers = sorted(
             ((uid, p["net"]) for uid, p in players.items() if p["net"] < 0),
             key=lambda x: x[1],
@@ -93,18 +88,12 @@ class ParisXPCog(commands.Cog):
             name = member.display_name if member else f"<@{uid}>"
             return f"{name} — {amt:+d} XP"
 
-        lines = [f"🎰 Classement du mois – {month}", "", "💎 TOP GAGNANTS"]
-        if winners:
+        lines = [f"💸 Classement des pertes XP – {month}", ""]
+        if losers:
             medals = ["🥇", "🥈", "🥉"]
-            for i, (uid, amt) in enumerate(winners):
+            for i, (uid, amt) in enumerate(losers):
                 prefix = medals[i] if i < len(medals) else f"{i+1}."
                 lines.append(f"{prefix} {fmt(uid, amt)}")
-        else:
-            lines.append("Aucun gagnant pour le moment.")
-        lines.extend(["", "💸 TOP PERDANTS"])
-        if losers:
-            for i, (uid, amt) in enumerate(losers, start=1):
-                lines.append(f"{i}. {fmt(uid, amt)}")
         else:
             lines.append("Aucun perdant pour le moment.")
 
