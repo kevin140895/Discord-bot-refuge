@@ -1,4 +1,4 @@
-"""Roulette Refuge cog providing an isolated XP betting game."""
+"""Isolated XP betting game for 🤑 Roulette Refuge."""
 from __future__ import annotations
 
 import random
