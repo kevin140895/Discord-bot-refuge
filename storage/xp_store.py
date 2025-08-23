@@ -76,15 +76,17 @@ class XPStore:
         async with self.lock:
             user = self.data.setdefault(uid, {"xp": 0, "level": 0})
             old_level = int(user.get("level", 0))
-            if amount > 0:
-                user["xp"] = int(user.get("xp", 0)) + int(amount)
-                new_level = self._calc_level(int(user["xp"]))
-                if new_level > old_level:
+            if amount != 0:
+                current_xp = int(user.get("xp", 0))
+                new_xp = max(0, current_xp + int(amount))
+                user["xp"] = new_xp
+                new_level = self._calc_level(new_xp)
+                if new_level != old_level:
                     user["level"] = new_level
             else:
                 new_level = old_level
             total_xp = int(user.get("xp", 0))
-        if amount > 0:
+        if amount != 0:
             self._schedule_flush()
         return old_level, new_level, total_xp
 

@@ -94,19 +94,20 @@ async def xp_flush_cache_to_disk() -> None:
     logging.info("💾 XP flush vers disque (%d utilisateurs).", len(xp_store.data))
 
 async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
-    """Ajoute ``amount`` d'XP à ``user_id`` via le :class:`XPStore`.
+    """Modifie l'XP de ``user_id`` via le :class:`XPStore`.
 
-    Si l'utilisateur bénéficie d'un bonus temporaire « Double XP »,
-    le gain est doublé et le bonus est consommé automatiquement à
-    l'expiration.
+    Lorsque ``amount`` est positif et que l'utilisateur bénéficie d'un bonus
+    « Double XP », le gain est doublé automatiquement. Les montants négatifs
+    permettent de retirer de l'XP, sans bonus.
     """
     now = datetime.now(timezone.utc)
-    boost_exp = XP_BOOSTS.get(str(user_id))
-    if boost_exp:
-        if boost_exp > now:
-            amount *= 2
-        else:
-            XP_BOOSTS.pop(str(user_id), None)
+    if amount > 0:
+        boost_exp = XP_BOOSTS.get(str(user_id))
+        if boost_exp:
+            if boost_exp > now:
+                amount *= 2
+            else:
+                XP_BOOSTS.pop(str(user_id), None)
     return await xp_store.add_xp(user_id, amount)
 
 

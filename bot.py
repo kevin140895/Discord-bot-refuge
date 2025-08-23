@@ -62,6 +62,7 @@ class RefugeBot(commands.Bot):
         extensions = [
             "cogs.role_reminder",
             "cogs.roulette",
+            "cogs.roulette_xp",
             "cogs.xp",
             "cogs.voice_double_xp",
             "cogs.first_message",
