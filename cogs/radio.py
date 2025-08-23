@@ -10,6 +10,7 @@ from config import (
     RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
+    RADIO_TEXT_CHANNEL_ID,
     RADIO_VC_ID,
     ROCK_RADIO_STREAM_URL,
 )
@@ -29,13 +30,6 @@ class RadioCog(commands.Cog):
         self._reconnect_task: Optional[asyncio.Task] = None
         self._original_name: Optional[str] = None
         self._previous_stream: Optional[str] = None
-
-        if rename_manager._worker is None:
-            async def _ensure_rename_worker() -> None:
-                await rename_manager.start()
-                logging.info("[radio] rename_manager worker démarré")
-
-            asyncio.create_task(_ensure_rename_worker())
 
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
@@ -75,10 +69,13 @@ class RadioCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        channel = self.bot.get_channel(self.vc_id)
-        if isinstance(channel, discord.VoiceChannel):
-            self._original_name = channel.name
-            await self._ensure_radio_message(channel)
+        voice_channel = self.bot.get_channel(self.vc_id)
+        if isinstance(voice_channel, discord.VoiceChannel):
+            self._original_name = voice_channel.name
+
+        text_channel = self.bot.get_channel(RADIO_TEXT_CHANNEL_ID)
+        if isinstance(text_channel, discord.abc.Messageable):
+            await self._ensure_radio_message(text_channel)
         await self._connect_and_play()
 
     async def _rename_for_stream(

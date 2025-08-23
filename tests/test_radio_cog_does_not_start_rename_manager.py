@@ -12,7 +12,7 @@ from utils.rename_manager import rename_manager
 
 
 @pytest.mark.asyncio
-async def test_radio_cog_starts_rename_manager(monkeypatch):
+async def test_radio_cog_does_not_start_rename_manager(monkeypatch):
     bot = SimpleNamespace(loop=asyncio.get_event_loop())
     rename_manager._worker = None
     start_mock = AsyncMock()
@@ -21,4 +21,4 @@ async def test_radio_cog_starts_rename_manager(monkeypatch):
     RadioCog(bot)
     await asyncio.sleep(0)
 
-    start_mock.assert_awaited_once()
+    start_mock.assert_not_called()
