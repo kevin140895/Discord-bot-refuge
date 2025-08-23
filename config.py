@@ -2,6 +2,7 @@
 Modifiez les valeurs ci-dessous pour adapter le bot à votre serveur."""
 
 import os
+import time
 
 
 def _resolve_data_dir() -> str:
@@ -18,6 +19,17 @@ def _resolve_data_dir() -> str:
     if os.path.isdir("/app/data"):
         return "/app/data"
     return "/data"
+
+# ── Informations globales ──────────────────────────────────────
+GUILD_ID: int = int(os.getenv("GUILD_ID", "0"))
+
+TZ: str = os.getenv("TZ", "Europe/Paris")
+os.environ["TZ"] = TZ
+try:
+    time.tzset()
+except AttributeError:
+    # ``tzset`` n'existe pas sur toutes les plateformes (ex: Windows)
+    pass
 
 # ── Salons statistiques ───────────────────────────────────────
 STATS_CATEGORY_ID = 1406408038692294676  # Catégorie "📊 Statistiques"

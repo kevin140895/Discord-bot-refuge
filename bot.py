@@ -8,7 +8,6 @@ interaction with the bot.
 
 from __future__ import annotations
 
-import discord
 from discord.ext import commands
 
 from storage.xp_store import xp_store
