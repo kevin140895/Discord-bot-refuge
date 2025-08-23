@@ -173,7 +173,7 @@ class RouletteRefugeCog(commands.Cog):
         self.last_bet[interaction.user.id] = now
         self.daily_counts[interaction.user.id] += 1
 
-        segment = str(outcome)
+        segment = self._segment_name(outcome)
         tx = {
             "user": interaction.user.id,
             "amount": amount,
@@ -181,11 +181,7 @@ class RouletteRefugeCog(commands.Cog):
             "segment": segment,
             "ts": now.isoformat(),
         }
-        if outcome == "double":
-            tx["segment"] = "double_xp_1h"
-            tx["notes"] = "placeholder only"
-        elif outcome == "ticket":
-            tx["segment"] = "ticket_free"
+        if outcome in {"double", "ticket"}:
             tx["notes"] = "placeholder only"
 
         self.transactions.append(tx)
@@ -215,26 +211,28 @@ class RouletteRefugeCog(commands.Cog):
         return -amount
 
     def _draw(self) -> Any:
-        r = random.random()
-        if r < 0.40:
-            return 0
-        if r < 0.58:
-            return 0.5
-        if r < 0.72:
-            return 1
-        if r < 0.86:
-            return 2
-        if r < 0.95:
-            return 5
-        if r < 0.98:
-            return 10
-        if r < 0.983:
-            return "ticket"
-        if r < 0.99:
-            return "double"
-        if r < 0.993:
+        outcomes = [
+            0,
+            0.5,
+            1,
+            2,
+            5,
+            10,
+            "ticket",
+            "double",
+            "jackpot",
+        ]
+        weights = [40, 18, 14, 14, 9, 3, 0.3, 0.7, 0.3]
+        return random.choices(outcomes, weights=weights, k=1)[0]
+
+    def _segment_name(self, outcome: Any) -> str:
+        if outcome == "double":
+            return "double_xp_1h"
+        if outcome == "ticket":
+            return "ticket_free"
+        if outcome == "jackpot":
             return "jackpot"
-        return 0
+        return f"x{outcome}".replace(".", "_")
 
     def _result_message(self, amount: int, net: int, outcome: Any) -> str:
         if outcome == "jackpot":
