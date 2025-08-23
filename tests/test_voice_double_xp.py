@@ -37,12 +37,26 @@ def test_multiplier_application():
 
 @pytest.mark.asyncio
 async def test_persistence_no_redraw(tmp_path, monkeypatch):
-    today = datetime.now(dx.PARIS_TZ).date().isoformat()
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2025, 1, 1, 9, 0, tzinfo=tz)
+
+    monkeypatch.setattr(dx, "datetime", FixedDatetime)
+
+    today = FixedDatetime.now(dx.PARIS_TZ).date().isoformat()
     state_file = tmp_path / "double_voice_xp.json"
     monkeypatch.setattr(dx, "STATE_FILE", str(state_file))
     await dx._write_state({"date": today, "sessions": ["10:00"]})
 
-    bot = SimpleNamespace(loop=asyncio.get_event_loop(), get_channel=lambda cid: None)
+    async def wait():
+        return None
+
+    bot = SimpleNamespace(
+        loop=asyncio.get_event_loop(),
+        get_channel=lambda cid: None,
+        wait_until_ready=wait,
+    )
     with patch.object(dx.tasks.Loop, "start", lambda self, *a, **k: None):
         with patch.object(dx.DoubleVoiceXP, "_run_session", AsyncMock()):
             with patch.object(dx.random, "randint", side_effect=AssertionError("no redraw")):
@@ -107,3 +121,40 @@ async def test_resume_after_restart(tmp_path, monkeypatch):
                 await asyncio.sleep(0.2)
     set_bonus.assert_called_with(True)
     assert end_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_no_duplicate_messages_when_prepared_twice(monkeypatch):
+    """Calling _prepare_today twice should schedule only once."""
+
+    async def wait():
+        return None
+
+    bot = SimpleNamespace(
+        loop=asyncio.get_event_loop(),
+        get_channel=lambda cid: None,
+        wait_until_ready=wait,
+    )
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2025, 1, 1, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(dx, "datetime", FixedDatetime)
+    monkeypatch.setattr(dx, "XP_DOUBLE_VOICE_START_HOUR", 0)
+    monkeypatch.setattr(dx, "XP_DOUBLE_VOICE_END_HOUR", 1)
+    monkeypatch.setattr(dx.random, "randint", lambda a, b: 1)
+    monkeypatch.setattr(dx.random, "sample", lambda seq, k: [1])
+
+    with patch.object(dx, "_write_state", AsyncMock()):
+        with patch.object(dx.DoubleVoiceXP, "_run_session", AsyncMock()) as run_mock:
+            with patch.object(dx.DoubleVoiceXP, "_startup", AsyncMock()):
+                with patch.object(dx.tasks.Loop, "start", lambda self, *a, **k: None):
+                    cog = dx.DoubleVoiceXP(bot)
+                    cog.state = {"date": "", "sessions": []}
+                    await cog._prepare_today(force=True)
+                    await cog._prepare_today(force=True)
+                    await asyncio.sleep(0)
+
+    assert run_mock.await_count == 1

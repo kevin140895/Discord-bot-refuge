@@ -110,6 +110,11 @@ class DoubleVoiceXP(commands.Cog):
     async def _prepare_today(self, force: bool = False) -> None:
         """Lire/initialiser l'état du jour puis planifier ou reprendre les sessions."""
 
+        # Cancel any previously scheduled tasks to avoid duplicates.
+        for task in self._tasks:
+            task.cancel()
+        self._tasks.clear()
+
         today = datetime.now(PARIS_TZ).date()
         state = _read_state()
         if force or state.get("date") != today.isoformat():
