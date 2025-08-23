@@ -1,4 +1,4 @@
-"""Isolated XP betting game for 🤑 Roulette Refuge."""
+"""Roulette Refuge cog providing an isolated XP betting game."""
 from __future__ import annotations
 
 import random
@@ -19,8 +19,6 @@ CONFIG_PATH = DATA_DIR / "config.json"
 STATE_PATH = DATA_DIR / "state.json"
 TX_PATH = DATA_DIR / "transactions.json"
 LEADERBOARD_PATH = DATA_DIR / "leaderboard.json"
-
-
 class BetModal(discord.ui.Modal):
     def __init__(self, cog: "RouletteRefugeCog") -> None:
         super().__init__(title="🤑 Roulette Refuge", timeout=None, custom_id="pari_xp_modal")
@@ -64,8 +62,6 @@ class RouletteRefugeCog(commands.Cog):
         self.daily_counts: Dict[int, int] = defaultdict(int)
         self.current_day = now_paris().date()
         self.open = False
-        self.hub_message: discord.Message | None = None
-        self.leaderboard_message: discord.Message | None = None
         self.scheduler_task.start()
         self.leaderboard_task.start()
 
@@ -176,18 +172,12 @@ class RouletteRefugeCog(commands.Cog):
         await add_xp(interaction.user.id, net)
         self.last_bet[interaction.user.id] = now
         self.daily_counts[interaction.user.id] += 1
-
-        segment = self._segment_name(outcome)
         tx = {
             "user": interaction.user.id,
             "amount": amount,
             "net": net,
-            "segment": segment,
             "ts": now.isoformat(),
         }
-        if outcome in {"double", "ticket"}:
-            tx["notes"] = "placeholder only"
-
         self.transactions.append(tx)
         await save_json(TX_PATH, self.transactions)
         self.leaderboard[str(interaction.user.id)] = self.leaderboard.get(str(interaction.user.id), 0) + net
@@ -215,42 +205,34 @@ class RouletteRefugeCog(commands.Cog):
         return -amount
 
     def _draw(self) -> Any:
-        outcomes = [
-            0,
-            0.5,
-            1,
-            2,
-            5,
-            10,
-            "ticket",
-            "double",
-            "jackpot",
-        ]
-        # scale probabilities to integers to avoid float rounding issues
-        weights = [400, 180, 140, 140, 90, 30, 3, 7, 3]
-        return random.choices(outcomes, weights=weights, k=1)[0]
-
-    def _segment_name(self, outcome: Any) -> str:
-        if outcome == "double":
-            return "double_xp_1h"
-        if outcome == "ticket":
-            return "ticket_free"
-        if outcome == "jackpot":
+        r = random.random()
+        if r < 0.40:
+            return 0
+        if r < 0.58:
+            return 0.5
+        if r < 0.72:
+            return 1
+        if r < 0.86:
+            return 2
+        if r < 0.95:
+            return 5
+        if r < 0.98:
+            return 10
+        if r < 0.983:
+            return "ticket"
+        if r < 0.99:
+            return "double"
+        if r < 0.993:
             return "jackpot"
-        return f"x{outcome}".replace(".", "_")
+        return 0
 
     def _result_message(self, amount: int, net: int, outcome: Any) -> str:
-        """Message to display after a spin.
-
-        Double XP and ticket outcomes are placeholders; they have no gameplay
-        effect and are only communicated to the user.
-        """
         if outcome == "jackpot":
             return "🎉 Super Jackpot ! Tu gagnes 1000 XP !"
         if outcome == "double":
-            return "⚡ Tu as gagné un boost Double XP (1h) ! (placeholder)"
+            return "✨ Tu obtiens un bonus double XP d'une heure (non implémenté)."
         if outcome == "ticket":
-            return "🎟️ Tu as gagné un ticket gratuit ! (placeholder)"
+            return "🎫 Ticket obtenu (sans effet)."
         if net > 0:
             return f"Tu gagnes {net:+d} XP !"
         if net == 0:
@@ -285,7 +267,7 @@ class RouletteRefugeCog(commands.Cog):
             embed.add_field(name="Plus gros gain", value=f"<@{biggest[0]}> {biggest[1]} XP", inline=False)
         embed.add_field(name="Total misé", value=f"{total_bet} XP")
         embed.add_field(name="Total redistribué", value=f"{total_net} XP")
-        await channel send(embed=embed)
+        await channel.send(embed=embed)
 
     # -------------------------- Tasks --------------------------
     @tasks.loop(minutes=1)
