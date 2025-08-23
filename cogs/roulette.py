@@ -352,13 +352,18 @@ class RouletteCog(commands.Cog):
     async def _ensure_poster_message(self):
         poster = self.store.get_poster()
         if poster:
-            ch = self.bot.get_channel(int(poster.get("channel_id", 0)))
-            if isinstance(ch, (discord.TextChannel, discord.Thread)):
-                try:
-                    await ch.fetch_message(int(poster.get("message_id", 0)))
-                    return
-                except discord.NotFound as e:
-                    logging.debug("Poster message missing: %s", e)
+            stored_ch_id = int(poster.get("channel_id", 0))
+            if stored_ch_id != CHANNEL_ID:
+                # L'ID configuré a changé : supprimer l'ancien message
+                await self._delete_old_poster_message()
+            else:
+                ch = self.bot.get_channel(stored_ch_id)
+                if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                    try:
+                        await ch.fetch_message(int(poster.get("message_id", 0)))
+                        return
+                    except discord.NotFound as e:
+                        logging.debug("Poster message missing: %s", e)
         existing = await self._find_existing_poster()
         if existing:
             self.store.set_poster(
