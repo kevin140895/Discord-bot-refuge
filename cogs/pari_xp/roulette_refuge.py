@@ -19,8 +19,6 @@ CONFIG_PATH = DATA_DIR / "config.json"
 STATE_PATH = DATA_DIR / "state.json"
 TX_PATH = DATA_DIR / "transactions.json"
 LEADERBOARD_PATH = DATA_DIR / "leaderboard.json"
-
-
 class BetModal(discord.ui.Modal):
     def __init__(self, cog: "RouletteRefugeCog") -> None:
         super().__init__(title="🤑 Roulette Refuge", timeout=None, custom_id="pari_xp_modal")
@@ -285,7 +283,7 @@ class RouletteRefugeCog(commands.Cog):
             embed.add_field(name="Plus gros gain", value=f"<@{biggest[0]}> {biggest[1]} XP", inline=False)
         embed.add_field(name="Total misé", value=f"{total_bet} XP")
         embed.add_field(name="Total redistribué", value=f"{total_net} XP")
-        await channel send(embed=embed)
+        await channel.send(embed=embed)
 
     # -------------------------- Tasks --------------------------
     @tasks.loop(minutes=1)
