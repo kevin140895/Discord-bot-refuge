@@ -183,6 +183,52 @@ class PlayerTypeView(discord.ui.View):
             )
 
 
+class RadioView(discord.ui.View):
+    """Boutons pour sélectionner la station radio."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    async def _dispatch(self, interaction: discord.Interaction, cmd: str) -> None:
+        cog = interaction.client.get_cog("RadioCog")
+        if not cog:
+            await interaction.response.send_message(
+                "❌ Radio indisponible.", ephemeral=True
+            )
+            return
+        command = getattr(cog, cmd, None)
+        if command:
+            await command.callback(cog, interaction)
+
+    @discord.ui.button(label="24/7", style=discord.ButtonStyle.primary, custom_id="radio_24")
+    async def btn_radio_24(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._dispatch(interaction, "radio_24")
+
+    @discord.ui.button(
+        label="Rock", style=discord.ButtonStyle.secondary, custom_id="radio_rock"
+    )
+    async def btn_radio_rock(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._dispatch(interaction, "radio_rock")
+
+    @discord.ui.button(label="Rap", style=discord.ButtonStyle.primary, custom_id="radio_rap")
+    async def btn_radio_rap(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._dispatch(interaction, "radio_rap")
+
+    @discord.ui.button(
+        label="Rap FR", style=discord.ButtonStyle.primary, custom_id="radio_rapfr"
+    )
+    async def btn_radio_rapfr(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._dispatch(interaction, "radio_rapfr")
+
+
 class RSVPView(discord.ui.View):
     """Boutons RSVP pour les événements de jeu."""
 

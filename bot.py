@@ -16,7 +16,7 @@ from utils.rate_limit import GlobalRateLimiter
 from storage.xp_store import xp_store
 from utils.rename_manager import rename_manager
 from utils.channel_edit_manager import channel_edit_manager
-from view import PlayerTypeView
+from view import PlayerTypeView, RadioView
 from utils.api_meter import api_meter, APICallCtx
 
 load_dotenv(override=True)
@@ -57,6 +57,7 @@ intents.presences = True
 class RefugeBot(commands.Bot):
     async def setup_hook(self) -> None:
         self.add_view(PlayerTypeView())
+        self.add_view(RadioView())
         await xp_store.start()
         extensions = [
             "cogs.role_reminder",
