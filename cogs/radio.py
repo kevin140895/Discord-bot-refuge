@@ -15,6 +15,7 @@ from config import (
 )
 from utils.rename_manager import rename_manager
 from utils.voice import ensure_voice, play_stream
+from view import RadioView
 
 
 class RadioCog(commands.Cog):
@@ -53,11 +54,31 @@ class RadioCog(commands.Cog):
         await asyncio.sleep(5)
         await self._connect_and_play()
 
+    async def _ensure_radio_message(
+        self, channel: discord.abc.Messageable
+    ) -> None:
+        try:
+            async for msg in channel.history(limit=50):
+                if msg.author.id != self.bot.user.id:
+                    continue
+                for row in msg.components:
+                    for comp in row.children:
+                        if (
+                            isinstance(comp, discord.ui.Button)
+                            and comp.custom_id == "radio_24"
+                        ):
+                            return
+        except Exception as e:
+            logging.warning("Impossible de vérifier le message radio: %s", e)
+            return
+        await channel.send("Changement de radio", view=RadioView())
+
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         channel = self.bot.get_channel(self.vc_id)
         if isinstance(channel, discord.VoiceChannel):
             self._original_name = channel.name
+            await self._ensure_radio_message(channel)
         await self._connect_and_play()
 
     async def _rename_for_stream(
