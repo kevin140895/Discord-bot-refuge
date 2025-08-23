@@ -164,7 +164,7 @@ class GameEventsCog(commands.Cog):
             evt.state = "waiting"
             await save_event(evt)
             logging.info("[game] Salon vocal créé pour %s", evt.id)
-        # À l'heure H: annonce ou annulation
+        # À l'heure H: annonce ou attente
         if evt.state in {"scheduled", "waiting"} and now >= evt.time:
             if any(s in {"yes", "maybe"} for s in evt.rsvps.values()):
                 channel = guild.get_channel(evt.channel_id)
@@ -189,17 +189,34 @@ class GameEventsCog(commands.Cog):
                 await save_event(evt)
                 logging.info("[game] Annonce publiée pour %s", evt.id)
             else:
-                creator = guild.get_member(evt.creator_id)
-                if creator:
-                    try:
-                        await creator.send(
-                            f"Ton événement **{evt.game_name}** est annulé (aucun RSVP)."
-                        )
-                    except discord.HTTPException:
-                        pass
-                evt.state = "cancelled"
-                await save_event(evt)
-                logging.info("[game] Événement %s annulé", evt.id)
+                if evt.state != "waiting":
+                    evt.state = "waiting"
+                    await save_event(evt)
+
+        if (
+            evt.state in {"scheduled", "waiting"}
+            and now >= evt.time + timedelta(minutes=30)
+        ):
+            if not any(s in {"yes", "maybe"} for s in evt.rsvps.values()):
+                vc = guild.get_channel(evt.voice_channel_id) if evt.voice_channel_id else None
+                if not isinstance(vc, discord.VoiceChannel) or not vc.members:
+                    creator = guild.get_member(evt.creator_id)
+                    if creator:
+                        try:
+                            await creator.send(
+                                f"Ton événement **{evt.game_name}** est annulé (aucun RSVP)."
+                            )
+                        except discord.HTTPException:
+                            pass
+                    if isinstance(vc, discord.VoiceChannel):
+                        try:
+                            await vc.delete(reason="Événement annulé")
+                        except discord.HTTPException:
+                            pass
+                    set_voice_channel(evt, None)
+                    evt.state = "cancelled"
+                    await save_event(evt)
+                    logging.info("[game] Événement %s annulé", evt.id)
         # Fin de session quand le vocal est vide
         if (
             evt.state == "running"
