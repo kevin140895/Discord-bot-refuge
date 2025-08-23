@@ -5,10 +5,13 @@ venv/
 
 # Local data and JSON files
 data/*
-*.json
+data/**/*.json
+/app/data/**/*.json
 # Allow committing Roulette Refuge data
 !data/pari_xp/
 !data/pari_xp/*.json
+# Allow necessary configuration files
+!config.json
 
 # Secret files
 /app/data/*

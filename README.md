@@ -59,6 +59,10 @@ essentielles pour exécuter le bot :
 
 Adaptez ces valeurs selon votre déploiement avant de lancer le bot.
 
+## Gestion des secrets
+
+Ne stockez jamais de jetons, de clés API ou d'autres informations sensibles dans le dépôt. Utilisez des variables d'environnement ou un gestionnaire de secrets dédié. Le fichier `.env` est ignoré par Git ; servez-vous du modèle `.env.example` pour documenter les paramètres requis.
+
 ## Données persistantes
 
 Certaines fonctionnalités (XP, roulette, salons temporaires…) écrivent des
