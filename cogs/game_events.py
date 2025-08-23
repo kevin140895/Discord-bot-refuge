@@ -131,6 +131,18 @@ class GameEventsCog(commands.Cog):
         guild = self.bot.get_guild(evt.guild_id)
         if guild is None:
             return
+        if (
+            evt.state == "scheduled"
+            and not evt.reminder_sent
+            and now >= evt.time - timedelta(hours=1)
+        ):
+            channel = guild.get_channel(evt.channel_id)
+            if isinstance(channel, discord.TextChannel):
+                await channel.send(
+                    f"Rappel: {evt.game_name} commence dans une heure !"
+                )
+            evt.reminder_sent = True
+            await save_event(evt)
         # T-10 minutes: création salon vocal et DMs
         if evt.state == "scheduled" and now >= evt.time - timedelta(minutes=10):
             creator = guild.get_member(evt.creator_id)

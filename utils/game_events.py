@@ -36,6 +36,7 @@ class GameEvent:
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     participants: Set[int] = field(default_factory=set)
+    reminder_sent: bool = False
     state: str = "scheduled"  # scheduled, waiting, running, finished, cancelled
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -54,6 +55,7 @@ class GameEvent:
             else None
         )
         d["participants"] = list(self.participants)
+        d["reminder_sent"] = self.reminder_sent
         return d
 
     @staticmethod
@@ -83,6 +85,7 @@ class GameEvent:
             started_at=parse_dt(data.get("started_at")),
             ended_at=parse_dt(data.get("ended_at")),
             participants=set(map(int, data.get("participants", []))),
+            reminder_sent=bool(data.get("reminder_sent", False)),
             state=data.get("state", "scheduled"),
             created_at=parse_dt(data.get("created_at")) or datetime.now(timezone.utc),
         )
