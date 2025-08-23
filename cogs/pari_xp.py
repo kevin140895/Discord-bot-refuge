@@ -62,6 +62,8 @@ class RouletteRefugeCog(commands.Cog):
         self.daily_counts: Dict[int, int] = defaultdict(int)
         self.current_day = now_paris().date()
         self.open = False
+        self.hub_message: discord.Message | None = None
+        self.leaderboard_message: discord.Message | None = None
         self.scheduler_task.start()
         self.leaderboard_task.start()
 
@@ -222,7 +224,8 @@ class RouletteRefugeCog(commands.Cog):
             "double",
             "jackpot",
         ]
-        weights = [40, 18, 14, 14, 9, 3, 0.3, 0.7, 0.3]
+        # scale probabilities to integers to avoid float rounding issues
+        weights = [400, 180, 140, 140, 90, 30, 3, 7, 3]
         return random.choices(outcomes, weights=weights, k=1)[0]
 
     def _segment_name(self, outcome: Any) -> str:
