@@ -119,10 +119,11 @@ class RouletteRefugeCog(commands.Cog):
             embed = self._build_hub_embed()
             view = self._build_hub_view()
             for child in view.children:
-                if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_bet":
+                if (
+                    isinstance(child, discord.ui.Button)
+                    and getattr(child, "custom_id", None) == "pari_xp_bet"
+                ):
                     setattr(child, "callback", self._bet_button_callback)  # noqa: B010
-                if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_leaderboard":
-                    setattr(child, "callback", self._leaderboard_button_callback)  # noqa: B010
             message = None
             if hub_id:
                 try:
@@ -164,21 +165,6 @@ class RouletteRefugeCog(commands.Cog):
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ) -> None:
                 await cog._bet_button_callback(interaction)
-
-            @discord.ui.button(
-                custom_id="pari_xp_leaderboard",
-                label="📊 Leaderboard",
-                style=discord.ButtonStyle.primary,
-            )
-            async def leaderboard(  # type: ignore[override]
-                self, interaction: discord.Interaction, button: discord.ui.Button
-            ) -> None:
-                msg_id = cog.state.get("leaderboard_message_id")
-                if msg_id:
-                    url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{msg_id}"
-                    await interaction.response.send_message(url, ephemeral=True)
-                else:
-                    await interaction.response.send_message("indisponible", ephemeral=True)
 
         return HubView()
 
@@ -522,21 +508,6 @@ class RouletteRefugeCog(commands.Cog):
     @_autoheal_presence_task.before_loop
     async def _wait_ready_autoheal(self):
         await self.bot.wait_until_ready()
-
-    async def _leaderboard_button_callback(self, interaction: discord.Interaction) -> None:
-        if interaction.channel_id != int(self.config.get("channel_id", 0)):
-            await interaction.response.send_message(
-                "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
-                ephemeral=True,
-            )
-            return
-        state = storage.load_json(storage.Path(STATE_PATH), {})
-        msg_id = state.get("leaderboard_message_id")
-        if msg_id:
-            url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{msg_id}"
-            await interaction.response.send_message(url, ephemeral=True)
-        else:
-            await interaction.response.send_message("📊 Leaderboard indisponible", ephemeral=True)
 
     async def _bet_button_callback(self, interaction: discord.Interaction) -> None:
         if interaction.channel_id != int(self.config.get("channel_id", 0)):
@@ -886,9 +857,9 @@ class RouletteRefugeCog(commands.Cog):
 
         lb_ok = all(hasattr(self, name) for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"])
         lb_ok &= inspect.getsource(type(self).__init__).count("leaderboard_task.start") > 0
-        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 180 or getattr(self.leaderboard_task, "minutes", None) == 3.0
-        lb_ok &= "pari_xp_leaderboard" in inspect.getsource(self._build_hub_view)
-        lb_ok &= "ephemeral=True" in inspect.getsource(self._leaderboard_button_callback)
+        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 180 or getattr(
+            self.leaderboard_task, "minutes", None
+        ) == 3.0
         report["leaderboard"] = "PASS" if lb_ok else "FAIL"
 
         summary_src = inspect.getsource(self._post_daily_summary)
