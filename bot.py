@@ -12,6 +12,7 @@ import pkgutil
 import discord
 from discord.ext import commands
 from config import GUILD_ID
+import cogs
 
 from storage.xp_store import xp_store
 from utils.api_meter import api_meter
@@ -48,8 +49,8 @@ class RefugeBot(commands.Bot):
         # Load all cogs from the ``cogs`` package so every slash command is
         # registered when the bot starts. ``load_extension`` is patched to an
         # ``AsyncMock`` in the tests, so awaiting is safe.
-        for module in pkgutil.iter_modules(["cogs"]):
-            await self.load_extension(f"cogs.{module.name}")
+        for module in pkgutil.iter_modules(cogs.__path__):
+            await self.load_extension(f"{cogs.__name__}.{module.name}")
 
         # Sync application commands. Use guild-specific sync when ``GUILD_ID``
         # is defined so commands appear instantly on that server.
