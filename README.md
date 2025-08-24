@@ -57,7 +57,7 @@ Un fichier d'exemple [`.env.example`](./.env.example) regroupe les variables
 essentielles pour exécuter le bot :
 
 - `DISCORD_TOKEN` : jeton du bot fourni par le [Portail développeur Discord](https://discord.com/developers/applications).
-- `GUILD_ID` : identifiant du serveur Discord principal.
+- `GUILD_ID` : identifiant du serveur Discord principal. Utilisé pour synchroniser immédiatement les commandes slash sur ce serveur lors du démarrage du bot.
 - `OWNER_ID` : identifiant du propriétaire du bot.
 - `TZ` : fuseau horaire du processus (défaut : `Europe/Paris`).
 - `DATA_DIR` : répertoire de stockage persistant pour les données.

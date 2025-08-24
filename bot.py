@@ -8,7 +8,10 @@ interaction with the bot.
 
 from __future__ import annotations
 
+import pkgutil
+import discord
 from discord.ext import commands
+from config import GUILD_ID
 
 from storage.xp_store import xp_store
 from utils.api_meter import api_meter
@@ -42,10 +45,18 @@ class RefugeBot(commands.Bot):
         limiter.start()
         await reset_http_error_counter()
 
-        # Load Roulette Refuge cog.  ``load_extension`` is patched to an
+        # Load all cogs from the ``cogs`` package so every slash command is
+        # registered when the bot starts. ``load_extension`` is patched to an
         # ``AsyncMock`` in the tests, so awaiting is safe.
-        await self.load_extension("cogs.pari_xp")
-        await self.tree.sync()
+        for module in pkgutil.iter_modules(["cogs"]):
+            await self.load_extension(f"cogs.{module.name}")
+
+        # Sync application commands. Use guild-specific sync when ``GUILD_ID``
+        # is defined so commands appear instantly on that server.
+        if GUILD_ID:
+            await self.tree.sync(guild=discord.Object(id=GUILD_ID))
+        else:
+            await self.tree.sync()
 
         # Register persistent views. ``add_view`` can only be called once per
         # view instance; protect against duplicates when ``setup_hook`` runs
