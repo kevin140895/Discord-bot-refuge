@@ -726,103 +726,114 @@ class RouletteRefugeCog(commands.Cog):
             "✅ Mise reçue. Tirage en cours…",
             ephemeral=True,
         )
-        if color_choice:
-            outcome_color = random.choice(["rouge", "noir"])
-            segment = f"color_{outcome_color}"
-            payout = amount * 2 if color_choice == outcome_color else 0
-            delta = payout - amount
-            result = {
-                "payout": payout,
-                "delta": delta,
-                "mult": 2.0 if color_choice == outcome_color else 0.0,
-                "notes": f"Couleur gagnante : {outcome_color}",
-                "ticket": False,
-                "double_xp": False,
-            }
-        else:
-            segment = self._draw_segment()
-            result = self._compute_result(amount, segment)
-        if use_ticket:
-            result["delta"] = cast(int, result["delta"]) + amount
-        ts = self._now().isoformat()
-        delta = int(cast(int, result["delta"]))
-        add_user_xp(user_id, delta, reason="pari_xp")
-        if result.get("double_xp"):
-            apply_double_xp_buff(user_id, 60)
-        if result.get("ticket"):
-            tickets = storage.load_json(storage.Path(TICKETS_PATH), [])
-            tickets.append({"user_id": user_id, "ts": ts, "used": False})
-            await storage.save_json(storage.Path(TICKETS_PATH), tickets)
-        transactions = storage.load_json(storage.Path(TX_PATH), [])
-        day_key = ts.split("T")[0]
-        transactions.append(
-            {
-                "ts": ts,
-                "user_id": user_id,
-                "username": user.name,
-                "bet": amount,
-                "segment": segment,
-                "payout": result["payout"],
-                "delta": result["delta"],
-                "mult": result["mult"],
-                "notes": result["notes"],
-                "ticket": result["ticket"],
-                "double_xp": result["double_xp"],
-                "day_key": day_key,
-            }
-        )
-        await storage.save_json(storage.Path(TX_PATH), transactions)
-
-        # Refresh leaderboard after each bet so the ranking stays up to date
         try:
-            channel = await self._get_channel()
-            if channel:
-                await self._ensure_leaderboard_message(channel)
-                state = storage.load_json(storage.Path(STATE_PATH), {})
-                msg_id = state.get("leaderboard_message_id")
-                if msg_id:
-                    try:
-                        msg = await channel.fetch_message(int(msg_id))
-                        await msg.edit(embed=self._build_leaderboard_embed())
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        lines = [
-            f"Mise : {amount} XP",
-            f"Segment : {segment}",
-            f"Gain : {result['payout']} XP",
-            f"Delta : {result['delta']} XP",
-        ]
-        if color_choice:
-            lines.insert(1, f"Pari couleur : {color_choice}")
-        if result["notes"]:
-            lines.append(f"Note : {result['notes']}")
-        if result.get("ticket"):
-            lines.append("🎟️ Tu as gagné un ticket gratuit !")
-        elif result.get("double_xp"):
-            lines.append("⚡ Tu as gagné un boost Double XP 1h !")
-        embed = discord.Embed(title="🎲 Résultat", description="\n".join(lines))
-        await interaction.followup.send(embed=embed, ephemeral=True)
-        public_channel = interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
-        announce_channel = await self._get_announce_channel()
-        if announce_channel:
-            public_channel = announce_channel
-        if public_channel:
-            big_win_mult = self.config.get("announce_big_win_mult_threshold", 5)
-            big_loss_xp = self.config.get("announce_big_loss_xp_threshold", 100)
-            if segment == "super_jackpot_plus_1000":
-                content = f"💥 SUPER JACKPOT ! {user.mention} +1000 XP !"
-                if self.config.get("announce_super_jackpot_ping_here", False):
-                    content = "@here " + content
-                await public_channel.send(content)
-            elif result["mult"] and result["mult"] >= big_win_mult:
-                await public_channel.send(f"🎉 {user.display_name} gagne {result['mult']}× sa mise ({result['payout']} XP) !")
-            elif result["delta"] <= -big_loss_xp:
-                await public_channel.send(
-                    f"😢 {user.display_name} vient de perdre {abs(int(cast(int, result['delta'])))} XP..."
+            if color_choice:
+                outcome_color = random.choice(["rouge", "noir"])
+                segment = f"color_{outcome_color}"
+                payout = amount * 2 if color_choice == outcome_color else 0
+                delta = payout - amount
+                result = {
+                    "payout": payout,
+                    "delta": delta,
+                    "mult": 2.0 if color_choice == outcome_color else 0.0,
+                    "notes": f"Couleur gagnante : {outcome_color}",
+                    "ticket": False,
+                    "double_xp": False,
+                }
+            else:
+                segment = self._draw_segment()
+                result = self._compute_result(amount, segment)
+            if use_ticket:
+                result["delta"] = cast(int, result["delta"]) + amount
+            ts = self._now().isoformat()
+            delta = int(cast(int, result["delta"]))
+            add_user_xp(user_id, delta, reason="pari_xp")
+            if result.get("double_xp"):
+                apply_double_xp_buff(user_id, 60)
+            if result.get("ticket"):
+                tickets = storage.load_json(storage.Path(TICKETS_PATH), [])
+                tickets.append({"user_id": user_id, "ts": ts, "used": False})
+                await storage.save_json(storage.Path(TICKETS_PATH), tickets)
+            transactions = storage.load_json(storage.Path(TX_PATH), [])
+            day_key = ts.split("T")[0]
+            transactions.append(
+                {
+                    "ts": ts,
+                    "user_id": user_id,
+                    "username": user.name,
+                    "bet": amount,
+                    "segment": segment,
+                    "payout": result["payout"],
+                    "delta": result["delta"],
+                    "mult": result["mult"],
+                    "notes": result["notes"],
+                    "ticket": result["ticket"],
+                    "double_xp": result["double_xp"],
+                    "day_key": day_key,
+                }
+            )
+            await storage.save_json(storage.Path(TX_PATH), transactions)
+    
+            # Refresh leaderboard after each bet so the ranking stays up to date
+            try:
+                channel = await self._get_channel()
+                if channel:
+                    await self._ensure_leaderboard_message(channel)
+                    state = storage.load_json(storage.Path(STATE_PATH), {})
+                    msg_id = state.get("leaderboard_message_id")
+                    if msg_id:
+                        try:
+                            msg = await channel.fetch_message(int(msg_id))
+                            await msg.edit(embed=self._build_leaderboard_embed())
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            lines = [
+                f"Mise : {amount} XP",
+                f"Segment : {segment}",
+                f"Gain : {result['payout']} XP",
+                f"Delta : {result['delta']} XP",
+            ]
+            if color_choice:
+                lines.insert(1, f"Pari couleur : {color_choice}")
+            if result["notes"]:
+                lines.append(f"Note : {result['notes']}")
+            if result.get("ticket"):
+                lines.append("🎟️ Tu as gagné un ticket gratuit !")
+            elif result.get("double_xp"):
+                lines.append("⚡ Tu as gagné un boost Double XP 1h !")
+            embed = discord.Embed(title="🎲 Résultat", description="\n".join(lines))
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            public_channel = interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
+            announce_channel = await self._get_announce_channel()
+            if announce_channel:
+                public_channel = announce_channel
+            if public_channel:
+                big_win_mult = self.config.get("announce_big_win_mult_threshold", 5)
+                big_loss_xp = self.config.get("announce_big_loss_xp_threshold", 100)
+                if segment == "super_jackpot_plus_1000":
+                    content = f"💥 SUPER JACKPOT ! {user.mention} +1000 XP !"
+                    if self.config.get("announce_super_jackpot_ping_here", False):
+                        content = "@here " + content
+                    await public_channel.send(content)
+                elif result["mult"] and result["mult"] >= big_win_mult:
+                    await public_channel.send(f"🎉 {user.display_name} gagne {result['mult']}× sa mise ({result['payout']} XP) !")
+                elif result["delta"] <= -big_loss_xp:
+                    await public_channel.send(
+                        f"😢 {user.display_name} vient de perdre {abs(int(cast(int, result['delta'])))} XP..."
+                    )
+        except Exception as exc:  # pragma: no cover - handled explicitly
+            logging.exception("Error while handling bet submission", exc_info=exc)
+            try:
+                await interaction.followup.send(
+                    "❌ Une erreur est survenue lors du traitement de ton pari.",
+                    ephemeral=True,
                 )
-
+            except Exception:
+                pass
+            return
+    
     async def _self_check_report(self) -> dict:
         report: dict[str, str] = {}
 
