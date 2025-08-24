@@ -100,6 +100,11 @@ class APIMeter:
         while True:
             try:
                 item = await asyncio.wait_for(self.queue.get(), timeout=0.25)
+                if item is None:
+                    if buffer:
+                        await asyncio.to_thread(self._flush, buffer)
+                        buffer.clear()
+                    break
                 buffer.append(item)
                 if len(buffer) >= 100:
                     await asyncio.to_thread(self._flush, buffer)
@@ -250,8 +255,8 @@ class APIMeter:
 
     async def aclose(self) -> None:
         if self.writer_task:
-            self.writer_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            await self.queue.put(None)
+            with contextlib.suppress(Exception):
                 await self.writer_task
             self.writer_task = None
         if self.summary_task:

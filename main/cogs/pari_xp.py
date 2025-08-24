@@ -15,6 +15,7 @@ from main.utils.xp_adapter import (
 import random
 import inspect
 import re
+import logging
 
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
@@ -862,7 +863,7 @@ class RouletteRefugeCog(commands.Cog):
     @commands.command(name="pari_xp_selfcheck")
     async def pari_xp_selfcheck(self, ctx: commands.Context) -> None:
         report = await self._self_check_report()
-        print(report)
+        logging.debug("pari_xp self-check report: %s", report)
         await ctx.send(str(report))
 
     @app_commands.command(name="pari_xp_selfcheck", description="Diagnostic interne Roulette Refuge")

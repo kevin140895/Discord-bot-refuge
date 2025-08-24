@@ -32,7 +32,14 @@ class DiscordCriticalHandler(logging.Handler):
 
 
 def main() -> None:
-    intents = discord.Intents.all()
+    intents = discord.Intents(
+        guilds=True,
+        members=True,
+        messages=True,
+        reactions=True,
+        voice_states=True,
+        message_content=True,
+    )
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise RuntimeError("DISCORD_TOKEN environment variable not set")
