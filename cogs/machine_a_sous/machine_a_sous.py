@@ -436,10 +436,10 @@ class MachineASousCog(commands.Cog):
         self.maintenance_loop.start()
 
     async def _post_state_message(self, opened: bool):
-        """Announce the open/closed state in the machine channel."""
-        ch = self.bot.get_channel(CHANNEL_ID)
+        """Announce the open/closed state in the announcement channel."""
+        ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logger.warning("[MachineASous] CHANNEL_ID invalide.")
+            logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")
             return
         try:
             old = self.store.get_state_message()
@@ -518,9 +518,9 @@ class MachineASousCog(commands.Cog):
 
     async def _ensure_state_message(self, opened: bool):
         """Ensure a state message exists and matches the current status."""
-        ch = self.bot.get_channel(CHANNEL_ID)
+        ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logger.warning("[MachineASous] CHANNEL_ID invalide.")
+            logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")
             return
         stored = self.store.get_state_message()
         if stored:
