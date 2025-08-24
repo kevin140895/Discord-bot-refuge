@@ -18,7 +18,10 @@ Install `libopus0` and `ffmpeg` on Debian/Ubuntu:
 sudo apt install libopus0 ffmpeg
 ```
 
-The `nixpacks.toml` build configuration already lists `libopus0` to ensure the library is present in production environments.  The Python dependencies in [`requirements.txt`](./requirements.txt) include `discord.py[voice]` and `imageio-ffmpeg` so FFmpeg support is available.
+The `nixpacks.toml` build configuration already lists `libopus0` to ensure the library
+is present in production environments. The Python dependencies in
+[`requirements.txt`](./requirements.txt) include `discord.py[voice]` and
+`imageio-ffmpeg` so FFmpeg support is available.
 
 ## FFmpeg options
 
