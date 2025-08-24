@@ -700,7 +700,28 @@ class RouletteRefugeCog(commands.Cog):
             )
             return
         self._bets_today[user_id] = count + 1
-        _ = use_ticket_str.lower() == "oui"
+
+        use_ticket = use_ticket_str.lower() == "oui"
+        if use_ticket:
+            tickets = storage.load_json(storage.Path(TICKETS_PATH), [])
+            ticket = next(
+                (
+                    t
+                    for t in tickets
+                    if t.get("user_id") == user_id and not t.get("used")
+                ),
+                None,
+            )
+            if not ticket:
+                await interaction.response.send_message(
+                    "❌ Aucun ticket gratuit disponible.",
+                    ephemeral=True,
+                )
+                return
+            ticket["used"] = True
+            ticket["used_ts"] = self._now().isoformat()
+            await storage.save_json(storage.Path(TICKETS_PATH), tickets)
+
         await interaction.response.send_message(
             "✅ Mise reçue. Tirage en cours…",
             ephemeral=True,
@@ -721,6 +742,8 @@ class RouletteRefugeCog(commands.Cog):
         else:
             segment = self._draw_segment()
             result = self._compute_result(amount, segment)
+        if use_ticket:
+            result["delta"] = cast(int, result["delta"]) + amount
         ts = self._now().isoformat()
         delta = int(cast(int, result["delta"]))
         add_user_xp(user_id, delta, reason="pari_xp")
