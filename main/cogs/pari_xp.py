@@ -280,9 +280,31 @@ class RouletteRefugeCog(commands.Cog):
         await channel.send(embed=embed)
 
     async def _announce_close(self, channel: discord.TextChannel) -> None:
+        transactions = storage.load_json(storage.Path(TX_PATH), [])
+        now = datetime.now(TZ_PARIS)
+        today: date = now.date()
+        day_txs = []
+        for tx in transactions:
+            ts = tx.get("ts")
+            try:
+                dt = datetime.fromisoformat(ts).astimezone(TZ_PARIS)
+            except Exception:
+                continue
+            if dt.date() == today:
+                day_txs.append(tx)
+
+        total_bet = sum(int(tx.get("bet", 0)) for tx in day_txs)
+        total_payout = sum(int(tx.get("payout", 0)) for tx in day_txs)
+        net = total_payout - total_bet
+        lines = [
+            f"Paris : {len(day_txs)}",
+            f"Total misé : {total_bet} XP",
+            f"Total redistribué : {total_payout} XP",
+            f"Résultat net : {net:+} XP",
+        ]
         embed = discord.Embed(
             title="🤑 Roulette Refuge — Clôture du jour",
-            description="(placeholder)",
+            description="\n".join(lines),
             color=discord.Color.red(),
         )
         announce_channel = await self._get_announce_channel()
