@@ -1,4 +1,4 @@
-"""XP adapter bridging Roulette Refuge with the global XP store."""
+"""XP adapter bridging Machine à sous with the global XP store."""
 from __future__ import annotations
 
 from storage.xp_store import xp_store

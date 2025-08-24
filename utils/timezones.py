@@ -1,4 +1,4 @@
-"""Timezone utilities for Roulette Refuge."""
+"""Timezone utilities for Machine à sous."""
 from __future__ import annotations
 
 from datetime import datetime
