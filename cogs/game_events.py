@@ -151,9 +151,10 @@ class GameEventsCog(commands.Cog):
             category = guild.get_channel(TEMP_VC_CATEGORY)
             try:
                 vc = await guild.create_voice_channel(name, category=category)
-            except discord.HTTPException as e:
-                logger.error("[game] création salon échouée pour %s: %s", evt.id, e)
-                return
+            except discord.HTTPException:
+                # Log the error but do not raise to keep the scheduler running
+                logger.exception("[game] création salon échouée pour %s", evt.id)
+                return  # Early return to avoid inconsistent state without voice_channel_id
             set_voice_channel(evt, vc.id)
             await save_event(evt)
             for uid, status in evt.rsvps.items():
