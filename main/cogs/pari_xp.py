@@ -414,13 +414,13 @@ class RouletteRefugeCog(commands.Cog):
                     label="Montant (XP)",
                     placeholder="≥ 5",
                     required=True,
-                    custom_id="amount",
+                    custom_id="pari_xp_amount",
                 )
                 self.use_ticket = ui.TextInput(
                     label="Utiliser un ticket gratuit ? (oui/non)",
                     placeholder="non",
                     required=False,
-                    custom_id="use_ticket",
+                    custom_id="pari_xp_use_ticket",
                 )
                 self.add_item(self.amount)
                 self.add_item(self.use_ticket)
@@ -428,9 +428,7 @@ class RouletteRefugeCog(commands.Cog):
             async def on_submit(
                 self, interaction: discord.Interaction
             ) -> None:  # type: ignore[override]
-                await cog._handle_bet_submission(
-                    interaction, self.amount.value, self.use_ticket.value or ""
-                )
+                await cog._handle_bet_submission(interaction)
 
         return BetModal()
 
@@ -497,9 +495,15 @@ class RouletteRefugeCog(commands.Cog):
     async def _handle_bet_submission(
         self,
         interaction: discord.Interaction,
-        amount_str: str,
-        use_ticket_str: str,
     ) -> None:
+        amount_str = ""
+        use_ticket_str = ""
+        for row in interaction.data.get("components", []):
+            for comp in row.get("components", []):
+                if comp.get("custom_id") == "pari_xp_amount":
+                    amount_str = comp.get("value", "")
+                elif comp.get("custom_id") == "pari_xp_use_ticket":
+                    use_ticket_str = comp.get("value", "")
         now = self._now()
         if not self._is_open_hours(now):
             await interaction.response.send_message(
