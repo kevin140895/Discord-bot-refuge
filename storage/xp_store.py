@@ -1,11 +1,11 @@
 """Persistent XP storage with debounced and periodic disk flushes."""
 
 import asyncio
+import contextlib
 import logging
 import math
 import os
-import contextlib
-from typing import Dict
+from typing import Dict, TypedDict, cast
 
 from config import DATA_DIR
 from utils.persistence import ensure_dir, read_json_safe, atomic_write_json_async
@@ -16,12 +16,18 @@ from utils.persistence import ensure_dir, read_json_safe, atomic_write_json_asyn
 XP_PATH = os.path.join(DATA_DIR, "data.json")
 
 
+class XPUserData(TypedDict, total=False):
+    xp: int
+    level: int
+    double_xp_until: str
+
+
 class XPStore:
     """Simple XP store with debounced and periodic flush."""
 
     def __init__(self, path: str = XP_PATH) -> None:
         self.path = path
-        self.data: Dict[str, Dict[str, int]] = {}
+        self.data: Dict[str, XPUserData] = {}
         self.lock = asyncio.Lock()
         self._flush_task: asyncio.Task | None = None
         self._periodic_task: asyncio.Task | None = None
@@ -74,7 +80,7 @@ class XPStore:
     async def add_xp(self, user_id: int, amount: int) -> tuple[int, int, int]:
         uid = str(user_id)
         async with self.lock:
-            user = self.data.setdefault(uid, {"xp": 0, "level": 0})
+            user = self.data.setdefault(uid, cast(XPUserData, {"xp": 0, "level": 0}))
             old_level = int(user.get("level", 0))
             if amount != 0:
                 current_xp = int(user.get("xp", 0))

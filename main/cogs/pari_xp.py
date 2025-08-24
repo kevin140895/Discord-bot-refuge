@@ -3,7 +3,7 @@ from discord.ext import commands, tasks  # noqa: F401
 from datetime import datetime
 from datetime import timedelta
 from datetime import date
-from typing import Optional
+from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo
 from discord import ui
 from discord import app_commands
@@ -64,7 +64,7 @@ class RouletteRefugeCog(commands.Cog):
         return channel if isinstance(channel, discord.TextChannel) else None
 
     async def _get_announce_channel(self) -> discord.TextChannel | None:
-        cfg = load_json(CONFIG_PATH, {})
+        cfg = load_json(storage.Path(CONFIG_PATH), {})
         ch_id = int(cfg.get("announce_channel_id") or 0)
         if ch_id:
             ch = self.bot.get_channel(ch_id) or await self.bot.fetch_channel(ch_id)
@@ -78,9 +78,9 @@ class RouletteRefugeCog(commands.Cog):
         view = self._build_hub_view()
         for child in view.children:
             if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_bet":
-                child.callback = self._bet_button_callback
+                setattr(child, "callback", self._bet_button_callback)  # noqa: B010
             if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_leaderboard":
-                child.callback = self._leaderboard_button_callback
+                setattr(child, "callback", self._leaderboard_button_callback)  # noqa: B010
         message = None
         if hub_id:
             try:
@@ -485,10 +485,11 @@ class RouletteRefugeCog(commands.Cog):
 
     async def _leaderboard_button_callback(self, interaction: discord.Interaction) -> None:
         if interaction.channel_id != int(self.config.get("channel_id", 0)):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
                 ephemeral=True,
             )
+            return
         state = storage.load_json(storage.Path(STATE_PATH), {})
         msg_id = state.get("leaderboard_message_id")
         if msg_id:
@@ -499,10 +500,11 @@ class RouletteRefugeCog(commands.Cog):
 
     async def _bet_button_callback(self, interaction: discord.Interaction) -> None:
         if interaction.channel_id != int(self.config.get("channel_id", 0)):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
                 ephemeral=True,
             )
+            return
         await interaction.response.send_modal(self._build_bet_modal())
 
     def _build_bet_modal(self) -> ui.Modal:
@@ -511,19 +513,26 @@ class RouletteRefugeCog(commands.Cog):
         class BetModal(ui.Modal):
             def __init__(self) -> None:
                 super().__init__(title="🤑 Roulette Refuge — Parier", custom_id="pari_xp_modal")
-                self.amount = ui.TextInput(
+                self.amount: ui.TextInput = ui.TextInput(
                     label="Montant (XP)",
                     placeholder="≥ 5",
                     required=True,
                     custom_id="pari_xp_amount",
                 )
-                self.use_ticket = ui.TextInput(
+                self.color: ui.TextInput = ui.TextInput(
+                    label="Couleur (rouge/noir)",
+                    placeholder="rouge ou noir",
+                    required=False,
+                    custom_id="pari_xp_color",
+                )
+                self.use_ticket: ui.TextInput = ui.TextInput(
                     label="Utiliser un ticket gratuit ? (oui/non)",
                     placeholder="non",
                     required=False,
                     custom_id="pari_xp_use_ticket",
                 )
                 self.add_item(self.amount)
+                self.add_item(self.color)
                 self.add_item(self.use_ticket)
 
             async def on_submit(self, interaction: discord.Interaction) -> None:  # type: ignore[override]
@@ -606,11 +615,15 @@ class RouletteRefugeCog(commands.Cog):
             )
             return
         amount_str = ""
+        color_str = ""
         use_ticket_str = ""
-        for row in interaction.data.get("components", []):
+        data = cast(dict[str, Any], interaction.data or {})
+        for row in data.get("components", []):
             for comp in row.get("components", []):
                 if comp.get("custom_id") == "pari_xp_amount":
                     amount_str = comp.get("value", "")
+                elif comp.get("custom_id") == "pari_xp_color":
+                    color_str = comp.get("value", "")
                 elif comp.get("custom_id") == "pari_xp_use_ticket":
                     use_ticket_str = comp.get("value", "")
         now = self._now()
@@ -625,6 +638,13 @@ class RouletteRefugeCog(commands.Cog):
         except Exception:
             await interaction.response.send_message(
                 "❌ Mise minimale : 5 XP.",
+                ephemeral=True,
+            )
+            return
+        color_choice = color_str.strip().lower()
+        if color_choice and color_choice not in ("rouge", "noir"):
+            await interaction.response.send_message(
+                "❌ Couleur invalide (rouge/noir).",
                 ephemeral=True,
             )
             return
@@ -671,10 +691,25 @@ class RouletteRefugeCog(commands.Cog):
         self._bets_today[user_id] = count + 1
         _ = use_ticket_str.lower() == "oui"
         await interaction.response.send_message("✅ Mise reçue. (Tirage à l'étape 6)", ephemeral=True)
-        segment = self._draw_segment()
-        result = self._compute_result(amount, segment)
+        if color_choice:
+            outcome_color = random.choice(["rouge", "noir"])
+            segment = f"color_{outcome_color}"
+            payout = amount * 2 if color_choice == outcome_color else 0
+            delta = payout - amount
+            result = {
+                "payout": payout,
+                "delta": delta,
+                "mult": 2.0 if color_choice == outcome_color else 0.0,
+                "notes": f"Couleur gagnante : {outcome_color}",
+                "ticket": False,
+                "double_xp": False,
+            }
+        else:
+            segment = self._draw_segment()
+            result = self._compute_result(amount, segment)
         ts = self._now().isoformat()
-        add_user_xp(user_id, result["delta"], reason="pari_xp")
+        delta = int(cast(int, result["delta"]))
+        add_user_xp(user_id, delta, reason="pari_xp")
         if result.get("double_xp"):
             apply_double_xp_buff(user_id, 60)
         if result.get("ticket"):
@@ -706,6 +741,8 @@ class RouletteRefugeCog(commands.Cog):
             f"Gain : {result['payout']} XP",
             f"Delta : {result['delta']} XP",
         ]
+        if color_choice:
+            lines.insert(1, f"Pari couleur : {color_choice}")
         if result["notes"]:
             lines.append(f"Note : {result['notes']}")
         if result.get("ticket"):
@@ -729,7 +766,9 @@ class RouletteRefugeCog(commands.Cog):
             elif result["mult"] and result["mult"] >= big_win_mult:
                 await public_channel.send(f"🎉 {user.display_name} gagne {result['mult']}× sa mise ({result['payout']} XP) !")
             elif result["delta"] <= -big_loss_xp:
-                await public_channel.send(f"😢 {user.display_name} vient de perdre {abs(result['delta'])} XP...")
+                await public_channel.send(
+                    f"😢 {user.display_name} vient de perdre {abs(int(cast(int, result['delta'])))} XP..."
+                )
 
     async def _self_check_report(self) -> dict:
         report: dict[str, str] = {}
@@ -750,9 +789,9 @@ class RouletteRefugeCog(commands.Cog):
         modal = self._build_bet_modal()
         ui_ok = getattr(modal, "custom_id", "") == "pari_xp_modal"
         ids = [c.custom_id for c in modal.children if isinstance(c, ui.TextInput)]
-        ui_ok &= ids == ["pari_xp_amount", "pari_xp_use_ticket"]
+        ui_ok &= ids == ["pari_xp_amount", "pari_xp_color", "pari_xp_use_ticket"]
         view = self._build_hub_view()
-        btn_ids = [c.custom_id for c in view.children if isinstance(c, discord.ui.Button)]
+        btn_ids = [c.custom_id or "" for c in view.children if isinstance(c, discord.ui.Button)]
         ui_ok &= all(cid.startswith("pari_xp_") for cid in btn_ids)
         report["ui_ids"] = "PASS" if ui_ok else "FAIL"
 
@@ -763,6 +802,7 @@ class RouletteRefugeCog(commands.Cog):
             "❌ Solde insuffisant (il faut conserver au moins 10 XP).",
             "⏳ Attends {remaining}s avant de rejouer.",
             "📉 Tu as atteint 20 paris aujourd'hui. Reviens demain.",
+            "❌ Couleur invalide (rouge/noir).",
         ]
         guards_ok = all(s in src for s in guard_strings)
         report["guards"] = "PASS" if guards_ok else "FAIL"
@@ -789,7 +829,7 @@ class RouletteRefugeCog(commands.Cog):
         report["announces"] = "PASS" if announces_ok else "FAIL"
 
         lb_ok = all(hasattr(self, name) for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"])
-        lb_ok &= inspect.getsource(self.__init__).count("leaderboard_task.start") > 0
+        lb_ok &= inspect.getsource(type(self).__init__).count("leaderboard_task.start") > 0
         lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 420 or getattr(self.leaderboard_task, "minutes", None) == 7.0
         lb_ok &= "pari_xp_leaderboard" in inspect.getsource(self._build_hub_view)
         lb_ok &= "ephemeral=True" in inspect.getsource(self._leaderboard_button_callback)
@@ -808,12 +848,15 @@ class RouletteRefugeCog(commands.Cog):
         report["daily_summary"] = "PASS" if summary_ok else "FAIL"
 
         module = inspect.getmodule(self)
-        module_src = inspect.getsource(module)
-        classes = [c for c in vars(module).values() if inspect.isclass(c) and c.__module__ == module.__name__]
+        module_src = inspect.getsource(module) if module else ""
+        classes = [c for c in vars(module).values() if inspect.isclass(c) and c.__module__ == module.__name__] if module else []
         class_name = self.__class__.__name__
-        isolation_ok = len([c for c in classes if c.__name__ == class_name]) == 1
+        isolation_ok = module is not None and len([c for c in classes if c.__name__ == class_name]) == 1
         custom_ids = [cid for cid in re.findall(r'custom_id="([^"]+)"', module_src) if not cid.startswith("(")]
-        isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
+        if module:
+            isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
+        else:
+            isolation_ok = False
         isolation_ok &= PARI_XP_DATA_DIR == "main/data/pari_xp/"
         isolation_ok &= "pari_xp" in module_src.lower()
         report["isolation"] = "PASS" if isolation_ok else "FAIL"
