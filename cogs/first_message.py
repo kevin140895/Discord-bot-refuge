@@ -19,6 +19,7 @@ from utils.persistence import (
     ensure_dir,
     read_json_safe,
 )
+logger = logging.getLogger(__name__)
 
 FIRST_WIN_FILE = os.path.join(DATA_DIR, "first_win.json")
 ensure_dir(DATA_DIR)
@@ -46,7 +47,7 @@ class FirstMessageCog(commands.Cog):
                 try:
                     self._save_task.result()
                 except Exception:  # pragma: no cover - logging
-                    logging.exception("[FirstMessage] Échec de la sauvegarde d'état")
+                    logger.exception("[FirstMessage] Échec de la sauvegarde d'état")
             else:
                 self._save_task.cancel()
 
@@ -92,14 +93,14 @@ class FirstMessageCog(commands.Cog):
         task = asyncio.create_task(self._save_state(), name="first_message_save")
         task.add_done_callback(self._handle_save_task_result)
         self._save_task = task
-        logging.info("[FirstMessage] Challenge réinitialisé")
+        logger.info("[FirstMessage] Challenge réinitialisé")
 
     def _handle_save_task_result(self, task: asyncio.Task) -> None:
         """Log les erreurs potentielles de la tâche de sauvegarde."""
         try:
             task.result()
         except Exception:  # pragma: no cover - logging
-            logging.exception("[FirstMessage] Erreur lors de la sauvegarde de l'état")
+            logger.exception("[FirstMessage] Erreur lors de la sauvegarde de l'état")
 
     # ── Tasks ────────────────────────────────────────────────
     @tasks.loop(time=time(hour=8))
@@ -135,7 +136,7 @@ class FirstMessageCog(commands.Cog):
             f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 400 XP !",
         )
         await self._save_state()
-        logging.info(
+        logger.info(
             "[FirstMessage] %s a gagné le challenge du premier message", message.author
         )
 

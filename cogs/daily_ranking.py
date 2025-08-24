@@ -21,6 +21,7 @@ from config import DATA_DIR, XP_VIEWER_ROLE_ID
 from utils.interactions import safe_respond
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 from .xp import DAILY_STATS, DAILY_LOCK, save_daily_stats_to_disk
+logger = logging.getLogger(__name__)
 
 try:
     from zoneinfo import ZoneInfo
@@ -104,18 +105,18 @@ class DailyRankingAndRoles(commands.Cog):
     async def _run_daily_task(self) -> None:
         now = datetime.now(PARIS_TZ)
         day = (now - timedelta(days=1)).date().isoformat()
-        logging.info("[daily_ranking] Calcul du classement pour %s", day)
+        logger.info("[daily_ranking] Calcul du classement pour %s", day)
         async with DAILY_LOCK:
             stats = DAILY_STATS.pop(day, {})
         if not stats:
-            logging.info("[daily_ranking] Aucune statistique pour %s", day)
+            logger.info("[daily_ranking] Aucune statistique pour %s", day)
             await save_daily_stats_to_disk()
             return
         ranking = self._compute_ranking(stats)
         ranking["date"] = day
         self._write_persistence(ranking)
         await save_daily_stats_to_disk()
-        logging.info("[daily_ranking] Classement %s sauvegardé", day)
+        logger.info("[daily_ranking] Classement %s sauvegardé", day)
 
     @app_commands.command(
         name="test_classement1", description="Prévisualise le classement du jour"
@@ -139,4 +140,3 @@ class DailyRankingAndRoles(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - integration
     await bot.add_cog(DailyRankingAndRoles(bot))
-

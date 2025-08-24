@@ -17,6 +17,7 @@ from config import (
 from utils.rename_manager import rename_manager
 from utils.voice import ensure_voice, play_stream
 from view import RadioView
+logger = logging.getLogger(__name__)
 
 
 class RadioCog(commands.Cog):
@@ -33,14 +34,14 @@ class RadioCog(commands.Cog):
 
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
-            logging.warning("RADIO_STREAM_URL non défini")
+            logger.warning("RADIO_STREAM_URL non défini")
             return
         self.voice = await ensure_voice(self.bot, self.vc_id, self.voice)
         play_stream(self.voice, self.stream_url, after=self._after_play)
 
     def _after_play(self, error: Optional[Exception]) -> None:
         if error:
-            logging.warning("Erreur de lecture radio: %s", error)
+            logger.warning("Erreur de lecture radio: %s", error)
         if self._reconnect_task is None or self._reconnect_task.done():
             self._reconnect_task = self.bot.loop.create_task(self._delayed_reconnect())
 
@@ -63,7 +64,7 @@ class RadioCog(commands.Cog):
                         ):
                             return
         except Exception as e:
-            logging.warning("Impossible de vérifier le message radio: %s", e)
+            logger.warning("Impossible de vérifier le message radio: %s", e)
             return
         await channel.send("Changement de radio", view=RadioView())
 

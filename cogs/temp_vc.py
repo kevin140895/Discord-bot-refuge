@@ -18,6 +18,7 @@ from config import (
 from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
 from utils.rename_manager import rename_manager
+logger = logging.getLogger(__name__)
 
 # IDs des salons vocaux temporaires connus
 TEMP_VC_IDS: Set[int] = set(load_temp_vc_ids())
@@ -55,7 +56,7 @@ class TempVCCog(commands.Cog):
         if rename_manager._worker is None:
             async def _ensure_rename_worker() -> None:
                 await rename_manager.start()
-                logging.info("[temp_vc] rename_manager worker démarré")
+                logger.info("[temp_vc] rename_manager worker démarré")
 
             asyncio.create_task(_ensure_rename_worker())
 
@@ -193,7 +194,7 @@ class TempVCCog(commands.Cog):
                 try:
                     await before.channel.delete(reason="Salon temporaire vide")
                 except discord.HTTPException:
-                    logging.exception(
+                    logger.exception(
                         "Suppression du salon %s échouée", before.channel.id
                     )
                 else:
@@ -237,4 +238,3 @@ class TempVCCog(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(TempVCCog(bot))
-

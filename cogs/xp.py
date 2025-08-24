@@ -32,6 +32,7 @@ from utils.metrics import measure
 from storage.xp_store import xp_store
 from utils.game_events import get_multiplier, record_participant
 from utils.voice_bonus import get_voice_multiplier
+logger = logging.getLogger(__name__)
 
 # Fichiers de persistance
 VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
@@ -57,7 +58,7 @@ def load_voice_times() -> dict[str, datetime]:
         try:
             out[uid] = datetime.fromisoformat(iso)
         except ValueError as e:
-            logging.warning("Invalid voice time for user %s: %s", uid, e)
+            logger.warning("Invalid voice time for user %s: %s", uid, e)
             continue
     return out
 
@@ -67,9 +68,9 @@ async def save_voice_times_to_disk() -> None:
     try:
         serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
         await atomic_write_json_async(VOICE_TIMES_FILE, serializable)
-        logging.info("[xp] Voice times sauvegardés (%s)", VOICE_TIMES_FILE)
+        logger.info("[xp] Voice times sauvegardés (%s)", VOICE_TIMES_FILE)
     except OSError as e:
-        logging.exception("[xp] Échec sauvegarde voice times: %s", e)
+        logger.exception("[xp] Échec sauvegarde voice times: %s", e)
 
 
 def load_daily_stats() -> dict:
@@ -89,7 +90,7 @@ def load_xp_boosts() -> dict[str, datetime]:
         try:
             out[uid] = datetime.fromisoformat(iso)
         except ValueError as e:
-            logging.warning("Invalid XP boost for user %s: %s", uid, e)
+            logger.warning("Invalid XP boost for user %s: %s", uid, e)
             continue
     return out
 
@@ -100,9 +101,9 @@ async def save_xp_boosts_to_disk() -> None:
             uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in XP_BOOSTS.items()
         }
         await atomic_write_json_async(XP_BOOSTS_FILE, serializable)
-        logging.info("[xp] XP boosts sauvegardés (%s)", XP_BOOSTS_FILE)
+        logger.info("[xp] XP boosts sauvegardés (%s)", XP_BOOSTS_FILE)
     except OSError as e:
-        logging.exception("[xp] Échec sauvegarde XP boosts: %s", e)
+        logger.exception("[xp] Échec sauvegarde XP boosts: %s", e)
 
 
 async def xp_bootstrap_cache() -> None:
@@ -112,12 +113,12 @@ async def xp_bootstrap_cache() -> None:
     voice_times = load_voice_times()
     DAILY_STATS = load_daily_stats()
     XP_BOOSTS = load_xp_boosts()
-    logging.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
+    logger.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
 
 async def xp_flush_cache_to_disk() -> None:
     await xp_store.flush()
-    logging.info("💾 XP flush vers disque (%d utilisateurs).", len(xp_store.data))
+    logger.info("💾 XP flush vers disque (%d utilisateurs).", len(xp_store.data))
 
 async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
     """Modifie l'XP de ``user_id`` via le :class:`XPStore`.
@@ -200,10 +201,10 @@ class XPCog(commands.Cog):
         try:
             await save_voice_times_to_disk()
         except OSError as e:
-            logging.exception("[xp] auto_backup_xp: exception: %s", e)
+            logger.exception("[xp] auto_backup_xp: exception: %s", e)
         await save_daily_stats_to_disk()
         await save_xp_boosts_to_disk()
-        logging.info("🛟 Sauvegarde périodique effectuée.")
+        logger.info("🛟 Sauvegarde périodique effectuée.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -307,13 +308,13 @@ class XPCog(commands.Cog):
             try:
                 await interaction.response.defer(ephemeral=True, thinking=True)
             except discord.Forbidden:
-                logging.warning("[xp] Permissions insuffisantes pour différer la réponse")
+                logger.warning("[xp] Permissions insuffisantes pour différer la réponse")
             except discord.NotFound:
-                logging.warning("[xp] Interaction introuvable lors du defer")
+                logger.warning("[xp] Interaction introuvable lors du defer")
             except discord.HTTPException as e:
-                logging.error("[xp] Erreur HTTP lors du defer: %s", e)
+                logger.error("[xp] Erreur HTTP lors du defer: %s", e)
             except Exception as e:
-                logging.exception("[xp] Erreur inattendue lors du defer: %s", e)
+                logger.exception("[xp] Erreur inattendue lors du defer: %s", e)
             user_id = str(interaction.user.id)
             async with XP_LOCK:
                 data = XP_CACHE.get(user_id)
@@ -331,27 +332,27 @@ class XPCog(commands.Cog):
                 file = discord.File(fp=image, filename="rank.png")
                 await interaction.followup.send(file=file, ephemeral=True)
             except discord.Forbidden:
-                logging.warning(
+                logger.warning(
                     "[xp] Permissions insuffisantes pour envoyer la carte de rang"
                 )
                 await interaction.followup.send(
                     "❌ Permissions insuffisantes.", ephemeral=True
                 )
             except discord.NotFound:
-                logging.warning(
+                logger.warning(
                     "[xp] Interaction ou ressource introuvable lors de l'envoi de la carte"
                 )
                 await interaction.followup.send(
                     "❌ Ressource introuvable.", ephemeral=True
                 )
             except discord.HTTPException as e:
-                logging.error(f"/rang: erreur HTTP lors de l'envoi de la carte: {e}")
+                logger.error(f"/rang: erreur HTTP lors de l'envoi de la carte: {e}")
                 await interaction.followup.send(
                     "❌ Erreur HTTP lors de la génération de la carte.",
                     ephemeral=True,
                 )
             except Exception as e:
-                logging.exception(f"/rang: exception inattendue: {e}")
+                logger.exception(f"/rang: exception inattendue: {e}")
                 await interaction.followup.send(
                     "❌ Une erreur est survenue pendant la génération de la carte.",
                     ephemeral=True,

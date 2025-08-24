@@ -18,6 +18,7 @@ from config import (
     IGNORED_ROLE_IDS,
     DATA_DIR,
 )
+logger = logging.getLogger(__name__)
 
 # ─────────────────────── PARAMS ───────────────────────
 try:
@@ -64,7 +65,7 @@ def _read_json(path: str) -> Dict[str, Any]:
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        logging.error(f"[rolescan] JSON corrompu: {path}")
+        logger.error(f"[rolescan] JSON corrompu: {path}")
         return {}
 
 
@@ -117,7 +118,7 @@ class RoleReminderCog(commands.Cog):
         try:
             atomic_write_json(ROLE_REMINDERS_FILE, self.reminders)
         except Exception as e:
-            logging.error(
+            logger.error(
                 f"[rolescan] Écriture JSON échouée pour {ROLE_REMINDERS_FILE}: {e}"
             )
 
@@ -128,7 +129,7 @@ class RoleReminderCog(commands.Cog):
         try:
             await self._run_scan_once()
         except Exception as e:
-            logging.exception(f"[rolescan] erreur scan: {e}")
+            logger.exception(f"[rolescan] erreur scan: {e}")
 
     @_scan_loop.before_loop
     async def _before_scan_loop(self):
@@ -140,7 +141,7 @@ class RoleReminderCog(commands.Cog):
         try:
             await self._run_cleanup_tick()
         except Exception as e:
-            logging.exception(f"[rolescan] erreur cleanup: {e}")
+            logger.exception(f"[rolescan] erreur cleanup: {e}")
 
     @_cleanup_loop.before_loop
     async def _before_cleanup_loop(self):
@@ -157,7 +158,7 @@ class RoleReminderCog(commands.Cog):
         with measure("rolescan.scan_once"):
             now = _now_tz()
             guilds = [guild] if guild else list(self.bot.guilds)
-            logging.info(
+            logger.info(
                 f"[rolescan] ▶ Début scan (invoked_by_cmd={invoked_by_cmd})"
             )
 
@@ -167,7 +168,7 @@ class RoleReminderCog(commands.Cog):
 
                 ch = g.get_channel(REMINDER_CHANNEL_ID)
                 if not isinstance(ch, discord.TextChannel):
-                    logging.warning(
+                    logger.warning(
                         f"[rolescan] Salon {REMINDER_CHANNEL_ID} introuvable "
                         f"(guild {g.id})"
                     )
@@ -182,7 +183,7 @@ class RoleReminderCog(commands.Cog):
                     and perms.manage_messages
                     and perms.read_message_history
                 ):
-                    logging.warning(
+                    logger.warning(
                         f"[rolescan] Permissions insuffisantes dans {ch.id} "
                         f"(guild {g.id})"
                     )
@@ -235,15 +236,15 @@ class RoleReminderCog(commands.Cog):
                         sent += 1
                         await asyncio.sleep(random.uniform(SLEEP_MIN, SLEEP_MAX))
                     except Exception as e:
-                        logging.error(
+                        logger.error(
                             f"[rolescan] Envoi rappel échoué pour {member}: {e}"
                         )
 
-                logging.info(
+                logger.info(
                     f"[rolescan] Guild {g.id} — rappels envoyés: {sent}"
                 )
 
-            logging.info("[rolescan] ■ Fin scan")
+            logger.info("[rolescan] ■ Fin scan")
 
     async def _run_cleanup_tick(self):
         with measure("rolescan.cleanup_tick"):
@@ -295,7 +296,7 @@ class RoleReminderCog(commands.Cog):
                     self._save_state()
                     await asyncio.sleep(random.uniform(SLEEP_MIN, SLEEP_MAX))
                 except Exception as e:
-                    logging.error(
+                    logger.error(
                         f"[rolescan] Suppression message {msg_id} échouée: {e}"
                     )
 
@@ -393,7 +394,7 @@ class RoleReminderCog(commands.Cog):
                     msg = await ch.fetch_message(int(rec.get("message_id")))
                     await msg.delete()
                 except Exception as e:
-                    logging.debug("Failed to delete reminder message: %s", e)
+                    logger.debug("Failed to delete reminder message: %s", e)
 
             self.reminders.get(g_key, {}).pop(u_key, None)
             self._save_state()
@@ -406,4 +407,4 @@ async def setup(bot: commands.Bot):
     try:
         bot.tree.add_command(RoleReminderCog.group)
     except Exception as e:
-        logging.debug("Failed to add RoleReminder group: %s", e)
+        logger.debug("Failed to add RoleReminder group: %s", e)

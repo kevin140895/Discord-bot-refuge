@@ -26,6 +26,7 @@ from config import (
 )
 from utils.persistence import read_json_safe, atomic_write_json_async, ensure_dir
 from utils.voice_bonus import set_voice_bonus
+logger = logging.getLogger(__name__)
 
 try:
     from zoneinfo import ZoneInfo
@@ -49,7 +50,7 @@ def _read_state() -> dict:
     try:
         return read_json_safe(STATE_FILE)
     except Exception:  # pragma: no cover - unexpected error
-        logging.exception("[double_xp] failed to read state file")
+        logger.exception("[double_xp] failed to read state file")
         return {}
 
 
@@ -58,7 +59,7 @@ async def _write_state(data: dict) -> None:
     try:
         await atomic_write_json_async(STATE_FILE, data)
     except Exception:  # pragma: no cover - disk errors
-        logging.exception("[double_xp] failed to write state file")
+        logger.exception("[double_xp] failed to write state file")
 
 
 def _random_sessions() -> List[str]:
@@ -187,7 +188,7 @@ class DoubleVoiceXP(commands.Cog):
         session["end"] = end_dt.isoformat()
         await _write_state(self.state)
         set_voice_bonus(True)
-        logging.info(
+        logger.info(
             "[double_xp] session started at %s", end_dt.isoformat()
         )
         channel = self.bot.get_channel(XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID)
@@ -197,7 +198,7 @@ class DoubleVoiceXP(commands.Cog):
                     "Hey 🎉 À partir de maintenant, c’est DOUBLE XP en vocal ! Profitez-en 😉"
                 )
             except Exception as e:  # pragma: no cover - network errors
-                logging.warning("[double_xp] Failed to send start message: %s", e)
+                logger.warning("[double_xp] Failed to send start message: %s", e)
 
     async def _end_session(
         self, session: Dict[str, Any], announce: bool = True
@@ -208,7 +209,7 @@ class DoubleVoiceXP(commands.Cog):
         session["ended"] = True
         await _write_state(self.state)
         set_voice_bonus(False)
-        logging.info("[double_xp] session ended")
+        logger.info("[double_xp] session ended")
         channel = self.bot.get_channel(XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID)
         if announce and channel:
             try:
@@ -216,7 +217,7 @@ class DoubleVoiceXP(commands.Cog):
                     "✅ La session Double XP vocale est terminée pour aujourd’hui, merci à ceux qui étaient présents !"
                 )
             except Exception as e:  # pragma: no cover - network errors
-                logging.warning("[double_xp] Failed to send end message: %s", e)
+                logger.warning("[double_xp] Failed to send end message: %s", e)
 
 
 async def setup(bot: commands.Bot) -> None:

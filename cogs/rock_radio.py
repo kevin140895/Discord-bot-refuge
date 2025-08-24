@@ -7,6 +7,7 @@ from discord.ext import commands
 
 from config import ROCK_RADIO_STREAM_URL, ROCK_RADIO_VC_ID
 from utils.voice import ensure_voice, play_stream
+logger = logging.getLogger(__name__)
 
 
 class RockRadioCog(commands.Cog):
@@ -25,14 +26,14 @@ class RockRadioCog(commands.Cog):
 
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
-            logging.warning("ROCK_RADIO_STREAM_URL non défini")
+            logger.warning("ROCK_RADIO_STREAM_URL non défini")
             return
         self.voice = await ensure_voice(self.bot, self.vc_id, self.voice)
         play_stream(self.voice, self.stream_url, after=self._after_play)
 
     def _after_play(self, error: Optional[Exception]) -> None:
         if error:
-            logging.warning("Erreur de lecture rock radio: %s", error)
+            logger.warning("Erreur de lecture rock radio: %s", error)
         if self._reconnect_task is None or self._reconnect_task.done():
             self._reconnect_task = self.bot.loop.create_task(self._delayed_reconnect())
 
