@@ -9,8 +9,11 @@ interaction with the bot.
 from __future__ import annotations
 
 import pkgutil
+from typing import Final
+
 import discord
 from discord.ext import commands
+
 from config import GUILD_ID
 import cogs
 
@@ -21,8 +24,9 @@ from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter
 from view import PlayerTypeView
 
+
 # global rate limiter instance
-limiter = GlobalRateLimiter()
+limiter: Final[GlobalRateLimiter] = GlobalRateLimiter()
 
 
 async def reset_http_error_counter() -> None:
@@ -86,6 +90,25 @@ class RefugeBot(commands.Bot):
         await super().close()
 
 
+def create_bot() -> RefugeBot:
+    """Create a :class:`RefugeBot` with default intents.
+
+    Having a factory function makes it easier for tests and static type
+    checkers to create a bot instance without executing side effects at module
+    import time.
+    """
+
+    intents: discord.Intents = discord.Intents(
+        guilds=True,
+        members=True,
+        messages=True,
+        reactions=True,
+        voice_states=True,
+        message_content=True,
+    )
+    return RefugeBot(command_prefix="!", intents=intents)
+
+
 __all__ = [
     "RefugeBot",
     "xp_store",
@@ -94,4 +117,5 @@ __all__ = [
     "api_meter",
     "limiter",
     "reset_http_error_counter",
+    "create_bot",
 ]
