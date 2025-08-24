@@ -60,7 +60,7 @@ class MachineASousView(discord.ui.View):
         uid = str(interaction.user.id)
         role_given = False
         expires_at_txt = None
-        old_lvl = new_lvl = total_xp = 0
+        old_lvl = new_lvl = old_xp = total_xp = 0
 
         if gain == "ticket":
             if not free:
@@ -85,8 +85,11 @@ class MachineASousView(discord.ui.View):
                 if pool:
                     other = random.choice(pool)
             try:
-                old_lvl, new_lvl, total_xp = await award_xp(
-                    interaction.user.id, 50
+                old_lvl, new_lvl, old_xp, total_xp = await award_xp(
+                    interaction.user.id,
+                    50,
+                    guild_id=interaction.guild_id,
+                    source="machine_a_sous",
                 )
             except Exception as e:
                 logger.exception("[MachineASous] award_xp a échoué: %s", e)
@@ -97,7 +100,9 @@ class MachineASousView(discord.ui.View):
                 return
             if other:
                 try:
-                    await award_xp(other.id, 50)
+                    await award_xp(
+                        other.id, 50, guild_id=interaction.guild_id, source="machine_a_sous"
+                    )
                 except Exception as e:
                     logger.exception("[MachineASous] award_xp (shared) échec: %s", e)
             if other:
@@ -111,8 +116,11 @@ class MachineASousView(discord.ui.View):
         else:
             # Gain d'XP classique
             try:
-                old_lvl, new_lvl, total_xp = await award_xp(
-                    interaction.user.id, gain
+                old_lvl, new_lvl, old_xp, total_xp = await award_xp(
+                    interaction.user.id,
+                    gain,
+                    guild_id=interaction.guild_id,
+                    source="machine_a_sous",
                 )
             except Exception as e:
                 logger.exception("[MachineASous] award_xp a échoué: %s", e)
