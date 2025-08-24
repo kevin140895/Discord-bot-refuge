@@ -189,6 +189,19 @@ class RouletteRefugeCog(commands.Cog):
             await storage.save_json(storage.Path(STATE_PATH), state)
             self.state = state
 
+    async def _refresh_leaderboard(self, channel: discord.TextChannel) -> None:
+        """Ensure leaderboard message exists and refresh its embed."""
+        try:
+            await self._ensure_leaderboard_message(channel)
+            state = storage.load_json(storage.Path(STATE_PATH), {})
+            msg_id = state.get("leaderboard_message_id")
+            if not msg_id:
+                return
+            msg = await channel.fetch_message(int(msg_id))
+            await msg.edit(embed=self._build_leaderboard_embed())
+        except Exception:
+            pass
+
     def _build_leaderboard_embed(self) -> discord.Embed:
         tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
         now = datetime.now(tz)
@@ -417,6 +430,13 @@ class RouletteRefugeCog(commands.Cog):
         if not channel:
             return
 
+        if now.day == 1 and now.hour == 0 and now.minute == 0:
+            await storage.save_json(storage.Path(TX_PATH), [])
+            try:
+                await self._refresh_leaderboard(channel)
+            except Exception:
+                pass
+
         if now.hour == open_hour and now.minute == 0:
             await self._announce_open(channel)
             await self._update_hub_state(True)
@@ -438,18 +458,8 @@ class RouletteRefugeCog(commands.Cog):
     @tasks.loop(minutes=3.0)
     async def leaderboard_task(self) -> None:
         channel = await self._get_channel()
-        if not channel:
-            return
-        await self._ensure_leaderboard_message(channel)
-        state = storage.load_json(storage.Path(STATE_PATH), {})
-        msg_id = state.get("leaderboard_message_id")
-        if not msg_id:
-            return
-        try:
-            msg = await channel.fetch_message(int(msg_id))
-            await msg.edit(embed=self._build_leaderboard_embed())
-        except Exception:
-            pass
+        if channel:
+            await self._refresh_leaderboard(channel)
 
     @leaderboard_task.before_loop
     async def _wait_ready_lb(self) -> None:
@@ -785,15 +795,7 @@ class RouletteRefugeCog(commands.Cog):
             try:
                 channel = await self._get_channel()
                 if channel:
-                    await self._ensure_leaderboard_message(channel)
-                    state = storage.load_json(storage.Path(STATE_PATH), {})
-                    msg_id = state.get("leaderboard_message_id")
-                    if msg_id:
-                        try:
-                            msg = await channel.fetch_message(int(msg_id))
-                            await msg.edit(embed=self._build_leaderboard_embed())
-                        except Exception:
-                            pass
+                    await self._refresh_leaderboard(channel)
             except Exception:
                 pass
             lines = [
