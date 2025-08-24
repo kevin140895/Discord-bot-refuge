@@ -100,12 +100,7 @@ class RouletteRefugeCog(commands.Cog):
             "💵 **Mise min**: 5 XP · 🛑 **Cooldown**: 15s · 🎲 **Cap**: 20/jour",
             "Résultats privés (éphémères). Gros événements annoncés publiquement.",
             "—",
-            "État : "
-            + (
-                "🟢 **Ouvert — ferme à 02:00**"
-                if self._is_open_hours()
-                else "🔴 **Fermé — ouvre à 08:00**"
-            ),
+            "État : " + ("🟢 **Ouvert — ferme à 02:00**" if self._is_open_hours() else "🔴 **Fermé — ouvre à 08:00**"),
         ]
         return discord.Embed(title=title, description="\n".join(lines))
 
@@ -124,9 +119,7 @@ class RouletteRefugeCog(commands.Cog):
             async def bet(  # type: ignore[override]
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ) -> None:
-                await interaction.response.send_message(
-                    "Modal non implémentée.", ephemeral=True
-                )
+                await cog._bet_button_callback(interaction)
 
             @discord.ui.button(
                 custom_id="pari_xp_leaderboard",
@@ -141,9 +134,7 @@ class RouletteRefugeCog(commands.Cog):
                     url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{msg_id}"
                     await interaction.response.send_message(url, ephemeral=True)
                 else:
-                    await interaction.response.send_message(
-                        "indisponible", ephemeral=True
-                    )
+                    await interaction.response.send_message("indisponible", ephemeral=True)
 
         return HubView()
 
@@ -199,24 +190,14 @@ class RouletteRefugeCog(commands.Cog):
             [v for v in stats.values() if int(v["net"]) < 0],
             key=lambda x: int(x["net"]),
         )[:10]
-        win_lines = [
-            f"{idx+1}. {w['username']} ({int(w['net']):+} XP)"
-            for idx, w in enumerate(winners)
-        ]
-        loss_lines = [
-            f"{idx+1}. {loser['username']} ({int(loser['net']):+} XP)"
-            for idx, loser in enumerate(losers)
-        ]
+        win_lines = [f"{idx + 1}. {w['username']} ({int(w['net']):+} XP)" for idx, w in enumerate(winners)]
+        loss_lines = [f"{idx + 1}. {loser['username']} ({int(loser['net']):+} XP)" for idx, loser in enumerate(losers)]
         biggest = None
         for tx in month_txs:
             if tx.get("delta", 0) > 0:
                 if not biggest or tx["delta"] > biggest["delta"]:
                     biggest = tx
-        biggest_val = (
-            f"{biggest['username']} (+{biggest['delta']} XP)"
-            if biggest
-            else "N/A"
-        )
+        biggest_val = f"{biggest['username']} (+{biggest['delta']} XP)" if biggest else "N/A"
         embed = discord.Embed(
             title=f"📊 Roulette Refuge — Leaderboard ({now.strftime('%B %Y')})",
             color=discord.Color.purple(),
@@ -357,17 +338,9 @@ class RouletteRefugeCog(commands.Cog):
             [v for v in stats.values() if int(v["net"]) < 0],
             key=lambda x: int(x["net"]),
         )[:3]
-        win_lines = [
-            f"{idx+1}. {w['username']} ({int(w['net']):+} XP)"
-            for idx, w in enumerate(winners)
-        ]
-        loss_lines = [
-            f"{idx+1}. {loser['username']} ({int(loser['net']):+} XP)"
-            for idx, loser in enumerate(losers)
-        ]
-        biggest_val = (
-            f"{biggest['username']} (+{biggest['delta']} XP)" if biggest else "N/A"
-        )
+        win_lines = [f"{idx + 1}. {w['username']} ({int(w['net']):+} XP)" for idx, w in enumerate(winners)]
+        loss_lines = [f"{idx + 1}. {loser['username']} ({int(loser['net']):+} XP)" for idx, loser in enumerate(losers)]
+        biggest_val = f"{biggest['username']} (+{biggest['delta']} XP)" if biggest else "N/A"
         embed = discord.Embed(
             title="🤑 Roulette Refuge — Clôture du jour",
             color=discord.Color.gold(),
@@ -419,13 +392,9 @@ class RouletteRefugeCog(commands.Cog):
         elif now.hour == last_call_hour and now.minute == last_call_minute:
             announce_ch = await self._get_announce_channel()
             if announce_ch:
-                await announce_ch.send(
-                    "⏳ Dernier appel — fermeture dans 15 minutes (02:00)."
-                )
+                await announce_ch.send("⏳ Dernier appel — fermeture dans 15 minutes (02:00).")
                 return
-            await channel.send(
-                "⏳ Dernier appel — fermeture dans 15 minutes (02:00)."
-            )
+            await channel.send("⏳ Dernier appel — fermeture dans 15 minutes (02:00).")
         elif now.hour == close_hour and now.minute == 0:
             await self._announce_close(channel)
             await self._update_hub_state(False)
@@ -526,9 +495,7 @@ class RouletteRefugeCog(commands.Cog):
             url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{msg_id}"
             await interaction.response.send_message(url, ephemeral=True)
         else:
-            await interaction.response.send_message(
-                "📊 Leaderboard indisponible", ephemeral=True
-            )
+            await interaction.response.send_message("📊 Leaderboard indisponible", ephemeral=True)
 
     async def _bet_button_callback(self, interaction: discord.Interaction) -> None:
         if interaction.channel_id != int(self.config.get("channel_id", 0)):
@@ -543,9 +510,7 @@ class RouletteRefugeCog(commands.Cog):
 
         class BetModal(ui.Modal):
             def __init__(self) -> None:
-                super().__init__(
-                    title="🤑 Roulette Refuge — Parier", custom_id="pari_xp_modal"
-                )
+                super().__init__(title="🤑 Roulette Refuge — Parier", custom_id="pari_xp_modal")
                 self.amount = ui.TextInput(
                     label="Montant (XP)",
                     placeholder="≥ 5",
@@ -561,9 +526,7 @@ class RouletteRefugeCog(commands.Cog):
                 self.add_item(self.amount)
                 self.add_item(self.use_ticket)
 
-            async def on_submit(
-                self, interaction: discord.Interaction
-            ) -> None:  # type: ignore[override]
+            async def on_submit(self, interaction: discord.Interaction) -> None:  # type: ignore[override]
                 await cog._handle_bet_submission(interaction)
 
         return BetModal()
@@ -694,9 +657,7 @@ class RouletteRefugeCog(commands.Cog):
         cd_until = self._cooldowns.get(user_id)
         if cd_until and cd_until > now:
             remaining = int((cd_until - now).total_seconds())
-            await interaction.response.send_message(
-                f"⏳ Attends {remaining}s avant de rejouer.", ephemeral=True
-            )
+            await interaction.response.send_message(f"⏳ Attends {remaining}s avant de rejouer.", ephemeral=True)
             return
         self._cooldowns[user_id] = now + timedelta(seconds=15)
         daily_cap = int(self.config.get("daily_cap", 20))
@@ -709,9 +670,7 @@ class RouletteRefugeCog(commands.Cog):
             return
         self._bets_today[user_id] = count + 1
         _ = use_ticket_str.lower() == "oui"
-        await interaction.response.send_message(
-            "✅ Mise reçue. (Tirage à l'étape 6)", ephemeral=True
-        )
+        await interaction.response.send_message("✅ Mise reçue. (Tirage à l'étape 6)", ephemeral=True)
         segment = self._draw_segment()
         result = self._compute_result(amount, segment)
         ts = self._now().isoformat()
@@ -768,14 +727,9 @@ class RouletteRefugeCog(commands.Cog):
                     content = "@here " + content
                 await public_channel.send(content)
             elif result["mult"] and result["mult"] >= big_win_mult:
-                await public_channel.send(
-                    f"🎉 {user.display_name} gagne {result['mult']}× sa mise ({result['payout']} XP) !"
-                )
+                await public_channel.send(f"🎉 {user.display_name} gagne {result['mult']}× sa mise ({result['payout']} XP) !")
             elif result["delta"] <= -big_loss_xp:
-                await public_channel.send(
-                    f"😢 {user.display_name} vient de perdre {abs(result['delta'])} XP..."
-                )
-
+                await public_channel.send(f"😢 {user.display_name} vient de perdre {abs(result['delta'])} XP...")
 
     async def _self_check_report(self) -> dict:
         report: dict[str, str] = {}
@@ -789,11 +743,8 @@ class RouletteRefugeCog(commands.Cog):
         )
         report["hours"] = "PASS" if open_ok else "FAIL"
 
-        desc = (self._build_hub_embed().description or "")
-        hub_ok = (
-            "🟢 **Ouvert — ferme à 02:00**" in desc
-            or "🔴 **Fermé — ouvre à 08:00**" in desc
-        )
+        desc = self._build_hub_embed().description or ""
+        hub_ok = "🟢 **Ouvert — ferme à 02:00**" in desc or "🔴 **Fermé — ouvre à 08:00**" in desc
         report["hub_embed"] = "PASS" if hub_ok else "FAIL"
 
         modal = self._build_bet_modal()
@@ -801,9 +752,7 @@ class RouletteRefugeCog(commands.Cog):
         ids = [c.custom_id for c in modal.children if isinstance(c, ui.TextInput)]
         ui_ok &= ids == ["pari_xp_amount", "pari_xp_use_ticket"]
         view = self._build_hub_view()
-        btn_ids = [
-            c.custom_id for c in view.children if isinstance(c, discord.ui.Button)
-        ]
+        btn_ids = [c.custom_id for c in view.children if isinstance(c, discord.ui.Button)]
         ui_ok &= all(cid.startswith("pari_xp_") for cid in btn_ids)
         report["ui_ids"] = "PASS" if ui_ok else "FAIL"
 
@@ -824,19 +773,10 @@ class RouletteRefugeCog(commands.Cog):
         double = self._compute_result(10, "double_xp_1h")
         super_jp = self._compute_result(10, "super_jackpot_plus_1000")
         cond_place = (
-            ticket.get("ticket")
-            and double.get("double_xp")
-            and ticket["delta"] == -10
-            and double["delta"] == -10
-            and super_jp["delta"] == 1000
+            ticket.get("ticket") and double.get("double_xp") and ticket["delta"] == -10 and double["delta"] == -10 and super_jp["delta"] == 1000
         )
-        cond_msgs = (
-            "ticket gratuit !" in src
-            and "boost Double XP 1h !" in src
-        )
-        report["draw_placeholders"] = (
-            "PASS" if cond_draw and cond_place and cond_msgs else "FAIL"
-        )
+        cond_msgs = "ticket gratuit !" in src and "boost Double XP 1h !" in src
+        report["draw_placeholders"] = "PASS" if cond_draw and cond_place and cond_msgs else "FAIL"
 
         announces_ok = (
             "announce_big_win_mult_threshold" in src
@@ -848,15 +788,9 @@ class RouletteRefugeCog(commands.Cog):
         )
         report["announces"] = "PASS" if announces_ok else "FAIL"
 
-        lb_ok = all(
-            hasattr(self, name)
-            for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"]
-        )
+        lb_ok = all(hasattr(self, name) for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"])
         lb_ok &= inspect.getsource(self.__init__).count("leaderboard_task.start") > 0
-        lb_ok &= (
-            getattr(self.leaderboard_task, "seconds", None) == 420
-            or getattr(self.leaderboard_task, "minutes", None) == 7.0
-        )
+        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 420 or getattr(self.leaderboard_task, "minutes", None) == 7.0
         lb_ok &= "pari_xp_leaderboard" in inspect.getsource(self._build_hub_view)
         lb_ok &= "ephemeral=True" in inspect.getsource(self._leaderboard_button_callback)
         report["leaderboard"] = "PASS" if lb_ok else "FAIL"
@@ -875,20 +809,10 @@ class RouletteRefugeCog(commands.Cog):
 
         module = inspect.getmodule(self)
         module_src = inspect.getsource(module)
-        classes = [
-            c
-            for c in vars(module).values()
-            if inspect.isclass(c) and c.__module__ == module.__name__
-        ]
+        classes = [c for c in vars(module).values() if inspect.isclass(c) and c.__module__ == module.__name__]
         class_name = self.__class__.__name__
-        isolation_ok = (
-            len([c for c in classes if c.__name__ == class_name]) == 1
-        )
-        custom_ids = [
-            cid
-            for cid in re.findall(r'custom_id="([^"]+)"', module_src)
-            if not cid.startswith("(")
-        ]
+        isolation_ok = len([c for c in classes if c.__name__ == class_name]) == 1
+        custom_ids = [cid for cid in re.findall(r'custom_id="([^"]+)"', module_src) if not cid.startswith("(")]
         isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
         isolation_ok &= PARI_XP_DATA_DIR == "main/data/pari_xp/"
         isolation_ok &= "pari_xp" in module_src.lower()
@@ -916,11 +840,7 @@ class RouletteRefugeCog(commands.Cog):
         if any(v != "PASS" for v in report.values()):
             color = discord.Color.orange()
 
-        embed = discord.Embed(
-            title="🧪 Roulette Refuge — Self-check",
-            description="Diagnostic interne (PASS/FAIL)",
-            color=color
-        )
+        embed = discord.Embed(title="🧪 Roulette Refuge — Self-check", description="Diagnostic interne (PASS/FAIL)", color=color)
         for key, val in report.items():
             embed.add_field(name=key, value=val, inline=True)
         embed.set_footer(text="Ce diagnostic n'altère rien (add-only).")
