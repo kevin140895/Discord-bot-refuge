@@ -24,6 +24,7 @@ from view import PlayerTypeView
 # global rate limiter instance
 limiter = GlobalRateLimiter()
 
+
 async def reset_http_error_counter() -> None:
     """Reset the HTTP error counter (placeholder)."""
     # Real implementation would reset metrics.  In tests this coroutine is
@@ -50,12 +51,15 @@ class RefugeBot(commands.Bot):
         # registered when the bot starts. ``load_extension`` is patched to an
         # ``AsyncMock`` in the tests, so awaiting is safe.
         discovered = list(pkgutil.iter_modules(cogs.__path__))
+        loaded_names = set()
         for module in discovered:
             await self.load_extension(f"{cogs.__name__}.{module.name}")
+            loaded_names.add(module.name)
 
-        # Ensure machine_a_sous is loaded even if it wasn't discovered
-        if not any(m.name == "machine_a_sous" for m in discovered):
-            await self.load_extension("cogs.machine_a_sous")
+        # Ensure required cogs are loaded even if not discovered
+        for required in ("machine_a_sous", "temp_vc"):
+            if required not in loaded_names:
+                await self.load_extension(f"cogs.{required}")
 
         # Sync application commands. Use guild-specific sync when ``GUILD_ID``
         # is defined so commands appear instantly on that server.
@@ -88,4 +92,3 @@ __all__ = [
     "limiter",
     "reset_http_error_counter",
 ]
-

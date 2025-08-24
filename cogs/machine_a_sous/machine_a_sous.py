@@ -16,15 +16,15 @@ from ..xp import award_xp, add_xp_boost
 from config import (
     ANNOUNCE_CHANNEL_ID,
     ROLE_NOTIFICATION as NOTIF_ROLE_ID,
-    ROULETTE_ROLE_ID as ROLE_ID,
-    ROULETTE_CHANNEL_ID as CHANNEL_ID,
+    MACHINE_A_SOUS_ROLE_ID as ROLE_ID,
+    MACHINE_A_SOUS_CHANNEL_ID as CHANNEL_ID,
     DATA_DIR,
-    ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES,
+    MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES,
 )
 logger = logging.getLogger(__name__)
 
 PARIS_TZ = "Europe/Paris"
-WINNER_ROLE_NAME = "🏆 Gagnant Roulette"
+WINNER_ROLE_NAME = "🏆 Gagnant Machine à sous"
 # Répartition des gains (total 1000)
 REWARDS = [
     0,
@@ -39,21 +39,21 @@ REWARDS = [
     "shared_xp",
 ]
 WEIGHTS = [300, 250, 150, 100, 50, 10, 5, 50, 30, 55]
-SPIN_GIF_URL = "https://media.tenor.com/ZzOaGh2sg2AAAAAi/roulette-spin.gif"
+SPIN_GIF_URL = "https://media.tenor.com/2roX3zvclxkAAAAC/slot-machine.gif"
 WIN_GIF_URL = "https://media.tenor.com/XwI-iYdkfVIAAAAi/lottery-winner.gif"
 
 def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-class RouletteView(discord.ui.View):
+class MachineASousView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     async def _single_spin(
         self,
         interaction: discord.Interaction,
-        cog: "RouletteRefugeCog",
+        cog: "MachineASousCog",
         free: bool = False,
     ) -> None:
         gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
@@ -89,7 +89,7 @@ class RouletteView(discord.ui.View):
                     interaction.user.id, 50
                 )
             except Exception as e:
-                logger.exception("[Roulette] award_xp a échoué: %s", e)
+                logger.exception("[MachineASous] award_xp a échoué: %s", e)
                 await interaction.followup.send(
                     "❌ Erreur interne (XP). Réessaie plus tard.",
                     ephemeral=True,
@@ -99,7 +99,7 @@ class RouletteView(discord.ui.View):
                 try:
                     await award_xp(other.id, 50)
                 except Exception as e:
-                    logger.exception("[Roulette] award_xp (shared) échec: %s", e)
+                    logger.exception("[MachineASous] award_xp (shared) échec: %s", e)
             if other:
                 msg = (
                     f"🤝 XP partagé ! Toi et {other.mention} gagnez chacun 50 XP."
@@ -115,7 +115,7 @@ class RouletteView(discord.ui.View):
                     interaction.user.id, gain
                 )
             except Exception as e:
-                logger.exception("[Roulette] award_xp a échoué: %s", e)
+                logger.exception("[MachineASous] award_xp a échoué: %s", e)
                 await interaction.followup.send(
                     "❌ Erreur interne (XP). Réessaie plus tard.",
                     ephemeral=True,
@@ -130,7 +130,7 @@ class RouletteView(discord.ui.View):
                     try:
                         if role < me.top_role:
                             await interaction.user.add_roles(
-                                role, reason="Roulette (gagnant 1000 XP)"
+                                role, reason="Machine à sous (gagnant 1000 XP)"
                             )
                             role_given = True
                             expires_at = (
@@ -144,7 +144,7 @@ class RouletteView(discord.ui.View):
                                 expires_at=expires_at.isoformat(),
                             )
                     except Exception as e:
-                        logger.error("[Roulette] add_roles échec: %s", e)
+                        logger.error("[MachineASous] add_roles échec: %s", e)
             if not free:
                 cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
 
@@ -177,7 +177,7 @@ class RouletteView(discord.ui.View):
                         embed = discord.Embed(
                             title="🎉 Jackpot !",
                             description=(
-                                f"{interaction.user.mention} a gagné **{gain} XP** à la roulette !"
+                                f"{interaction.user.mention} a gagné **{gain} XP** à la machine à sous !"
                             ),
                             color=0xFFD700,
                         )
@@ -185,7 +185,7 @@ class RouletteView(discord.ui.View):
                         await ch.send(embed=embed)
                     except Exception as e:
                         logger.error(
-                            "[Roulette] Échec annonce gagnant: %s", e
+                            "[MachineASous] Échec annonce gagnant: %s", e
                         )
 
         try:
@@ -199,9 +199,9 @@ class RouletteView(discord.ui.View):
                     total_xp,
                 )
         except Exception as e:
-            logger.error("[Roulette] announce_level_up échouée: %s", e)
+            logger.error("[MachineASous] announce_level_up échouée: %s", e)
 
-        spin_embed = discord.Embed(title="🎰 La roulette tourne…")
+        spin_embed = discord.Embed(title="🎰 La machine à sous tourne…")
         spin_embed.set_image(url=SPIN_GIF_URL)
         spin_msg = await interaction.followup.send(
             embed=spin_embed,
@@ -214,21 +214,21 @@ class RouletteView(discord.ui.View):
             await self._single_spin(interaction, cog, free=True)
 
     @discord.ui.button(
-        label="🎰 Roulette",
+        label="🎰 Machine à sous",
         style=discord.ButtonStyle.success,
-        custom_id="roulette:play",
+        custom_id="machineasous:play",
     )
     async def play_button(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        cog: Optional["RouletteRefugeCog"] = interaction.client.get_cog(
-            "RouletteRefugeCog",
+        cog: Optional["MachineASousCog"] = interaction.client.get_cog(
+            "MachineASousCog",
         )  # type: ignore
         if not cog:
             return await interaction.response.send_message(
-                "❌ Fonction Roulette indisponible.",
+                "❌ Fonction Machine à sous indisponible.",
                 ephemeral=True,
             )
 
@@ -236,7 +236,7 @@ class RouletteView(discord.ui.View):
             nxt = next_boundary_dt(tz=PARIS_TZ, start_h=10, end_h=22)
             return await interaction.response.send_message(
                 (
-                    "⏳ La roulette est ouverte "
+                    "⏳ La machine à sous est ouverte "
                     "**de 10:00 à 22:00 (Europe/Paris)**.\n"
                     f"🔔 Prochaine ouverture/fermeture : **{_fmt(nxt)}**."
                 ),
@@ -266,7 +266,7 @@ class RouletteView(discord.ui.View):
         await self._single_spin(interaction, cog)
 
 
-class RouletteRefugeCog(commands.Cog):
+class MachineASousCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.tz = ZoneInfo(PARIS_TZ)
@@ -282,7 +282,7 @@ class RouletteRefugeCog(commands.Cog):
             desc_state = "⛔ **Fermée** (10:00–22:00)"
             color = 0xED4245
         return discord.Embed(
-            title="🎰 Roulette",
+            title="🎰 Machine à sous",
             description=(
                 f"{desc_state}\n\n"
                 "0 / 5 / 20 / 50 / 100 / 500 / **1000** XP\n"
@@ -314,13 +314,13 @@ class RouletteRefugeCog(commands.Cog):
         await self._delete_old_poster_message()
         ch = self.bot.get_channel(CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logger.warning("[Roulette] Salon roulette introuvable.")
+            logger.warning("[MachineASous] Salon machine à sous introuvable.")
             return
         try:
             if self.current_view_enabled:
                 msg = await ch.send(
                     embed=self._poster_embed(),
-                    view=RouletteView(),
+                    view=MachineASousView(),
                 )
             else:
                 msg = await ch.send(embed=self._poster_embed())
@@ -328,10 +328,10 @@ class RouletteRefugeCog(commands.Cog):
                 channel_id=str(ch.id),
                 message_id=str(msg.id),
             )
-            logger.info("[Roulette] Nouveau message roulette publié.")
+            logger.info("[MachineASous] Nouveau message machine à sous publié.")
         except Exception as e:
             logger.error(
-                f"[Roulette] Échec envoi nouveau message roulette: {e}"
+                f"[MachineASous] Échec envoi nouveau message machine à sous: {e}"
             )
 
     async def _find_existing_poster(self) -> Optional[discord.Message]:
@@ -343,7 +343,7 @@ class RouletteRefugeCog(commands.Cog):
                 if (
                     msg.author.id == self.bot.user.id
                     and msg.embeds
-                    and msg.embeds[0].title == "🎰 Roulette"
+                    and msg.embeds[0].title == "🎰 Machine à sous"
                 ):
                     return msg
         except Exception as e:
@@ -381,13 +381,13 @@ class RouletteRefugeCog(commands.Cog):
         try:
             await self._ensure_poster_message()
         except Exception as err:
-            logger.warning("[Roulette] Init failed: %s", err)
+            logger.warning("[MachineASous] Init failed: %s", err)
         self.maintenance_loop.start()
 
     async def _post_state_message(self, opened: bool):
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logger.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
+            logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")
             return
         try:
             old = self.store.get_state_message()
@@ -407,7 +407,7 @@ class RouletteRefugeCog(commands.Cog):
                         if (
                             m.author.id == self.bot.user.id
                             and m.embeds
-                            and m.embeds[0].title.startswith("🎰 Roulette —")
+                            and m.embeds[0].title.startswith("🎰 Machine à sous —")
                         ):
                             msg_to_delete = m
                             break
@@ -423,11 +423,11 @@ class RouletteRefugeCog(commands.Cog):
             allowed = None
             if opened:
                 content = (
-                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **roulette ouvre** maintenant — vous pouvez jouer jusqu’à **22:00**."
+                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **machine à sous ouvre** maintenant — vous pouvez jouer jusqu’à **22:00**."
                 )
                 allowed = discord.AllowedMentions(roles=True)
             if opened:
-                title = "🎰 Bienvenue à la Roulette du Refuge ! 🎰"
+                title = "🎰 Bienvenue à la Machine à sous du Refuge ! 🎰"
                 description = (
                     "Place tes mises et laisse tourner la roue... qui sait où elle s’arrêtera ?\n\n"
                     "💎 Super Jackpot → +1000 XP (ultra rare – 0,1% de chance !)\n"
@@ -441,7 +441,7 @@ class RouletteRefugeCog(commands.Cog):
                     "5️⃣0️⃣ Gain sympa – 50 XP 💵\n"
                     "1️⃣0️⃣0️⃣ Belle prise – 100 XP 💸\n"
                     "5️⃣0️⃣0️⃣ JACKPOT intermédiaire – 500 XP 💰\n\n"
-                    "🏆 Gagnant Roulette est attribué pendant 24h si tu gagnes le **Super Jackpot**\n\n"
+                    "🏆 Gagnant Machine à sous est attribué pendant 24h si tu gagnes le **Super Jackpot**\n\n"
                     "Bonne chance, et que la roue tourne en ta faveur !"
                 )
                 color = 0x2ECC71
@@ -460,12 +460,12 @@ class RouletteRefugeCog(commands.Cog):
             )
             self.store.set_state_message(str(ch.id), str(msg.id))
         except Exception as e:
-            logger.error("[Roulette] Post state message fail: %s", e)
+            logger.error("[MachineASous] Post state message fail: %s", e)
 
     async def _ensure_state_message(self, opened: bool):
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logger.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
+            logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")
             return
         stored = self.store.get_state_message()
         if stored:
@@ -474,7 +474,7 @@ class RouletteRefugeCog(commands.Cog):
                 if (
                     msg.embeds
                     and msg.embeds[0].title
-                    == f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}"
+                    == f"🎰 Machine à sous — {'OUVERTE' if opened else 'FERMÉE'}"
                 ):
                     return
             except discord.NotFound as e:
@@ -485,7 +485,7 @@ class RouletteRefugeCog(commands.Cog):
                     msg.author.id == self.bot.user.id
                     and msg.embeds
                     and msg.embeds[0].title
-                    == f"🎰 Roulette — {'OUVERTE' if opened else 'FERMÉE'}"
+                    == f"🎰 Machine à sous — {'OUVERTE' if opened else 'FERMÉE'}"
                 ):
                     self.store.set_state_message(str(ch.id), str(msg.id))
                     return
@@ -493,7 +493,7 @@ class RouletteRefugeCog(commands.Cog):
             logger.debug("Error ensuring state message: %s", e)
         await self._post_state_message(opened)
 
-    @tasks.loop(minutes=ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES)
+    @tasks.loop(minutes=MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES)
     async def maintenance_loop(self):
         # Vérification des horaires d'ouverture
         try:
@@ -507,9 +507,9 @@ class RouletteRefugeCog(commands.Cog):
                 await self._post_state_message(enabled_now)
                 self._last_announced_state = enabled_now
         except Exception as e:
-            logger.error("[Roulette] maintenance_loop boundary erreur: %s", e)
+            logger.error("[MachineASous] maintenance_loop boundary erreur: %s", e)
 
-        # Surveillance du message de la roulette
+        # Surveillance du message de la machine à sous
         try:
             poster = self.store.get_poster()
             if not poster:
@@ -524,7 +524,7 @@ class RouletteRefugeCog(commands.Cog):
                     except discord.NotFound:
                         await self._replace_poster_message()
         except Exception as e:
-            logger.error(f"[Roulette] maintenance_loop poster erreur: {e}")
+            logger.error(f"[MachineASous] maintenance_loop poster erreur: {e}")
 
         # Nettoyage des rôles temporaires
         try:
@@ -543,12 +543,12 @@ class RouletteRefugeCog(commands.Cog):
                         role = guild.get_role(int(data.get("role_id", 0)))
                         if member and role:
                             try:
-                                await member.remove_roles(role, reason="Roulette rôle expiré")
+                                await member.remove_roles(role, reason="Machine à sous rôle expiré")
                             except Exception as e:
-                                logger.error("[Roulette] maintenance_loop remove_roles erreur: %s", e)
+                                logger.error("[MachineASous] maintenance_loop remove_roles erreur: %s", e)
                     self.store.clear_role_assignment(uid)
         except Exception as e:
-            logger.error(f"[Roulette] maintenance_loop roles erreur: {e}")
+            logger.error(f"[MachineASous] maintenance_loop roles erreur: {e}")
 
     @maintenance_loop.before_loop
     async def before_maintenance_loop(self):
@@ -556,30 +556,30 @@ class RouletteRefugeCog(commands.Cog):
 
     # ── Slash command admin ──
     group = app_commands.Group(
-        name="roulette",
-        description="Gestion de la roulette",
+        name="machine",
+        description="Gestion de la machine à sous",
     )
 
     @group.command(
         name="refresh",
-        description="Republier le message de la roulette",
+        description="Republier le message de la machine à sous",
     )
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def refresh_roulette(self, interaction: discord.Interaction):
-        with measure("slash:roulette_refresh"):
+    async def refresh_machine(self, interaction: discord.Interaction):
+        with measure("slash:machine_refresh"):
             await interaction.response.defer(ephemeral=True, thinking=True)
             await self._replace_poster_message()
-            await interaction.followup.send("✅ Message roulette rafraîchi.", ephemeral=True)
+            await interaction.followup.send("✅ Message machine à sous rafraîchi.", ephemeral=True)
 
     async def cog_load(self):
         try:
-            self.bot.add_view(RouletteView())
+            self.bot.add_view(MachineASousView())
         except Exception as e:
-            logger.error("[Roulette] add_view échoué: %s", e)
+            logger.error("[MachineASous] add_view échoué: %s", e)
         self.bot.loop.create_task(self._init_after_ready())
 
     async def cog_unload(self):
         self.maintenance_loop.cancel()
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(RouletteRefugeCog(bot))
+    await bot.add_cog(MachineASousCog(bot))

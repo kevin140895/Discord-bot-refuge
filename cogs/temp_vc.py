@@ -127,13 +127,17 @@ class TempVCCog(commands.Cog):
                 break
 
         if game_name:
-            status = game_name
+            # Discord limite les noms de salon à 100 caractères ; on réserve
+            # l'espace pour la base et le séparateur «  • ».
+            max_status_len = 100 - len(base) - 3
+            status = game_name[:max_status_len]
         elif any(m.voice and m.voice.self_mute for m in channel.members):
             status = "Endormie"
         else:
             status = "Chat"
-
-        return f"{base} • {status}"
+        name = f"{base} • {status}"
+        # Discord limite les noms de salon à 100 caractères
+        return name[:100]
 
     async def _rename_channel(self, channel: discord.VoiceChannel) -> None:
         """Tâche différée effectuant le renommage du salon."""
@@ -225,6 +229,11 @@ class TempVCCog(commands.Cog):
                     new_vc.name,
                     new_vc.id,
                 )
+                await new_vc.delete(reason="Échec du déplacement du membre")
+                TEMP_VC_IDS.discard(new_vc.id)
+                self._last_names.pop(new_vc.id, None)
+                save_temp_vc_ids(TEMP_VC_IDS)
+                return
             await self._update_channel_name(new_vc)
             return
 
@@ -240,6 +249,9 @@ class TempVCCog(commands.Cog):
                         "Suppression du salon %s échouée", before.channel.id
                     )
                 else:
+                    task = self._rename_tasks.pop(before.channel.id, None)
+                    if task:
+                        task.cancel()
                     logger.info(
                         "[temp_vc] deleted temporary channel '%s' (ID %s) after %s (%s) left",
                         before.channel.name,

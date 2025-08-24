@@ -5,6 +5,8 @@ import discord
 
 from utils.audio import FFMPEG_BEFORE, FFMPEG_OPTIONS
 
+logger = logging.getLogger(__name__)
+
 
 async def fetch_voice_channel(
     bot: discord.Client, vc_id: int
@@ -20,7 +22,7 @@ async def fetch_voice_channel(
         except discord.HTTPException:
             channel = None
     if not isinstance(channel, discord.VoiceChannel):
-        logging.warning("Salon vocal %s introuvable", vc_id)
+        logger.warning("Salon vocal %s introuvable", vc_id)
         return None
     return channel
 
@@ -49,19 +51,19 @@ async def ensure_voice(
             else:
                 voice = await channel.connect(reconnect=True)
         except discord.Forbidden:
-            logging.warning(
+            logger.warning(
                 "Permissions insuffisantes pour se connecter au salon %s", vc_id
             )
         except discord.NotFound:
-            logging.warning(
+            logger.warning(
                 "Salon %s introuvable lors de la connexion", vc_id
             )
         except discord.HTTPException as e:
-            logging.error(
+            logger.error(
                 "Erreur HTTP lors de la connexion au salon %s: %s", vc_id, e
             )
         except Exception as e:  # pragma: no cover - sécurité supplémentaire
-            logging.exception(
+            logger.exception(
                 "Connexion au salon %s échouée: %s", vc_id, e
             )
     return voice

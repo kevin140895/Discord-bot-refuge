@@ -1,4 +1,4 @@
-"""Minimal JSON storage helpers for Roulette Refuge."""
+"""Minimal JSON storage helpers for Machine à sous."""
 from __future__ import annotations
 
 from pathlib import Path
