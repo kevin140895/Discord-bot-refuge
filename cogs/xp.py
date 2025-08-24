@@ -36,6 +36,7 @@ from utils.voice_bonus import get_voice_multiplier
 # Fichiers de persistance
 VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
 DAILY_STATS_FILE = os.path.join(DATA_DIR, "daily_stats.json")
+XP_BOOSTS_FILE = os.path.join(DATA_DIR, "xp_boosts.json")
 
 # S'assurer que le répertoire de données existe
 ensure_dir(DATA_DIR)
@@ -46,6 +47,7 @@ XP_CACHE: dict[str, dict] = xp_store.data
 DAILY_STATS: dict[str, dict[str, dict[str, int]]] = {}
 XP_LOCK = xp_store.lock
 DAILY_LOCK = asyncio.Lock()
+XP_BOOSTS: dict[str, datetime] = {}
 
 
 def load_voice_times() -> dict[str, datetime]:
@@ -80,12 +82,36 @@ async def save_daily_stats_to_disk() -> None:
     await atomic_write_json_async(DAILY_STATS_FILE, data)
 
 
+def load_xp_boosts() -> dict[str, datetime]:
+    data = read_json_safe(XP_BOOSTS_FILE)
+    out: dict[str, datetime] = {}
+    for uid, iso in data.items():
+        try:
+            out[uid] = datetime.fromisoformat(iso)
+        except ValueError as e:
+            logging.warning("Invalid XP boost for user %s: %s", uid, e)
+            continue
+    return out
+
+
+async def save_xp_boosts_to_disk() -> None:
+    try:
+        serializable = {
+            uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in XP_BOOSTS.items()
+        }
+        await atomic_write_json_async(XP_BOOSTS_FILE, serializable)
+        logging.info("[xp] XP boosts sauvegardés (%s)", XP_BOOSTS_FILE)
+    except OSError as e:
+        logging.exception("[xp] Échec sauvegarde XP boosts: %s", e)
+
+
 async def xp_bootstrap_cache() -> None:
-    global XP_CACHE, voice_times, DAILY_STATS, XP_LOCK
+    global XP_CACHE, voice_times, DAILY_STATS, XP_LOCK, XP_BOOSTS
     XP_CACHE = xp_store.data
     XP_LOCK = xp_store.lock
     voice_times = load_voice_times()
     DAILY_STATS = load_daily_stats()
+    XP_BOOSTS = load_xp_boosts()
     logging.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
 
@@ -108,10 +134,8 @@ async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
                 amount *= 2
             else:
                 XP_BOOSTS.pop(str(user_id), None)
+                asyncio.create_task(save_xp_boosts_to_disk())
     return await xp_store.add_xp(user_id, amount)
-
-
-XP_BOOSTS: dict[str, datetime] = {}
 
 
 def add_xp_boost(user_id: int, duration_minutes: int) -> None:
@@ -119,6 +143,7 @@ def add_xp_boost(user_id: int, duration_minutes: int) -> None:
     XP_BOOSTS[str(user_id)] = datetime.now(timezone.utc) + timedelta(
         minutes=duration_minutes
     )
+    asyncio.create_task(save_xp_boosts_to_disk())
 
 async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed: int):
     def _draw() -> io.BytesIO:
@@ -177,6 +202,7 @@ class XPCog(commands.Cog):
         except OSError as e:
             logging.exception("[xp] auto_backup_xp: exception: %s", e)
         await save_daily_stats_to_disk()
+        await save_xp_boosts_to_disk()
         logging.info("🛟 Sauvegarde périodique effectuée.")
 
     @commands.Cog.listener()
