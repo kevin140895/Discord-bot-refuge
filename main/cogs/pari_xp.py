@@ -209,6 +209,7 @@ class RouletteRefugeCog(commands.Cog):
             username = tx.get("username", str(uid))
             delta = int(tx.get("delta", 0))
             user_stat = stats.setdefault(uid, {"username": username, "net": 0})
+            user_stat["username"] = username
             user_stat["net"] = int(user_stat["net"]) + delta
         winners = sorted(
             [v for v in stats.values() if int(v["net"]) > 0],
@@ -357,6 +358,7 @@ class RouletteRefugeCog(commands.Cog):
                 if not biggest or delta > biggest["delta"]:
                     biggest = tx
             user_stat = stats.setdefault(uid, {"username": username, "net": 0})
+            user_stat["username"] = username
             user_stat["net"] = int(user_stat["net"]) + delta
         winners = sorted(
             [v for v in stats.values() if int(v["net"]) > 0],
