@@ -448,7 +448,7 @@ class RouletteRefugeCog(commands.Cog):
     async def _wait_ready_scheduler(self) -> None:
         await self.bot.wait_until_ready()
 
-    @tasks.loop(minutes=7.0)
+    @tasks.loop(minutes=3.0)
     async def leaderboard_task(self) -> None:
         channel = await self._get_channel()
         if not channel:
@@ -776,6 +776,22 @@ class RouletteRefugeCog(commands.Cog):
             }
         )
         await storage.save_json(storage.Path(TX_PATH), transactions)
+
+        # Refresh leaderboard after each bet so the ranking stays up to date
+        try:
+            channel = await self._get_channel()
+            if channel:
+                await self._ensure_leaderboard_message(channel)
+                state = storage.load_json(storage.Path(STATE_PATH), {})
+                msg_id = state.get("leaderboard_message_id")
+                if msg_id:
+                    try:
+                        msg = await channel.fetch_message(int(msg_id))
+                        await msg.edit(embed=self._build_leaderboard_embed())
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         lines = [
             f"Mise : {amount} XP",
             f"Segment : {segment}",
@@ -871,7 +887,7 @@ class RouletteRefugeCog(commands.Cog):
 
         lb_ok = all(hasattr(self, name) for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"])
         lb_ok &= inspect.getsource(type(self).__init__).count("leaderboard_task.start") > 0
-        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 420 or getattr(self.leaderboard_task, "minutes", None) == 7.0
+        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 180 or getattr(self.leaderboard_task, "minutes", None) == 3.0
         lb_ok &= "pari_xp_leaderboard" in inspect.getsource(self._build_hub_view)
         lb_ok &= "ephemeral=True" in inspect.getsource(self._leaderboard_button_callback)
         report["leaderboard"] = "PASS" if lb_ok else "FAIL"
