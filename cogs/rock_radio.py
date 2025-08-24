@@ -35,7 +35,7 @@ class RockRadioCog(commands.Cog):
         if error:
             logger.warning("Erreur de lecture rock radio: %s", error)
         if self._reconnect_task is None or self._reconnect_task.done():
-            self._reconnect_task = self.bot.loop.create_task(self._delayed_reconnect())
+            self._reconnect_task = asyncio.create_task(self._delayed_reconnect())
 
     async def _delayed_reconnect(self) -> None:
         await asyncio.sleep(5)
@@ -54,7 +54,7 @@ class RockRadioCog(commands.Cog):
     ) -> None:
         if member.id == self.bot.user.id and after.channel is None:
             if self._reconnect_task is None or self._reconnect_task.done():
-                self._reconnect_task = self.bot.loop.create_task(
+                self._reconnect_task = asyncio.create_task(
                     self._delayed_reconnect()
                 )
             return
@@ -68,7 +68,7 @@ class RockRadioCog(commands.Cog):
         if self._reconnect_task and not self._reconnect_task.done():
             self._reconnect_task.cancel()
         if self.voice and self.voice.is_connected():
-            self.bot.loop.create_task(self.voice.disconnect())
+            asyncio.create_task(self.voice.disconnect())
 
 
 async def setup(bot: commands.Bot) -> None:

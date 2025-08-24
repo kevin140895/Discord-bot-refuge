@@ -88,7 +88,7 @@ class DoubleVoiceXP(commands.Cog):
         self._tasks: List[asyncio.Task] = []
         self.state: Dict[str, Any] = {}
         self.daily_planner.start()
-        self.bot.loop.create_task(self._startup())
+        asyncio.create_task(self._startup())
 
     async def _startup(self) -> None:
         """Attendre le démarrage du bot et préparer les sessions du jour."""
@@ -157,13 +157,13 @@ class DoubleVoiceXP(commands.Cog):
         if end_dt <= now:
             return
         delay = max(0, (dt - now).total_seconds())
-        task = self.bot.loop.create_task(self._run_session(session, delay))
+        task = asyncio.create_task(self._run_session(session, delay))
         self._tasks.append(task)
 
     def _resume_session(self, session: Dict[str, Any], delay: float) -> None:
         """Reprendre une session déjà démarrée et programmée pour se terminer."""
         set_voice_bonus(True)
-        task = self.bot.loop.create_task(self._finish_session(session, delay))
+        task = asyncio.create_task(self._finish_session(session, delay))
         self._tasks.append(task)
 
     async def _finish_session(self, session: Dict[str, Any], delay: float) -> None:

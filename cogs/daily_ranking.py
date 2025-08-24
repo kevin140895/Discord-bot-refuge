@@ -40,7 +40,7 @@ class DailyRankingAndRoles(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._task = self.bot.loop.create_task(self._scheduler())
+        self._task = asyncio.create_task(self._scheduler())
 
     def cog_unload(self) -> None:
         self._task.cancel()
