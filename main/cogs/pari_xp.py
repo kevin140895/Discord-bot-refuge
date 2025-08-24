@@ -747,7 +747,12 @@ class RouletteRefugeCog(commands.Cog):
                 result["delta"] = cast(int, result["delta"]) + amount
             ts = self._now().isoformat()
             delta = int(cast(int, result["delta"]))
-            add_user_xp(user_id, delta, reason="pari_xp")
+            add_user_xp(
+                user_id,
+                delta,
+                guild_id=interaction.guild_id or 0,
+                source="pari_xp",
+            )
             if result.get("double_xp"):
                 apply_double_xp_buff(user_id, 60)
             if result.get("ticket"):
