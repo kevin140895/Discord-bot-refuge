@@ -472,13 +472,12 @@ class MachineASousCog(commands.Cog):
 
             content = None
             allowed = None
+            title = f"🎰 Machine à sous — {'OUVERTE' if opened else 'FERMÉE'}"
             if opened:
                 content = (
                     f"<@&{NOTIF_ROLE_ID}> 🎰 La **machine à sous ouvre** maintenant — vous pouvez jouer jusqu’à **22:00**."
                 )
                 allowed = discord.AllowedMentions(roles=True)
-            if opened:
-                title = "🎰 Bienvenue à la Machine à sous du Refuge ! 🎰"
                 description = (
                     "Place tes mises et laisse tourner la roue... qui sait où elle s’arrêtera ?\n\n"
                     "💎 Super Jackpot → +1000 XP (ultra rare – 0,1% de chance !)\n"
@@ -497,7 +496,6 @@ class MachineASousCog(commands.Cog):
                 )
                 color = 0x2ECC71
             else:
-                title = "🎰 Casino du Refuge fermé ! 🎰"
                 description = (
                     "💡 Les néons s’éteignent… ⛔\n"
                     "À demain pour de nouvelles mises et, peut-être, le gros lot 💰."
