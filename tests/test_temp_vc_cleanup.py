@@ -72,9 +72,18 @@ async def test_rename_task_cancelled_on_channel_delete(monkeypatch):
     channel = SimpleNamespace(id=42, name="Temp", members=[], delete=AsyncMock())
     member = SimpleNamespace(id=1)
 
-    # Create a dummy rename task
+    # Create a dummy rename task and track pop calls
+    class TrackingDict(dict):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.popped = False
+
+        def pop(self, key, default=None):
+            self.popped = True
+            return super().pop(key, default)
+
     task = loop.create_task(asyncio.sleep(3600))
-    cog._rename_tasks[channel.id] = task
+    cog._rename_tasks = TrackingDict({channel.id: task})
 
     before = SimpleNamespace(channel=channel)
     after = SimpleNamespace(channel=None)
@@ -85,3 +94,4 @@ async def test_rename_task_cancelled_on_channel_delete(monkeypatch):
     channel.delete.assert_awaited_once()
     assert channel.id not in cog._rename_tasks
     assert task.cancelled()
+    assert cog._rename_tasks.popped
