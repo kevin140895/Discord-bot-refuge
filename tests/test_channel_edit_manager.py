@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
+import logging
 import pytest
 import pytest_asyncio
 
@@ -64,3 +65,12 @@ async def test_channel_edit_manager_respects_global_interval(monkeypatch, edit_m
     assert delays == [pytest.approx(3, abs=0.1)]
     ch1.edit.assert_awaited_once()
     ch2.edit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_channel_edit_manager_warns_if_worker_inactive(caplog):
+    mgr = cem._ChannelEditManager()
+    channel = SimpleNamespace(id=1, name="Old", edit=AsyncMock())
+    with caplog.at_level(logging.WARNING):
+        await mgr.request(channel, name="New")
+    assert "worker inactive" in caplog.text

@@ -46,6 +46,11 @@ class _ChannelEditManager:
         else:
             self._pending[channel.id] = (channel, kwargs)
             await self._queue.put(channel.id)
+        if self._worker is None or self._worker.done():
+            logging.warning(
+                "[channel_edit_manager] worker inactive; edit for %s may not run",
+                channel.id,
+            )
 
     async def _run(self) -> None:
         while True:
