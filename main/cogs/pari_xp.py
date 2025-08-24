@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo
 from discord import ui
 from utils.storage import load_json  # noqa: F401
 from utils.xp_adapter import get_user_xp, get_user_account_age_days
+import random
+from utils.xp_adapter import add_user_xp
 
 from utils import storage, timezones
 
@@ -14,6 +16,7 @@ DATA_DIR = "main/data/pari_xp/"
 CONFIG_PATH = DATA_DIR + "config.json"
 STATE_PATH = DATA_DIR + "state.json"
 LB_PATH = DATA_DIR + "leaderboard.json"
+TX_PATH = DATA_DIR + "transactions.json"
 
 
 class RouletteRefugeCog(commands.Cog):
@@ -222,6 +225,66 @@ class RouletteRefugeCog(commands.Cog):
 
         return BetModal()
 
+    def _draw_segment(self) -> str:
+        probabilities = self.config.get("probabilities", {})
+        if not probabilities:
+            return "lose_0x"
+        segments = list(probabilities.keys())
+        weights = list(probabilities.values())
+        return random.choices(segments, weights=weights, k=1)[0]
+
+    def _compute_result(self, bet: int, segment: str) -> dict:
+        payout = 0
+        delta = 0
+        mult: Optional[float] = None
+        notes = None
+        if segment == "lose_0x":
+            payout = 0
+            delta = -bet
+            mult = 0.0
+        elif segment == "half_0_5x":
+            payout = bet // 2
+            delta = payout - bet
+            mult = 0.5
+        elif segment == "even_1x":
+            payout = bet
+            delta = 0
+            mult = 1.0
+        elif segment == "win_2x":
+            payout = bet * 2
+            delta = payout - bet
+            mult = 2.0
+        elif segment == "win_5x":
+            payout = bet * 5
+            delta = payout - bet
+            mult = 5.0
+        elif segment == "win_10x":
+            payout = bet * 10
+            delta = payout - bet
+            mult = 10.0
+        elif segment == "super_jackpot_plus_1000":
+            payout = bet + 1000
+            delta = 1000
+            notes = "super jackpot"
+        elif segment == "ticket_free":
+            payout = 0
+            delta = -bet
+            notes = "placeholder ticket"
+        elif segment == "double_xp_1h":
+            payout = 0
+            delta = -bet
+            notes = "placeholder double_xp"
+        else:
+            payout = 0
+            delta = -bet
+        return {
+            "segment": segment,
+            "payout": payout,
+            "delta": delta,
+            "mult": mult,
+            "notes": notes,
+        }
+
     async def _handle_bet_submission(
         self,
         interaction: discord.Interaction,
@@ -251,6 +314,7 @@ class RouletteRefugeCog(commands.Cog):
             )
             return
         user_id = interaction.user.id
+        user = interaction.user
         if get_user_account_age_days(user_id) < 2:
             await interaction.response.send_message(
                 "❌ Ancienneté requise : 2 jours.",
@@ -289,4 +353,56 @@ class RouletteRefugeCog(commands.Cog):
         await interaction.response.send_message(
             "✅ Mise reçue. (Tirage à l'étape 6)", ephemeral=True
         )
+        segment = self._draw_segment()
+        result = self._compute_result(amount, segment)
+        add_user_xp(user_id, result["delta"], reason="pari_xp")
+        transactions = storage.load_json(storage.Path(TX_PATH), [])
+        ts = self._now().isoformat()
+        day_key = ts.split("T")[0]
+        transactions.append(
+            {
+                "ts": ts,
+                "user_id": user_id,
+                "username": user.name,
+                "bet": amount,
+                "segment": segment,
+                "payout": result["payout"],
+                "delta": result["delta"],
+                "mult": result["mult"],
+                "notes": result["notes"],
+                "day_key": day_key,
+            }
+        )
+        await storage.save_json(storage.Path(TX_PATH), transactions)
+        lines = [
+            f"Mise : {amount} XP",
+            f"Segment : {segment}",
+            f"Gain : {result['payout']} XP",
+            f"Delta : {result['delta']} XP",
+        ]
+        if result["notes"]:
+            lines.append(f"Note : {result['notes']}")
+        if segment == "ticket_free":
+            lines.append("🎟️ Tu as gagné un ticket gratuit (placeholder)")
+        elif segment == "double_xp_1h":
+            lines.append("⚡ Tu as gagné un boost Double XP 1h (placeholder)")
+        embed = discord.Embed(title="🎲 Résultat", description="\n".join(lines))
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        public_channel = interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
+        if public_channel:
+            big_win_mult = self.config.get("announce_big_win_mult_threshold", 5)
+            big_loss_xp = self.config.get("announce_big_loss_xp_threshold", 100)
+            if segment == "super_jackpot_plus_1000":
+                content = f"💥 SUPER JACKPOT ! {user.mention} +1000 XP !"
+                if self.config.get("announce_super_jackpot_ping_here", False):
+                    content = "@here " + content
+                await public_channel.send(content)
+            elif result["mult"] and result["mult"] >= big_win_mult:
+                await public_channel.send(
+                    f"🎉 {user.display_name} gagne {result['mult']}× sa mise ({result['payout']} XP) !"
+                )
+            elif result["delta"] <= -big_loss_xp:
+                await public_channel.send(
+                    f"😢 {user.display_name} vient de perdre {abs(result['delta'])} XP..."
+                )
 
