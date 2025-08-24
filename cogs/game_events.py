@@ -180,16 +180,12 @@ class GameEventsCog(commands.Cog):
                     maybe_mentions = [f"<@{u}>" for u, s in evt.rsvps.items() if s == "maybe"]
                     desc = "\n".join(yes_mentions) or "Personne"
                     desc += "\nPeut-être : " + (", ".join(maybe_mentions) or "aucun")
-                    msg = await channel.send(
+                    await channel.send(
                         f"C'est parti pour **{evt.game_name}** !\n"
                         f"Salon vocal: {vc.mention if vc else 'n/a'}\n"
                         f"Joueurs: {desc}\n"
                         "Multiplicateurs: ✅ x2, 🤔 x1.5, autres x1",
                     )
-                    try:
-                        await msg.pin()
-                    except discord.HTTPException:
-                        pass
                 evt.started_at = now
                 evt.state = "running"
                 await save_event(evt)
