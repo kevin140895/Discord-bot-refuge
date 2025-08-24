@@ -28,12 +28,10 @@
     "win_2x": 0.14,
     "win_5x": 0.09,
     "win_10x": 0.03,
-    "ticket_free": 0.003,
     "double_xp_1h": 0.007,
     "super_jackpot_plus_1000": 0.003
   },
   "segments_enabled": {
-    "ticket_free": true,
     "double_xp_1h": true,
     "xp_shared": false
   }

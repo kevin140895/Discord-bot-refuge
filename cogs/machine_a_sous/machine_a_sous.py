@@ -219,7 +219,12 @@ class MachineASousView(discord.ui.View):
         cog: "MachineASousCog",
         free: bool = False,
     ) -> None:
-        gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
+        if free:
+            choices = [r for r in REWARDS if r != 0]
+            weights = [w for r, w in zip(REWARDS, WEIGHTS) if r != 0]
+            gain = random.choices(choices, weights=weights, k=1)[0]
+        else:
+            gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
         if gain == "ticket":
             result = await self._reward_ticket(interaction, cog, free)
         elif gain == "double_xp":
@@ -292,6 +297,10 @@ class MachineASousView(discord.ui.View):
 
         uid = str(interaction.user.id)
         if cog.store.has_claimed_today(uid, tz=PARIS_TZ):
+            if cog.store.use_ticket(uid):
+                await interaction.response.defer(ephemeral=True)
+                await self._single_spin(interaction, cog, free=True)
+                return
             now = datetime.now(cog.tz)
             tomorrow = (
                 now + timedelta(days=1)
