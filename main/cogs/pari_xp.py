@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands, tasks  # noqa: F401
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from utils import storage, timezones
 
@@ -16,6 +17,7 @@ class RouletteRefugeCog(commands.Cog):
         self.bot = bot
         self.config = storage.load_json(storage.Path(CONFIG_PATH), {})
         self.state = storage.load_json(storage.Path(STATE_PATH), {})
+        self.scheduler_task.start()
 
     def _now(self) -> datetime:
         return datetime.now(timezones.TZ_PARIS)
@@ -113,4 +115,65 @@ class RouletteRefugeCog(commands.Cog):
         if channel:
             await self._ensure_hub_message(channel)
             # leaderboard sera géré aux étapes suivantes
+
+    async def _update_hub_state(self, is_open: bool) -> None:
+        self.state["is_open"] = is_open
+        await storage.save_json(storage.Path(STATE_PATH), self.state)
+        channel = await self._get_channel()
+        if channel:
+            await self._ensure_hub_message(channel)
+
+    async def _announce_open(self, channel: discord.TextChannel) -> None:
+        lines = [
+            "Horaires : 08:00→02:00",
+            "Mise min : 5 XP",
+            "Cooldown : 15s",
+            "Cap : 20/jour",
+        ]
+        embed = discord.Embed(
+            title="🤑 Roulette Refuge — Ouverture",
+            description="\n".join(lines),
+            color=discord.Color.green(),
+        )
+        await channel.send(embed=embed)
+
+    async def _announce_close(self, channel: discord.TextChannel) -> None:
+        embed = discord.Embed(
+            title="🤑 Roulette Refuge — Clôture du jour",
+            description="(placeholder)",
+            color=discord.Color.red(),
+        )
+        await channel.send(embed=embed)
+
+    @tasks.loop(minutes=1.0)
+    async def scheduler_task(self) -> None:
+        tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
+        now = datetime.now(tz)
+        open_hour = self.config.get("open_hour", 8)
+        last_call_hour = self.config.get("last_call_hour", 1)
+        last_call_minute = self.config.get("last_call_minute", 45)
+        close_hour = self.config.get("close_hour", 2)
+
+        if now.hour == 0 and now.minute == 0:
+            self.state["daily_cap_counter"] = 0
+            await storage.save_json(storage.Path(STATE_PATH), self.state)
+
+        channel = await self._get_channel()
+        if not channel:
+            return
+
+        if now.hour == open_hour and now.minute == 0:
+            await self._announce_open(channel)
+            await self._update_hub_state(True)
+        elif now.hour == last_call_hour and now.minute == last_call_minute:
+            await channel.send(
+                "⏳ Dernier appel — fermeture dans 15 minutes (02:00)."
+            )
+        elif now.hour == close_hour and now.minute == 0:
+            await self._announce_close(channel)
+            await self._update_hub_state(False)
+
+    @scheduler_task.before_loop
+    async def _wait_ready_scheduler(self) -> None:
+        await self.bot.wait_until_ready()
 
