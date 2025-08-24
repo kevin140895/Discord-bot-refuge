@@ -45,6 +45,7 @@ class RefugeBot(commands.Bot):
         # Load Machine à sous cog.  ``load_extension`` is patched to an
         # ``AsyncMock`` in the tests, so awaiting is safe.
         await self.load_extension("cogs.machine_a_sous")
+        await self.load_extension("cogs.temp_vc")
         await self.tree.sync()
 
         # Register persistent views. ``add_view`` can only be called once per
