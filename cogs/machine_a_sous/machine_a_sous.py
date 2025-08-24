@@ -497,6 +497,10 @@ class MachineASousCog(commands.Cog):
                 )
                 color = 0x2ECC71
             else:
+                content = (
+                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **machine à sous ferme** maintenant — rendez-vous demain !"
+                )
+                allowed = discord.AllowedMentions(roles=True)
                 description = (
                     "💡 Les néons s’éteignent… ⛔\n"
                     "À demain pour de nouvelles mises et, peut-être, le gros lot 💰."
