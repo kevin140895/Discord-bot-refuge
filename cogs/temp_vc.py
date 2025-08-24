@@ -229,6 +229,11 @@ class TempVCCog(commands.Cog):
                     new_vc.name,
                     new_vc.id,
                 )
+                await new_vc.delete(reason="Échec du déplacement du membre")
+                TEMP_VC_IDS.discard(new_vc.id)
+                self._last_names.pop(new_vc.id, None)
+                save_temp_vc_ids(TEMP_VC_IDS)
+                return
             await self._update_channel_name(new_vc)
             return
 
