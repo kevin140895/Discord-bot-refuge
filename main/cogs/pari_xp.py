@@ -11,6 +11,8 @@ from utils.storage import save_json
 from utils.xp_adapter import get_user_xp, get_user_account_age_days
 import random
 from utils.xp_adapter import add_user_xp
+import inspect
+import re
 
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
@@ -619,3 +621,120 @@ class RouletteRefugeCog(commands.Cog):
                     f"😢 {user.display_name} vient de perdre {abs(result['delta'])} XP..."
                 )
 
+
+    async def _self_check_report(self) -> dict:
+        report: dict[str, str] = {}
+
+        tz = TZ_PARIS
+        open_ok = (
+            not self._is_open_hours(datetime(2023, 1, 1, 2, 0, tzinfo=tz))
+            and not self._is_open_hours(datetime(2023, 1, 1, 7, 59, tzinfo=tz))
+            and self._is_open_hours(datetime(2023, 1, 1, 8, 0, tzinfo=tz))
+            and self._is_open_hours(datetime(2023, 1, 1, 1, 59, tzinfo=tz))
+        )
+        report["hours"] = "PASS" if open_ok else "FAIL"
+
+        desc = (self._build_hub_embed().description or "")
+        hub_ok = (
+            "🟢 **Ouvert — ferme à 02:00**" in desc
+            or "🔴 **Fermé — ouvre à 08:00**" in desc
+        )
+        report["hub_embed"] = "PASS" if hub_ok else "FAIL"
+
+        modal = self._build_bet_modal()
+        ui_ok = getattr(modal, "custom_id", "") == "pari_xp_modal"
+        ids = [c.custom_id for c in modal.children if isinstance(c, ui.TextInput)]
+        ui_ok &= ids == ["pari_xp_amount", "pari_xp_use_ticket"]
+        view = self._build_hub_view()
+        btn_ids = [
+            c.custom_id for c in view.children if isinstance(c, discord.ui.Button)
+        ]
+        ui_ok &= all(cid.startswith("pari_xp_") for cid in btn_ids)
+        report["ui_ids"] = "PASS" if ui_ok else "FAIL"
+
+        src = inspect.getsource(self._handle_bet_submission)
+        guard_strings = [
+            "❌ Mise minimale : 5 XP.",
+            "❌ Ancienneté requise : 2 jours.",
+            "❌ Solde insuffisant (il faut conserver au moins 10 XP).",
+            "⏳ Attends {remaining}s avant de rejouer.",
+            "📉 Tu as atteint 20 paris aujourd'hui. Reviens demain.",
+        ]
+        guards_ok = all(s in src for s in guard_strings)
+        report["guards"] = "PASS" if guards_ok else "FAIL"
+
+        draw_src = inspect.getsource(self._draw_segment)
+        cond_draw = "probabilities" in draw_src
+        ticket = self._compute_result(10, "ticket_free")
+        double = self._compute_result(10, "double_xp_1h")
+        super_jp = self._compute_result(10, "super_jackpot_plus_1000")
+        cond_place = (
+            ticket["notes"] == "placeholder ticket"
+            and double["notes"] == "placeholder double_xp"
+            and ticket["delta"] == -10
+            and double["delta"] == -10
+            and super_jp["delta"] == 1000
+        )
+        cond_msgs = (
+            "ticket gratuit (placeholder)" in src
+            and "boost Double XP 1h (placeholder)" in src
+        )
+        report["draw_placeholders"] = (
+            "PASS" if cond_draw and cond_place and cond_msgs else "FAIL"
+        )
+
+        announces_ok = (
+            "announce_big_win_mult_threshold" in src
+            and "announce_big_loss_xp_threshold" in src
+            and "announce_super_jackpot_ping_here" in src
+            and "@here" in src
+            and "user.display_name" in src
+            and "user.mention" in src
+        )
+        report["announces"] = "PASS" if announces_ok else "FAIL"
+
+        lb_ok = all(
+            hasattr(self, name)
+            for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"]
+        )
+        lb_ok &= inspect.getsource(self.__init__).count("leaderboard_task.start") > 0
+        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 420
+        lb_ok &= "pari_xp_leaderboard" in inspect.getsource(self._build_hub_view)
+        lb_ok &= "ephemeral=True" in inspect.getsource(self._leaderboard_button_callback)
+        report["leaderboard"] = "PASS" if lb_ok else "FAIL"
+
+        summary_src = inspect.getsource(self._post_daily_summary)
+        summary_ok = all(
+            s in summary_src
+            for s in [
+                "Top 3 gagnants",
+                "Top 3 perdants",
+                "Plus gros gain unique",
+                "Total misé / redistribué",
+            ]
+        )
+        report["daily_summary"] = "PASS" if summary_ok else "FAIL"
+
+        module = inspect.getmodule(self)
+        module_src = inspect.getsource(module)
+        classes = [
+            c
+            for c in vars(module).values()
+            if inspect.isclass(c) and c.__module__ == module.__name__
+        ]
+        isolation_ok = (
+            len([c for c in classes if c.__name__ == "RouletteRefugeCog"]) == 1
+        )
+        custom_ids = re.findall(r'custom_id="([^"]+)"', module_src)
+        isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
+        isolation_ok &= DATA_DIR == "main/data/pari_xp/"
+        isolation_ok &= "roulette" not in module_src.lower()
+        report["isolation"] = "PASS" if isolation_ok else "FAIL"
+
+        return report
+
+    @commands.command(name="pari_xp_selfcheck")
+    async def pari_xp_selfcheck(self, ctx: commands.Context) -> None:
+        report = await self._self_check_report()
+        print(report)
+        await ctx.send(str(report))
