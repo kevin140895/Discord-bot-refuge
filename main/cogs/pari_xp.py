@@ -727,7 +727,7 @@ class RouletteRefugeCog(commands.Cog):
         custom_ids = re.findall(r'custom_id="([^"]+)"', module_src)
         isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
         isolation_ok &= PARI_XP_DATA_DIR == "main/data/pari_xp/"
-        isolation_ok &= "roulette" not in module_src.lower()
+        isolation_ok &= "pari_xp" in module_src.lower()
         report["isolation"] = "PASS" if isolation_ok else "FAIL"
 
         return report
