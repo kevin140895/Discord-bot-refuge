@@ -17,6 +17,7 @@ import random
 import inspect
 import re
 import logging
+import asyncio
 
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
@@ -42,6 +43,7 @@ class RouletteRefugeCog(commands.Cog):
         self._bets_today_date = self._now().date()
         self._last_autoheal_hub = None
         self._last_autoheal_lb = None
+        self._hub_lock = asyncio.Lock()
         self._autoheal_presence_task.start()
 
     def _now(self) -> datetime:
@@ -112,28 +114,29 @@ class RouletteRefugeCog(commands.Cog):
         return None
 
     async def _ensure_hub_message(self, channel: discord.TextChannel) -> None:
-        hub_id = self.state.get("hub_message_id")
-        embed = self._build_hub_embed()
-        view = self._build_hub_view()
-        for child in view.children:
-            if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_bet":
-                setattr(child, "callback", self._bet_button_callback)  # noqa: B010
-            if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_leaderboard":
-                setattr(child, "callback", self._leaderboard_button_callback)  # noqa: B010
-        message = None
-        if hub_id:
-            try:
-                message = await channel.fetch_message(int(hub_id))
-            except Exception:
-                message = None
-        if not message:
-            message = await self._find_hub_message(channel)
-        if message:
-            await message.edit(embed=embed, view=view)
-        else:
-            message = await channel.send(embed=embed, view=view)
-            self.state["hub_message_id"] = message.id
-            await storage.save_json(storage.Path(STATE_PATH), self.state)
+        async with self._hub_lock:
+            hub_id = self.state.get("hub_message_id")
+            embed = self._build_hub_embed()
+            view = self._build_hub_view()
+            for child in view.children:
+                if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_bet":
+                    setattr(child, "callback", self._bet_button_callback)  # noqa: B010
+                if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_leaderboard":
+                    setattr(child, "callback", self._leaderboard_button_callback)  # noqa: B010
+            message = None
+            if hub_id:
+                try:
+                    message = await channel.fetch_message(int(hub_id))
+                except Exception:
+                    message = None
+            if not message:
+                message = await self._find_hub_message(channel)
+            if message:
+                await message.edit(embed=embed, view=view)
+            else:
+                message = await channel.send(embed=embed, view=view)
+                self.state["hub_message_id"] = message.id
+                await storage.save_json(storage.Path(STATE_PATH), self.state)
 
     def _build_hub_embed(self) -> discord.Embed:
         title = self.config.get("game_display_name", "🤑 Roulette Refuge")
