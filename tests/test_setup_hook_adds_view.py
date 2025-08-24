@@ -5,7 +5,7 @@ from pathlib import Path
 import asyncio
 import discord
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("DISCORD_TOKEN", "dummy")
@@ -38,9 +38,9 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
     await test_bot.setup_hook()
     # Second call should be idempotent
     await test_bot.setup_hook()
-
     add_view_mock.assert_called_once()
     assert isinstance(add_view_mock.call_args.args[0], view.PlayerTypeView)
+    bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot)])
 
     # Simulate a restart with a new instance
     other_bot = bot.RefugeBot(command_prefix="!", intents=intents)
@@ -52,7 +52,7 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
     monkeypatch.setattr(other_bot, "add_view", add_view_mock2)
 
     await other_bot.setup_hook()
-
     add_view_mock2.assert_called_once()
     assert isinstance(add_view_mock2.call_args.args[0], view.PlayerTypeView)
+    bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot), call(other_bot)])
 
