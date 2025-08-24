@@ -104,4 +104,5 @@ class StatsCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
+    await rename_manager.start()
     await bot.add_cog(StatsCog(bot))
