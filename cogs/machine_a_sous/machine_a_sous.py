@@ -50,6 +50,169 @@ class MachineASousView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
+    async def _reward_ticket(
+        self,
+        interaction: discord.Interaction,
+        cog: "MachineASousCog",
+        free: bool,
+    ):
+        """Handle the ticket reward which grants an extra spin."""
+        if not free:
+            cog.store.mark_claimed_today(str(interaction.user.id), tz=PARIS_TZ)
+        msg = "🎟️ Ticket gratuit ! Tu peux rejouer immédiatement."
+        return msg, False, None, 0, 0, 0, 0
+
+    async def _reward_double_xp(
+        self,
+        interaction: discord.Interaction,
+        cog: "MachineASousCog",
+        free: bool,
+    ):
+        """Activate a temporary double XP boost."""
+        if not free:
+            cog.store.mark_claimed_today(str(interaction.user.id), tz=PARIS_TZ)
+        add_xp_boost(interaction.user.id, 60)
+        msg = "⚡ Double XP activé pour toi pendant 1h !"
+        return msg, False, None, 0, 0, 0, 0
+
+    async def _reward_shared_xp(
+        self,
+        interaction: discord.Interaction,
+        cog: "MachineASousCog",
+        free: bool,
+    ):
+        """Award XP to the user and a random person in a voice channel."""
+        if not free:
+            cog.store.mark_claimed_today(str(interaction.user.id), tz=PARIS_TZ)
+        other = None
+        if interaction.guild:
+            pool = [
+                m
+                for vc in interaction.guild.voice_channels
+                for m in vc.members
+                if not m.bot and m.id != interaction.user.id
+            ]
+            if pool:
+                other = random.choice(pool)
+        try:
+            old_lvl, new_lvl, old_xp, total_xp = await award_xp(
+                interaction.user.id,
+                50,
+                guild_id=interaction.guild_id,
+                source="machine_a_sous",
+            )
+        except Exception as e:
+            logger.exception("[MachineASous] award_xp a échoué: %s", e)
+            await interaction.followup.send(
+                "❌ Erreur interne (XP). Réessaie plus tard.",
+                ephemeral=True,
+            )
+            return None
+        if other:
+            try:
+                await award_xp(
+                    other.id, 50, guild_id=interaction.guild_id, source="machine_a_sous"
+                )
+            except Exception as e:
+                logger.exception("[MachineASous] award_xp (shared) échec: %s", e)
+        if other:
+            msg = f"🤝 XP partagé ! Toi et {other.mention} gagnez chacun 50 XP."
+        else:
+            msg = "🤝 XP partagé… mais personne en vocal. Tu gagnes 50 XP !"
+        return msg, False, None, old_lvl, new_lvl, old_xp, total_xp
+
+    async def _reward_xp_gain(
+        self,
+        interaction: discord.Interaction,
+        cog: "MachineASousCog",
+        gain: int,
+        free: bool,
+    ):
+        """Handle classic XP rewards, including jackpots and roles."""
+        uid = str(interaction.user.id)
+        role_given = False
+        expires_at_txt = None
+        try:
+            old_lvl, new_lvl, old_xp, total_xp = await award_xp(
+                interaction.user.id,
+                gain,
+                guild_id=interaction.guild_id,
+                source="machine_a_sous",
+            )
+        except Exception as e:
+            logger.exception("[MachineASous] award_xp a échoué: %s", e)
+            await interaction.followup.send(
+                "❌ Erreur interne (XP). Réessaie plus tard.",
+                ephemeral=True,
+            )
+            return None
+
+        if gain == 1000 and ROLE_ID and interaction.guild:
+            guild = interaction.guild
+            role = guild.get_role(ROLE_ID)
+            me = guild.me or guild.get_member(cog.bot.user.id)  # type: ignore
+            if role and me and me.guild_permissions.manage_roles:
+                try:
+                    if role < me.top_role:
+                        await interaction.user.add_roles(
+                            role, reason="Machine à sous (gagnant 1000 XP)"
+                        )
+                        role_given = True
+                        expires_at = datetime.now(cog.tz) + timedelta(hours=24)
+                        expires_at_txt = _fmt(expires_at)
+                        cog.store.upsert_role_assignment(
+                            user_id=uid,
+                            guild_id=str(guild.id),
+                            role_id=str(role.id),
+                            expires_at=expires_at.isoformat(),
+                        )
+                except Exception as e:
+                    logger.error("[MachineASous] add_roles échec: %s", e)
+        if not free:
+            cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
+
+        msg = f"🎰 Résultat : **{gain} XP**."
+        if gain == 0:
+            msg += "\n😅 Pas de chance cette fois…"
+        elif gain == 5:
+            msg += "\n🔹 Un petit bonus, c'est toujours ça !"
+        elif gain == 20:
+            msg += "\n🎯 Pas mal !"
+        elif gain == 50:
+            msg += "\n🔸 Beau tirage !"
+        elif gain == 100:
+            msg += "\n🎉 Super gain !"
+        elif gain == 500:
+            msg += "\n💰 **Jackpot intermédiaire !**"
+        else:  # 1000
+            msg += "\n💎 **Super Jackpot !**"
+            if role_given and expires_at_txt:
+                msg += (
+                    "\n🎖️ Tu reçois le rôle "
+                    f"**{WINNER_ROLE_NAME}** pendant **24h** "
+                    f"(jusqu’au **{expires_at_txt}**)."
+                )
+
+        if gain >= 500:
+            ch = cog.bot.get_channel(ANNOUNCE_CHANNEL_ID)
+            if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                try:
+                    embed = discord.Embed(
+                        title="🎉 Jackpot !",
+                        description=(
+                            f"{interaction.user.mention} a gagné **{gain} XP** à la machine à sous !"
+                        ),
+                        color=0xFFD700,
+                    )
+                    embed.set_image(url=WIN_GIF_URL)
+                    await ch.send(embed=embed)
+                except Exception as e:
+                    logger.error(
+                        "[MachineASous] Échec annonce gagnant: %s", e
+                    )
+
+        return msg, role_given, expires_at_txt, old_lvl, new_lvl, old_xp, total_xp
+
     async def _single_spin(
         self,
         interaction: discord.Interaction,
@@ -57,144 +220,20 @@ class MachineASousView(discord.ui.View):
         free: bool = False,
     ) -> None:
         gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
-        uid = str(interaction.user.id)
-        role_given = False
-        expires_at_txt = None
-        old_lvl = new_lvl = old_xp = total_xp = 0
-
         if gain == "ticket":
-            if not free:
-                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
-            msg = "🎟️ Ticket gratuit ! Tu peux rejouer immédiatement."
+            result = await self._reward_ticket(interaction, cog, free)
         elif gain == "double_xp":
-            if not free:
-                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
-            add_xp_boost(interaction.user.id, 60)
-            msg = "⚡ Double XP activé pour toi pendant 1h !"
+            result = await self._reward_double_xp(interaction, cog, free)
         elif gain == "shared_xp":
-            if not free:
-                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
-            other = None
-            if interaction.guild:
-                pool = [
-                    m
-                    for vc in interaction.guild.voice_channels
-                    for m in vc.members
-                    if not m.bot and m.id != interaction.user.id
-                ]
-                if pool:
-                    other = random.choice(pool)
-            try:
-                old_lvl, new_lvl, old_xp, total_xp = await award_xp(
-                    interaction.user.id,
-                    50,
-                    guild_id=interaction.guild_id,
-                    source="machine_a_sous",
-                )
-            except Exception as e:
-                logger.exception("[MachineASous] award_xp a échoué: %s", e)
-                await interaction.followup.send(
-                    "❌ Erreur interne (XP). Réessaie plus tard.",
-                    ephemeral=True,
-                )
+            result = await self._reward_shared_xp(interaction, cog, free)
+            if result is None:
                 return
-            if other:
-                try:
-                    await award_xp(
-                        other.id, 50, guild_id=interaction.guild_id, source="machine_a_sous"
-                    )
-                except Exception as e:
-                    logger.exception("[MachineASous] award_xp (shared) échec: %s", e)
-            if other:
-                msg = (
-                    f"🤝 XP partagé ! Toi et {other.mention} gagnez chacun 50 XP."
-                )
-            else:
-                msg = (
-                    "🤝 XP partagé… mais personne en vocal. Tu gagnes 50 XP !"
-                )
         else:
-            # Gain d'XP classique
-            try:
-                old_lvl, new_lvl, old_xp, total_xp = await award_xp(
-                    interaction.user.id,
-                    gain,
-                    guild_id=interaction.guild_id,
-                    source="machine_a_sous",
-                )
-            except Exception as e:
-                logger.exception("[MachineASous] award_xp a échoué: %s", e)
-                await interaction.followup.send(
-                    "❌ Erreur interne (XP). Réessaie plus tard.",
-                    ephemeral=True,
-                )
+            result = await self._reward_xp_gain(interaction, cog, gain, free)
+            if result is None:
                 return
 
-            if gain == 1000 and ROLE_ID and interaction.guild:
-                guild = interaction.guild
-                role = guild.get_role(ROLE_ID)
-                me = guild.me or guild.get_member(cog.bot.user.id)  # type: ignore
-                if role and me and me.guild_permissions.manage_roles:
-                    try:
-                        if role < me.top_role:
-                            await interaction.user.add_roles(
-                                role, reason="Machine à sous (gagnant 1000 XP)"
-                            )
-                            role_given = True
-                            expires_at = (
-                                datetime.now(cog.tz) + timedelta(hours=24)
-                            )
-                            expires_at_txt = _fmt(expires_at)
-                            cog.store.upsert_role_assignment(
-                                user_id=uid,
-                                guild_id=str(guild.id),
-                                role_id=str(role.id),
-                                expires_at=expires_at.isoformat(),
-                            )
-                    except Exception as e:
-                        logger.error("[MachineASous] add_roles échec: %s", e)
-            if not free:
-                cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
-
-            msg = f"🎰 Résultat : **{gain} XP**."
-            if gain == 0:
-                msg += "\n😅 Pas de chance cette fois…"
-            elif gain == 5:
-                msg += "\n🔹 Un petit bonus, c'est toujours ça !"
-            elif gain == 20:
-                msg += "\n🎯 Pas mal !"
-            elif gain == 50:
-                msg += "\n🔸 Beau tirage !"
-            elif gain == 100:
-                msg += "\n🎉 Super gain !"
-            elif gain == 500:
-                msg += "\n💰 **Jackpot intermédiaire !**"
-            else:  # 1000
-                msg += "\n💎 **Super Jackpot !**"
-                if role_given and expires_at_txt:
-                    msg += (
-                        "\n🎖️ Tu reçois le rôle "
-                        f"**{WINNER_ROLE_NAME}** pendant **24h** "
-                        f"(jusqu’au **{expires_at_txt}**)."
-                    )
-
-            if gain >= 500:
-                ch = cog.bot.get_channel(ANNOUNCE_CHANNEL_ID)
-                if isinstance(ch, (discord.TextChannel, discord.Thread)):
-                    try:
-                        embed = discord.Embed(
-                            title="🎉 Jackpot !",
-                            description=(
-                                f"{interaction.user.mention} a gagné **{gain} XP** à la machine à sous !"
-                            ),
-                            color=0xFFD700,
-                        )
-                        embed.set_image(url=WIN_GIF_URL)
-                        await ch.send(embed=embed)
-                    except Exception as e:
-                        logger.error(
-                            "[MachineASous] Échec annonce gagnant: %s", e
-                        )
+        msg, _, _, old_lvl, new_lvl, _, total_xp = result
 
         try:
             announce = getattr(cog.bot, "announce_level_up", None)
@@ -283,6 +322,7 @@ class MachineASousCog(commands.Cog):
         self._last_announced_state: Optional[bool] = None
 
     def _poster_embed(self) -> discord.Embed:
+        """Create the poster embed describing rewards and open state."""
         if self.current_view_enabled:
             desc_state = "✅ **Ouverte** de 10:00 à 22:00 (Europe/Paris)"
             color = 0x2ECC71
@@ -303,6 +343,7 @@ class MachineASousCog(commands.Cog):
         )
 
     async def _delete_old_poster_message(self):
+        """Delete the previously stored poster message if present."""
         poster = self.store.get_poster()
         if not poster:
             return
@@ -318,6 +359,7 @@ class MachineASousCog(commands.Cog):
         self.store.clear_poster()
 
     async def _replace_poster_message(self):
+        """Publish a fresh poster message in the slot machine channel."""
         await self.bot.wait_until_ready()
         await self._delete_old_poster_message()
         ch = self.bot.get_channel(CHANNEL_ID)
@@ -393,6 +435,7 @@ class MachineASousCog(commands.Cog):
         self.maintenance_loop.start()
 
     async def _post_state_message(self, opened: bool):
+        """Announce the open/closed state in the announce channel."""
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
             logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")
@@ -471,6 +514,7 @@ class MachineASousCog(commands.Cog):
             logger.error("[MachineASous] Post state message fail: %s", e)
 
     async def _ensure_state_message(self, opened: bool):
+        """Ensure a state message exists and matches the current status."""
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
             logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")
