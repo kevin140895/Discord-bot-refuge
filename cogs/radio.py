@@ -32,6 +32,14 @@ class RadioCog(commands.Cog):
         self._original_name: Optional[str] = None
         self._previous_stream: Optional[str] = None
 
+    async def cog_load(self) -> None:
+        """Connecte la radio si le bot est déjà prêt lors du chargement du cog."""
+        if self.bot.is_ready():
+            text_channel = self.bot.get_channel(RADIO_TEXT_CHANNEL_ID)
+            if isinstance(text_channel, discord.abc.Messageable):
+                await self._ensure_radio_message(text_channel)
+            await self._connect_and_play()
+
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
             logger.warning("RADIO_STREAM_URL non défini")
