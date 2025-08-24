@@ -78,23 +78,23 @@ class StatsCog(commands.Cog):
                     channels[2], f"🔊 Voc : {voice}"
                 )
 
-    @tasks.loop(minutes=2)
+    @tasks.loop(time=time(hour=0))
     async def refresh_members(self) -> None:
-        """Met à jour le nombre de membres toutes les deux minutes."""
+        """Met à jour le nombre de membres une fois par jour."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_members(guild)
 
-    @tasks.loop(minutes=1)
+    @tasks.loop(minutes=15)
     async def refresh_online(self) -> None:
-        """Met à jour le nombre d'utilisateurs en ligne chaque minute."""
+        """Met à jour le nombre d'utilisateurs en ligne toutes les 15 minutes."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_online(guild)
 
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=3)
     async def refresh_voice(self) -> None:
-        """Met à jour le nombre d'utilisateurs en vocal toutes les heures."""
+        """Met à jour le nombre d'utilisateurs en vocal toutes les 3 minutes."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_voice(guild)
