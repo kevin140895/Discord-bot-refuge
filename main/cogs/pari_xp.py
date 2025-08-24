@@ -20,7 +20,7 @@ import logging
 
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
-from utils.storage import load_json, save_json
+from utils.storage import load_json
 
 PARI_XP_DATA_DIR = "main/data/pari_xp/"
 CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
@@ -72,6 +72,45 @@ class RouletteRefugeCog(commands.Cog):
                 return ch  # type: ignore[return-value]
         return await self._get_channel()
 
+    async def _find_hub_message(
+        self, channel: discord.TextChannel
+    ) -> discord.Message | None:
+        """Search recent channel history for an existing hub message."""
+        async for msg in channel.history(limit=50):
+            if msg.author == self.bot.user and msg.embeds:
+                embed = msg.embeds[0]
+                title = self.config.get("game_display_name", "🤑 Roulette Refuge")
+                if embed.title == title:
+                    self.state["hub_message_id"] = msg.id
+                    await storage.save_json(storage.Path(STATE_PATH), self.state)
+                    return msg
+        return None
+
+    async def _find_leaderboard_message(
+        self, channel: discord.TextChannel
+    ) -> discord.Message | None:
+        """Search pinned messages and recent history for existing leaderboard."""
+        title_prefix = "📊 Roulette Refuge"
+        try:
+            pins = await channel.pins()
+        except Exception:
+            pins = []
+        for msg in pins:
+            if msg.author == self.bot.user:
+                for embed in msg.embeds:
+                    if embed.title and embed.title.startswith(title_prefix):
+                        self.state["leaderboard_message_id"] = msg.id
+                        await storage.save_json(storage.Path(STATE_PATH), self.state)
+                        return msg
+        async for msg in channel.history(limit=50):
+            if msg.author == self.bot.user:
+                for embed in msg.embeds:
+                    if embed.title and embed.title.startswith(title_prefix):
+                        self.state["leaderboard_message_id"] = msg.id
+                        await storage.save_json(storage.Path(STATE_PATH), self.state)
+                        return msg
+        return None
+
     async def _ensure_hub_message(self, channel: discord.TextChannel) -> None:
         hub_id = self.state.get("hub_message_id")
         embed = self._build_hub_embed()
@@ -87,6 +126,8 @@ class RouletteRefugeCog(commands.Cog):
                 message = await channel.fetch_message(int(hub_id))
             except Exception:
                 message = None
+        if not message:
+            message = await self._find_hub_message(channel)
         if message:
             await message.edit(embed=embed, view=view)
         else:
@@ -139,7 +180,7 @@ class RouletteRefugeCog(commands.Cog):
         return HubView()
 
     async def _ensure_leaderboard_message(self, channel: discord.TextChannel) -> None:
-        state = storage.load_json(storage.Path(STATE_PATH), {})
+        state = storage.load_json(storage.Path(STATE_PATH), self.state)
         msg_id = state.get("leaderboard_message_id")
         embed = self._build_leaderboard_embed()
         message = None
@@ -148,6 +189,9 @@ class RouletteRefugeCog(commands.Cog):
                 message = await channel.fetch_message(int(msg_id))
             except Exception:
                 message = None
+        if not message:
+            message = await self._find_leaderboard_message(channel)
+            state = self.state
         if message:
             await message.edit(embed=embed)
         else:
@@ -430,7 +474,7 @@ class RouletteRefugeCog(commands.Cog):
         if not ch:
             return
 
-        state = load_json(storage.Path(STATE_PATH), {})
+        state = load_json(storage.Path(STATE_PATH), self.state)
         now = datetime.now(tz=TZ_PARIS)
 
         # --- HUB ---
@@ -448,12 +492,8 @@ class RouletteRefugeCog(commands.Cog):
         if need_heal_hub:
             if not self._last_autoheal_hub or (now - self._last_autoheal_hub) > timedelta(hours=1):
                 try:
-                    embed = self._build_hub_embed()
-                    view = self._build_hub_view()
-                    m = await ch.send(embed=embed, view=view)
-                    state["hub_message_id"] = m.id
-                    await save_json(storage.Path(STATE_PATH), state)
-                    self.state = state
+                    await self._ensure_hub_message(ch)
+                    state = self.state
                     self._last_autoheal_hub = now
                 except Exception:
                     pass
@@ -475,6 +515,7 @@ class RouletteRefugeCog(commands.Cog):
                 if not self._last_autoheal_lb or (now - self._last_autoheal_lb) > timedelta(hours=1):
                     try:
                         await self._ensure_leaderboard_message(ch)
+                        state = self.state
                         self._last_autoheal_lb = now
                     except Exception:
                         pass
