@@ -7,8 +7,6 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 from discord import ui
 from discord import app_commands
-from utils.storage import load_json  # noqa: F401
-from utils.storage import save_json
 from utils.xp_adapter import get_user_xp, get_user_account_age_days
 import random
 from utils.xp_adapter import add_user_xp
@@ -18,11 +16,11 @@ import re
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
 
-DATA_DIR = "main/data/pari_xp/"
-CONFIG_PATH = DATA_DIR + "config.json"
-STATE_PATH = DATA_DIR + "state.json"
-LB_PATH = DATA_DIR + "leaderboard.json"
-TX_PATH = DATA_DIR + "transactions.json"
+PARI_XP_DATA_DIR = "main/data/pari_xp/"
+CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
+STATE_PATH = PARI_XP_DATA_DIR + "state.json"
+LB_PATH = PARI_XP_DATA_DIR + "leaderboard.json"
+TX_PATH = PARI_XP_DATA_DIR + "transactions.json"
 
 
 class RouletteRefugeCog(commands.Cog):
@@ -131,7 +129,7 @@ class RouletteRefugeCog(commands.Cog):
         return HubView()
 
     async def _ensure_leaderboard_message(self, channel: discord.TextChannel) -> None:
-        state = load_json(storage.Path(STATE_PATH), {})
+        state = storage.load_json(storage.Path(STATE_PATH), {})
         msg_id = state.get("leaderboard_message_id")
         embed = self._build_leaderboard_embed()
         message = None
@@ -149,13 +147,13 @@ class RouletteRefugeCog(commands.Cog):
             except Exception:
                 pass
             state["leaderboard_message_id"] = message.id
-            await save_json(storage.Path(STATE_PATH), state)
+            await storage.save_json(storage.Path(STATE_PATH), state)
             self.state = state
 
     def _build_leaderboard_embed(self) -> discord.Embed:
         tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
         now = datetime.now(tz)
-        transactions = load_json(storage.Path(TX_PATH), [])
+        transactions = storage.load_json(storage.Path(TX_PATH), [])
         month_txs = []
         for tx in transactions:
             ts = tx.get("ts")
@@ -261,7 +259,7 @@ class RouletteRefugeCog(commands.Cog):
         await channel.send(embed=embed)
 
     async def _post_daily_summary(self, channel: discord.TextChannel) -> None:
-        transactions = load_json(storage.Path(TX_PATH), [])
+        transactions = storage.load_json(storage.Path(TX_PATH), [])
         now = datetime.now(TZ_PARIS)
         today: date = now.date()
         day_txs = []
@@ -377,7 +375,7 @@ class RouletteRefugeCog(commands.Cog):
         if not channel:
             return
         await self._ensure_leaderboard_message(channel)
-        state = load_json(storage.Path(STATE_PATH), {})
+        state = storage.load_json(storage.Path(STATE_PATH), {})
         msg_id = state.get("leaderboard_message_id")
         if not msg_id:
             return
@@ -392,7 +390,7 @@ class RouletteRefugeCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _leaderboard_button_callback(self, interaction: discord.Interaction) -> None:
-        state = load_json(storage.Path(STATE_PATH), {})
+        state = storage.load_json(storage.Path(STATE_PATH), {})
         msg_id = state.get("leaderboard_message_id")
         if msg_id:
             url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{msg_id}"
@@ -728,7 +726,7 @@ class RouletteRefugeCog(commands.Cog):
         )
         custom_ids = re.findall(r'custom_id="([^"]+)"', module_src)
         isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
-        isolation_ok &= DATA_DIR == "main/data/pari_xp/"
+        isolation_ok &= PARI_XP_DATA_DIR == "main/data/pari_xp/"
         isolation_ok &= "roulette" not in module_src.lower()
         report["isolation"] = "PASS" if isolation_ok else "FAIL"
 
