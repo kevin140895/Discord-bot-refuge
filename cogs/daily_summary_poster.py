@@ -22,6 +22,7 @@ from discord.ext import commands
 from config import ACTIVITY_SUMMARY_CH, DATA_DIR, XP_VIEWER_ROLE_ID
 from utils.interactions import safe_respond
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
+logger = logging.getLogger(__name__)
 
 try:
     from zoneinfo import ZoneInfo
@@ -119,7 +120,7 @@ class DailySummaryPoster(commands.Cog):
             try:
                 channel = await self.bot.fetch_channel(ACTIVITY_SUMMARY_CH)
             except Exception:
-                logging.exception(
+                logger.exception(
                     "[daily_summary] Salon %s introuvable", ACTIVITY_SUMMARY_CH
                 )
                 self._write_summary(
@@ -133,14 +134,14 @@ class DailySummaryPoster(commands.Cog):
                 await channel.fetch_message(message_id)
                 return  # already posted and message exists
             except discord.NotFound:
-                logging.warning(
+                logger.warning(
                     "[daily_summary] Message %s introuvable, re-publication", message_id
                 )
 
         message = self._build_message(data)
         msg = await channel.send(message)
         self._write_summary({"date": data.get("date"), "message_id": msg.id})
-        logging.info("[daily_summary] Classement %s publié", data.get("date"))
+        logger.info("[daily_summary] Classement %s publié", data.get("date"))
 
     # ── Tasks ────────────────────────────────────────────────
     async def _scheduler(self) -> None:
@@ -181,4 +182,3 @@ class DailySummaryPoster(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - integration
     await bot.add_cog(DailySummaryPoster(bot))
-

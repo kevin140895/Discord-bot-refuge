@@ -21,6 +21,7 @@ from config import (
     DATA_DIR,
     ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES,
 )
+logger = logging.getLogger(__name__)
 
 PARIS_TZ = "Europe/Paris"
 WINNER_ROLE_NAME = "🏆 Gagnant Roulette"
@@ -88,7 +89,7 @@ class RouletteView(discord.ui.View):
                     interaction.user.id, 50
                 )
             except Exception as e:
-                logging.exception("[Roulette] award_xp a échoué: %s", e)
+                logger.exception("[Roulette] award_xp a échoué: %s", e)
                 await interaction.followup.send(
                     "❌ Erreur interne (XP). Réessaie plus tard.",
                     ephemeral=True,
@@ -98,7 +99,7 @@ class RouletteView(discord.ui.View):
                 try:
                     await award_xp(other.id, 50)
                 except Exception as e:
-                    logging.exception("[Roulette] award_xp (shared) échec: %s", e)
+                    logger.exception("[Roulette] award_xp (shared) échec: %s", e)
             if other:
                 msg = (
                     f"🤝 XP partagé ! Toi et {other.mention} gagnez chacun 50 XP."
@@ -114,7 +115,7 @@ class RouletteView(discord.ui.View):
                     interaction.user.id, gain
                 )
             except Exception as e:
-                logging.exception("[Roulette] award_xp a échoué: %s", e)
+                logger.exception("[Roulette] award_xp a échoué: %s", e)
                 await interaction.followup.send(
                     "❌ Erreur interne (XP). Réessaie plus tard.",
                     ephemeral=True,
@@ -143,7 +144,7 @@ class RouletteView(discord.ui.View):
                                 expires_at=expires_at.isoformat(),
                             )
                     except Exception as e:
-                        logging.error("[Roulette] add_roles échec: %s", e)
+                        logger.error("[Roulette] add_roles échec: %s", e)
             if not free:
                 cog.store.mark_claimed_today(uid, tz=PARIS_TZ)
 
@@ -183,7 +184,7 @@ class RouletteView(discord.ui.View):
                         embed.set_image(url=WIN_GIF_URL)
                         await ch.send(embed=embed)
                     except Exception as e:
-                        logging.error(
+                        logger.error(
                             "[Roulette] Échec annonce gagnant: %s", e
                         )
 
@@ -198,7 +199,7 @@ class RouletteView(discord.ui.View):
                     total_xp,
                 )
         except Exception as e:
-            logging.error("[Roulette] announce_level_up échouée: %s", e)
+            logger.error("[Roulette] announce_level_up échouée: %s", e)
 
         spin_embed = discord.Embed(title="🎰 La roulette tourne…")
         spin_embed.set_image(url=SPIN_GIF_URL)
@@ -305,7 +306,7 @@ class RouletteRefugeCog(commands.Cog):
             msg = await ch.fetch_message(int(poster.get("message_id", 0)))
             await msg.delete()
         except Exception as e:
-            logging.debug("Failed to delete old poster message: %s", e)
+            logger.debug("Failed to delete old poster message: %s", e)
         self.store.clear_poster()
 
     async def _replace_poster_message(self):
@@ -313,7 +314,7 @@ class RouletteRefugeCog(commands.Cog):
         await self._delete_old_poster_message()
         ch = self.bot.get_channel(CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logging.warning("[Roulette] Salon roulette introuvable.")
+            logger.warning("[Roulette] Salon roulette introuvable.")
             return
         try:
             if self.current_view_enabled:
@@ -327,9 +328,9 @@ class RouletteRefugeCog(commands.Cog):
                 channel_id=str(ch.id),
                 message_id=str(msg.id),
             )
-            logging.info("[Roulette] Nouveau message roulette publié.")
+            logger.info("[Roulette] Nouveau message roulette publié.")
         except Exception as e:
-            logging.error(
+            logger.error(
                 f"[Roulette] Échec envoi nouveau message roulette: {e}"
             )
 
@@ -346,7 +347,7 @@ class RouletteRefugeCog(commands.Cog):
                 ):
                     return msg
         except Exception as e:
-            logging.debug("Failed to find existing poster: %s", e)
+            logger.debug("Failed to find existing poster: %s", e)
         return None
 
     async def _ensure_poster_message(self):
@@ -363,7 +364,7 @@ class RouletteRefugeCog(commands.Cog):
                         await ch.fetch_message(int(poster.get("message_id", 0)))
                         return
                     except discord.NotFound as e:
-                        logging.debug("Poster message missing: %s", e)
+                        logger.debug("Poster message missing: %s", e)
         existing = await self._find_existing_poster()
         if existing:
             self.store.set_poster(
@@ -380,13 +381,13 @@ class RouletteRefugeCog(commands.Cog):
         try:
             await self._ensure_poster_message()
         except Exception as err:
-            logging.warning("[Roulette] Init failed: %s", err)
+            logger.warning("[Roulette] Init failed: %s", err)
         self.maintenance_loop.start()
 
     async def _post_state_message(self, opened: bool):
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logging.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
+            logger.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
             return
         try:
             old = self.store.get_state_message()
@@ -399,7 +400,7 @@ class RouletteRefugeCog(commands.Cog):
                             int(old.get("message_id", 0))
                         )
                     except Exception as e:
-                        logging.debug("Failed to fetch old state message: %s", e)
+                        logger.debug("Failed to fetch old state message: %s", e)
             if not msg_to_delete:
                 try:
                     async for m in ch.history(limit=20):
@@ -411,12 +412,12 @@ class RouletteRefugeCog(commands.Cog):
                             msg_to_delete = m
                             break
                 except Exception as e:
-                    logging.debug("Error scanning history for state msg: %s", e)
+                    logger.debug("Error scanning history for state msg: %s", e)
             if msg_to_delete:
                 try:
                     await msg_to_delete.delete()
                 except Exception as e:
-                    logging.debug("Failed to delete old state msg: %s", e)
+                    logger.debug("Failed to delete old state msg: %s", e)
 
             content = None
             allowed = None
@@ -459,12 +460,12 @@ class RouletteRefugeCog(commands.Cog):
             )
             self.store.set_state_message(str(ch.id), str(msg.id))
         except Exception as e:
-            logging.error("[Roulette] Post state message fail: %s", e)
+            logger.error("[Roulette] Post state message fail: %s", e)
 
     async def _ensure_state_message(self, opened: bool):
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
-            logging.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
+            logger.warning("[Roulette] ANNOUNCE_CHANNEL_ID invalide.")
             return
         stored = self.store.get_state_message()
         if stored:
@@ -477,7 +478,7 @@ class RouletteRefugeCog(commands.Cog):
                 ):
                     return
             except discord.NotFound as e:
-                logging.debug("State message missing: %s", e)
+                logger.debug("State message missing: %s", e)
         try:
             async for msg in ch.history(limit=20):
                 if (
@@ -489,7 +490,7 @@ class RouletteRefugeCog(commands.Cog):
                     self.store.set_state_message(str(ch.id), str(msg.id))
                     return
         except Exception as e:
-            logging.debug("Error ensuring state message: %s", e)
+            logger.debug("Error ensuring state message: %s", e)
         await self._post_state_message(opened)
 
     @tasks.loop(minutes=ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES)
@@ -506,7 +507,7 @@ class RouletteRefugeCog(commands.Cog):
                 await self._post_state_message(enabled_now)
                 self._last_announced_state = enabled_now
         except Exception as e:
-            logging.error("[Roulette] maintenance_loop boundary erreur: %s", e)
+            logger.error("[Roulette] maintenance_loop boundary erreur: %s", e)
 
         # Surveillance du message de la roulette
         try:
@@ -523,7 +524,7 @@ class RouletteRefugeCog(commands.Cog):
                     except discord.NotFound:
                         await self._replace_poster_message()
         except Exception as e:
-            logging.error(f"[Roulette] maintenance_loop poster erreur: {e}")
+            logger.error(f"[Roulette] maintenance_loop poster erreur: {e}")
 
         # Nettoyage des rôles temporaires
         try:
@@ -544,10 +545,10 @@ class RouletteRefugeCog(commands.Cog):
                             try:
                                 await member.remove_roles(role, reason="Roulette rôle expiré")
                             except Exception as e:
-                                logging.error("[Roulette] maintenance_loop remove_roles erreur: %s", e)
+                                logger.error("[Roulette] maintenance_loop remove_roles erreur: %s", e)
                     self.store.clear_role_assignment(uid)
         except Exception as e:
-            logging.error(f"[Roulette] maintenance_loop roles erreur: {e}")
+            logger.error(f"[Roulette] maintenance_loop roles erreur: {e}")
 
     @maintenance_loop.before_loop
     async def before_maintenance_loop(self):
@@ -574,7 +575,7 @@ class RouletteRefugeCog(commands.Cog):
         try:
             self.bot.add_view(RouletteView())
         except Exception as e:
-            logging.error("[Roulette] add_view échoué: %s", e)
+            logger.error("[Roulette] add_view échoué: %s", e)
         self.bot.loop.create_task(self._init_after_ready())
 
     async def cog_unload(self):

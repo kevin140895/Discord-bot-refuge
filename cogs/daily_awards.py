@@ -23,6 +23,7 @@ from config import (
 )
 from utils.interactions import safe_respond
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
+logger = logging.getLogger(__name__)
 
 try:
     from zoneinfo import ZoneInfo
@@ -86,13 +87,13 @@ class DailyAwards(commands.Cog):
                         reason="Réinitialisation des rôles journaliers",
                     )
                 except discord.Forbidden:
-                    logging.warning("[daily_awards] Permissions insuffisantes pour retirer un rôle")
+                    logger.warning("[daily_awards] Permissions insuffisantes pour retirer un rôle")
                 except discord.NotFound:
-                    logging.warning("[daily_awards] Rôle ou membre introuvable lors du retrait")
+                    logger.warning("[daily_awards] Rôle ou membre introuvable lors du retrait")
                 except discord.HTTPException as e:
-                    logging.error("[daily_awards] Erreur HTTP lors du retrait d'un rôle: %s", e)
+                    logger.error("[daily_awards] Erreur HTTP lors du retrait d'un rôle: %s", e)
                 except Exception as e:  # pragma: no cover - just log
-                    logging.exception("[daily_awards] Erreur inattendue lors du retrait: %s", e)
+                    logger.exception("[daily_awards] Erreur inattendue lors du retrait: %s", e)
         for key, uid in winners.items():
             role = roles.get(key)
             if not role or not uid:
@@ -102,15 +103,15 @@ class DailyAwards(commands.Cog):
                 continue
             try:
                 await member.add_roles(role, reason="Attribution classement quotidien")
-                logging.info("[daily_awards] Rôle %s attribué à %s", role.id, uid)
+                logger.info("[daily_awards] Rôle %s attribué à %s", role.id, uid)
             except discord.Forbidden:
-                logging.warning("[daily_awards] Permissions insuffisantes pour attribuer un rôle")
+                logger.warning("[daily_awards] Permissions insuffisantes pour attribuer un rôle")
             except discord.NotFound:
-                logging.warning("[daily_awards] Rôle ou membre introuvable lors de l'attribution")
+                logger.warning("[daily_awards] Rôle ou membre introuvable lors de l'attribution")
             except discord.HTTPException as e:
-                logging.error("[daily_awards] Erreur HTTP lors de l'attribution du rôle: %s", e)
+                logger.error("[daily_awards] Erreur HTTP lors de l'attribution du rôle: %s", e)
             except Exception as e:  # pragma: no cover
-                logging.exception("[daily_awards] Erreur inattendue lors de l'attribution: %s", e)
+                logger.exception("[daily_awards] Erreur inattendue lors de l'attribution: %s", e)
 
     async def _mention_or_name(self, uid: int) -> str:
         guild = self.bot.guilds[0] if self.bot.guilds else None
@@ -174,14 +175,14 @@ class DailyAwards(commands.Cog):
             return
         winners = data.get("winners") or {}
         if not any(winners.values()):
-            logging.warning("[daily_awards] Pas de données gagnants pour %s", data.get("date"))
+            logger.warning("[daily_awards] Pas de données gagnants pour %s", data.get("date"))
             return
         channel = self.bot.get_channel(AWARD_ANNOUNCE_CHANNEL_ID)
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(AWARD_ANNOUNCE_CHANNEL_ID)
             except Exception:
-                logging.error(
+                logger.error(
                     "[daily_awards] Salon %s introuvable", AWARD_ANNOUNCE_CHANNEL_ID
                 )
                 return
@@ -192,18 +193,18 @@ class DailyAwards(commands.Cog):
                 await channel.fetch_message(state["message_id"])
                 return
             except discord.NotFound:
-                logging.warning(
+                logger.warning(
                     "[daily_awards] Message %s introuvable, nouvelle publication",
                     state["message_id"],
                 )
         await self._reset_and_assign(winners)
         message = await self._build_message(data)
         if not message:
-            logging.warning("[daily_awards] Message vide pour %s", date)
+            logger.warning("[daily_awards] Message vide pour %s", date)
             return
         msg = await channel.send(message)
         self._write_state({"date": date, "message_id": msg.id})
-        logging.info("[daily_awards] Annonce %s publiée", date)
+        logger.info("[daily_awards] Annonce %s publiée", date)
 
     # ── Tasks ────────────────────────────────────────────────
     async def _scheduler(self) -> None:

@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from config import CHANNEL_ROLES, CHANNEL_WELCOME
+logger = logging.getLogger(__name__)
 
 
 class WelcomeCog(commands.Cog):
@@ -27,20 +28,20 @@ class WelcomeCog(commands.Cog):
                     "Ravi de t’avoir parmi nous ! 🎮"
                 )
             except discord.Forbidden:
-                logging.warning(
+                logger.warning(
                     "[welcome] Permissions insuffisantes pour envoyer le message de bienvenue"
                 )
             except discord.NotFound:
-                logging.warning(
+                logger.warning(
                     "[welcome] Salon de bienvenue introuvable pour l'envoi du message"
                 )
             except discord.HTTPException as e:
-                logging.error(
+                logger.error(
                     "[welcome] Erreur HTTP lors de l'envoi du message de bienvenue: %s",
                     e,
                 )
             except Exception:
-                logging.exception(
+                logger.exception(
                     "[welcome] Échec d'envoi du message de bienvenue pour %s", member.id
                 )
 

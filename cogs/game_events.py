@@ -17,6 +17,7 @@ from utils.game_events import (
     save_event,
     set_voice_channel,
 )
+logger = logging.getLogger(__name__)
 
 
 class GameEventModal(discord.ui.Modal):
@@ -55,7 +56,7 @@ class GameEventsCog(commands.Cog):
                 try:
                     bot.add_view(RSVPView(evt.id), message_id=evt.message_id)
                 except Exception:
-                    logging.exception("[game] Impossible d'attacher la vue pour %s", evt.id)
+                    logger.exception("[game] Impossible d'attacher la vue pour %s", evt.id)
         self.scheduler.start()
 
     def cog_unload(self) -> None:
@@ -114,7 +115,7 @@ class GameEventsCog(commands.Cog):
         await save_event(evt)
         self.bot.add_view(view, message_id=msg.id)
         await safe_respond(interaction, "Événement créé ✔️", ephemeral=True)
-        logging.info("[game] Création événement %s", evt.id)
+        logger.info("[game] Création événement %s", evt.id)
 
     # ---------- boucle de planification ----------
 
@@ -125,7 +126,7 @@ class GameEventsCog(commands.Cog):
             try:
                 await self._process_event(evt, now)
             except Exception as e:
-                logging.exception("[game] scheduler error for %s: %s", evt.id, e)
+                logger.exception("[game] scheduler error for %s: %s", evt.id, e)
 
     async def _process_event(self, evt: GameEvent, now: datetime) -> None:
         guild = self.bot.get_guild(evt.guild_id)
@@ -160,10 +161,10 @@ class GameEventsCog(commands.Cog):
                                 f"{evt.game_name} commence dans 10 minutes !"
                             )
                         except discord.HTTPException:
-                            logging.info("[game] DM refusé pour %s", uid)
+                            logger.info("[game] DM refusé pour %s", uid)
             evt.state = "waiting"
             await save_event(evt)
-            logging.info("[game] Salon vocal créé pour %s", evt.id)
+            logger.info("[game] Salon vocal créé pour %s", evt.id)
         # À l'heure H: annonce ou attente
         if evt.state in {"scheduled", "waiting"} and now >= evt.time:
             if any(s in {"yes", "maybe"} for s in evt.rsvps.values()):
@@ -187,7 +188,7 @@ class GameEventsCog(commands.Cog):
                 evt.started_at = now
                 evt.state = "running"
                 await save_event(evt)
-                logging.info("[game] Annonce publiée pour %s", evt.id)
+                logger.info("[game] Annonce publiée pour %s", evt.id)
             else:
                 if evt.state != "waiting":
                     evt.state = "waiting"
@@ -216,7 +217,7 @@ class GameEventsCog(commands.Cog):
                     set_voice_channel(evt, None)
                     evt.state = "cancelled"
                     await save_event(evt)
-                    logging.info("[game] Événement %s annulé", evt.id)
+                    logger.info("[game] Événement %s annulé", evt.id)
         # Fin de session quand le vocal est vide
         if (
             evt.state == "running"
@@ -253,7 +254,7 @@ class GameEventsCog(commands.Cog):
                 evt.state = "finished"
                 evt.ended_at = now
                 await save_event(evt)
-                logging.info("[game] Événement %s terminé", evt.id)
+                logger.info("[game] Événement %s terminé", evt.id)
 
 
 async def setup(bot: commands.Bot) -> None:
