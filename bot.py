@@ -49,18 +49,13 @@ class RefugeBot(commands.Bot):
         # Load all cogs from the ``cogs`` package so every slash command is
         # registered when the bot starts. ``load_extension`` is patched to an
         # ``AsyncMock`` in the tests, so awaiting is safe.
-        loaded = set()
-        for module in pkgutil.iter_modules(cogs.__path__):
+        discovered = list(pkgutil.iter_modules(cogs.__path__))
+        for module in discovered:
             await self.load_extension(f"{cogs.__name__}.{module.name}")
-            loaded.add(module.name)
 
-        # ``machine_a_sous`` may live outside the ``cogs`` package, ensure it
-        # is still loaded.
-        if "machine_a_sous" not in loaded:
-            try:
-                await self.load_extension("cogs.machine_a_sous")
-            except ModuleNotFoundError:
-                pass
+        # Ensure machine_a_sous is loaded even if it wasn't discovered
+        if not any(m.name == "machine_a_sous" for m in discovered):
+            await self.load_extension("cogs.machine_a_sous")
 
         # Sync application commands. Use guild-specific sync when ``GUILD_ID``
         # is defined so commands appear instantly on that server.
