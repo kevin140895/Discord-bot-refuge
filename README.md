@@ -18,10 +18,7 @@ Install `libopus0` and `ffmpeg` on Debian/Ubuntu:
 sudo apt install libopus0 ffmpeg
 ```
 
-The `nixpacks.toml` build configuration already lists `libopus0` to ensure the library
-is present in production environments. The Python dependencies in
-[`requirements.txt`](./requirements.txt) include `discord.py[voice]` and
-`imageio-ffmpeg` so FFmpeg support is available.
+The `nixpacks.toml` build configuration already lists `libopus0` to ensure the library is present in production environments.  The Python dependencies in [`requirements.txt`](./requirements.txt) include `discord.py[voice]` and `imageio-ffmpeg` so FFmpeg support is available.
 
 ## FFmpeg options
 
@@ -60,7 +57,7 @@ Un fichier d'exemple [`.env.example`](./.env.example) regroupe les variables
 essentielles pour exécuter le bot :
 
 - `DISCORD_TOKEN` : jeton du bot fourni par le [Portail développeur Discord](https://discord.com/developers/applications).
-- `GUILD_ID` : identifiant du serveur Discord principal. Utilisé pour synchroniser immédiatement les commandes slash sur ce serveur lors du démarrage du bot.
+- `GUILD_ID` : identifiant du serveur Discord principal.
 - `OWNER_ID` : identifiant du propriétaire du bot.
 - `TZ` : fuseau horaire du processus (défaut : `Europe/Paris`).
 - `DATA_DIR` : répertoire de stockage persistant pour les données.
@@ -76,7 +73,7 @@ Ne stockez jamais de jetons, de clés API ou d'autres informations sensibles dan
 
 ## Données persistantes
 
-Certaines fonctionnalités (XP, roulette, salons temporaires…) écrivent des
+Certaines fonctionnalités (XP, machine à sous, salons temporaires…) écrivent des
 fichiers JSON pour conserver leur état. Par défaut, ces fichiers sont stockés
 dans le dossier `/app/data` si présent (montage Railway), sinon dans `/data`.
 Vous pouvez modifier cet emplacement en définissant la variable
@@ -109,8 +106,8 @@ ces limites.
 La fréquence de vérification des noms de ces salons est définie par la constante
 `TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
 
-La vérification de l'état de la roulette est contrôlée par la constante
-`ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES` (5 minutes par défaut).
+La vérification de l'état de la machine à sous est contrôlée par la constante
+`MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES` (5 minutes par défaut).
 
 ### Sauvegarde des sessions vocales
 
