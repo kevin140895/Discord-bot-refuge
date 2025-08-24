@@ -180,12 +180,26 @@ class GameEventsCog(commands.Cog):
                     maybe_mentions = [f"<@{u}>" for u, s in evt.rsvps.items() if s == "maybe"]
                     desc = "\n".join(yes_mentions) or "Personne"
                     desc += "\nPeut-être : " + (", ".join(maybe_mentions) or "aucun")
-                    await channel.send(
-                        f"C'est parti pour **{evt.game_name}** !\n"
-                        f"Salon vocal: {vc.mention if vc else 'n/a'}\n"
-                        f"Joueurs: {desc}\n"
-                        "Multiplicateurs: ✅ x2, 🤔 x1.5, autres x1",
+                    embed = discord.Embed(
+                        title=f"🎲 C'est parti pour **{evt.game_name}** !",
+                        color=discord.Color.gold(),
                     )
+                    embed.add_field(
+                        name="🎤 Salon vocal",
+                        value=vc.mention if vc else "n/a",
+                        inline=False,
+                    )
+                    embed.add_field(
+                        name="👥 Joueurs",
+                        value=desc or "Aucun",
+                        inline=False,
+                    )
+                    embed.add_field(
+                        name="✨ Multiplicateurs",
+                        value="✅ x2\n🤔 x1.5\nAutres x1",
+                        inline=False,
+                    )
+                    await channel.send(embed=embed)
                 evt.started_at = now
                 evt.state = "running"
                 await save_event(evt)
@@ -240,12 +254,31 @@ class GameEventsCog(commands.Cog):
                         counts["x1"] += 1
                 channel = guild.get_channel(evt.channel_id)
                 if isinstance(channel, discord.TextChannel):
-                    await channel.send(
-                        f"Session terminée : {evt.game_name}\n"
-                        f"Durée : {duration} min\n"
-                        f"Participants : {len(evt.participants)}\n"
-                        f"Bonus appliqués : x2={counts['x2']}, x1.5={counts['x1.5']}, x1={counts['x1']}"
+                    embed = discord.Embed(
+                        title=f"✅ Session terminée : {evt.game_name}",
+                        color=discord.Color.green(),
                     )
+                    embed.add_field(
+                        name="⏱️ Durée",
+                        value=f"{duration} min",
+                        inline=True,
+                    )
+                    embed.add_field(
+                        name="👥 Participants",
+                        value=str(len(evt.participants) if getattr(evt, 'participants', None) else 0),
+                        inline=True,
+                    )
+                    x2 = counts.get('x2', 0)
+                    x15 = counts.get('x1.5', 0)
+                    x1 = counts.get('x1', 0)
+                    embed.add_field(
+                        name="✨ Bonus appliqués",
+                        value=f"✅ x2 = **{x2}**\n🤔 x1.5 = **{x15}**\n🟩 x1 = **{x1}**",
+                        inline=False,
+                    )
+                    embed.timestamp = discord.utils.utcnow()
+                    embed.set_footer(text="Merci d’avoir participé !")
+                    await channel.send(embed=embed)
                 if isinstance(vc, discord.VoiceChannel):
                     try:
                         await vc.delete(reason="Événement terminé")
