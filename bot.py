@@ -15,6 +15,7 @@ from utils.api_meter import api_meter
 from utils.channel_edit_manager import channel_edit_manager
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter
+from view import PlayerTypeView
 
 # global rate limiter instance
 limiter = GlobalRateLimiter()
@@ -45,6 +46,13 @@ class RefugeBot(commands.Bot):
         # ``AsyncMock`` in the tests, so awaiting is safe.
         await self.load_extension("cogs.pari_xp")
         await self.tree.sync()
+
+        # Register persistent views. ``add_view`` can only be called once per
+        # view instance; protect against duplicates when ``setup_hook`` runs
+        # multiple times during tests or restarts.
+        if not getattr(self, "_player_type_view_added", False):
+            self.add_view(PlayerTypeView())
+            self._player_type_view_added = True
 
     async def close(self) -> None:  # type: ignore[override]
         """Ensure background helpers are stopped before shutting down."""
