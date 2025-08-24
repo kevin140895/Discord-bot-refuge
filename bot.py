@@ -8,7 +8,11 @@ interaction with the bot.
 
 from __future__ import annotations
 
+import pkgutil
+import discord
 from discord.ext import commands
+from config import GUILD_ID
+import cogs
 
 from storage.xp_store import xp_store
 from utils.api_meter import api_meter
@@ -19,6 +23,7 @@ from view import PlayerTypeView
 
 # global rate limiter instance
 limiter = GlobalRateLimiter()
+
 
 async def reset_http_error_counter() -> None:
     """Reset the HTTP error counter (placeholder)."""
@@ -42,11 +47,26 @@ class RefugeBot(commands.Bot):
         limiter.start()
         await reset_http_error_counter()
 
-        # Load Machine à sous cog.  ``load_extension`` is patched to an
+        # Load all cogs from the ``cogs`` package so every slash command is
+        # registered when the bot starts. ``load_extension`` is patched to an
         # ``AsyncMock`` in the tests, so awaiting is safe.
-        await self.load_extension("cogs.machine_a_sous")
-        await self.load_extension("cogs.temp_vc")
-        await self.tree.sync()
+        discovered = list(pkgutil.iter_modules(cogs.__path__))
+        loaded_names = set()
+        for module in discovered:
+            await self.load_extension(f"{cogs.__name__}.{module.name}")
+            loaded_names.add(module.name)
+
+        # Ensure required cogs are loaded even if not discovered
+        for required in ("machine_a_sous", "temp_vc"):
+            if required not in loaded_names:
+                await self.load_extension(f"cogs.{required}")
+
+        # Sync application commands. Use guild-specific sync when ``GUILD_ID``
+        # is defined so commands appear instantly on that server.
+        if GUILD_ID:
+            await self.tree.sync(guild=discord.Object(id=GUILD_ID))
+        else:
+            await self.tree.sync()
 
         # Register persistent views. ``add_view`` can only be called once per
         # view instance; protect against duplicates when ``setup_hook`` runs
@@ -72,4 +92,3 @@ __all__ = [
     "limiter",
     "reset_http_error_counter",
 ]
-
