@@ -70,7 +70,8 @@ async def test_update_stats_changes_channel_names(monkeypatch):
     bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
     cog = StatsCog(bot)
     cog.refresh_members.cancel()
-    cog.refresh_activity.cancel()
+    cog.refresh_online.cancel()
+    cog.refresh_voice.cancel()
 
     await cog.update_members(guild)
     await cog.update_online(guild)
