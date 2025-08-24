@@ -241,6 +241,9 @@ class TempVCCog(commands.Cog):
                         "Suppression du salon %s échouée", before.channel.id
                     )
                 else:
+                    task = self._rename_tasks.pop(before.channel.id, None)
+                    if task:
+                        task.cancel()
                     logger.info(
                         "[temp_vc] deleted temporary channel '%s' (ID %s) after %s (%s) left",
                         before.channel.name,
@@ -250,9 +253,6 @@ class TempVCCog(commands.Cog):
                     )
                     TEMP_VC_IDS.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
-                    task = self._rename_tasks.pop(before.channel.id, None)
-                    if task:
-                        task.cancel()
                     save_temp_vc_ids(TEMP_VC_IDS)
 
         # 3) Renommage sur changement d'état vocal
