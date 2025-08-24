@@ -34,6 +34,12 @@ from utils.game_events import get_multiplier, record_participant
 from utils.voice_bonus import get_voice_multiplier
 logger = logging.getLogger(__name__)
 
+BOT_OWNER_ID = 541417878314942495
+
+
+def _is_owner(interaction: discord.Interaction) -> bool:
+    return interaction.user.id == BOT_OWNER_ID
+
 # Fichiers de persistance
 VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
 DAILY_STATS_FILE = os.path.join(DATA_DIR, "daily_stats.json")
@@ -314,6 +320,32 @@ class XPCog(commands.Cog):
     @auto_backup_xp.before_loop
     async def before_auto_backup_xp(self) -> None:
         await self.bot.wait_until_ready()
+
+
+    @app_commands.command(name="don_xp", description="Donne de l'XP à un membre")
+    @app_commands.check(_is_owner)
+    @app_commands.describe(
+        membre="Membre qui reçoit l'XP",
+        montant="Quantité d'XP à ajouter",
+    )
+    async def don_xp(
+        self,
+        interaction: discord.Interaction,
+        membre: discord.Member,
+        montant: app_commands.Range[int, 1],
+    ) -> None:
+        with measure("slash:don_xp"):
+            old_lvl, new_lvl, old_xp, new_xp = await award_xp(
+                membre.id,
+                montant,
+                guild_id=interaction.guild.id if interaction.guild else None,
+                source="don_xp",
+            )
+            await safe_respond(
+                interaction,
+                f"{membre.display_name} reçoit {montant} XP. Total: {new_xp} XP (niveau {new_lvl}).",
+                ephemeral=True,
+            )
 
 
     @app_commands.command(name="rang", description="Affiche ton niveau avec une carte graphique")
