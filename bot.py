@@ -42,9 +42,9 @@ class RefugeBot(commands.Bot):
         limiter.start()
         await reset_http_error_counter()
 
-        # Load Roulette Refuge cog.  ``load_extension`` is patched to an
+        # Load Machine à sous cog.  ``load_extension`` is patched to an
         # ``AsyncMock`` in the tests, so awaiting is safe.
-        await self.load_extension("cogs.pari_xp")
+        await self.load_extension("cogs.machine_a_sous")
         await self.tree.sync()
 
         # Register persistent views. ``add_view`` can only be called once per

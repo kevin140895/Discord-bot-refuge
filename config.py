@@ -85,8 +85,8 @@ CHANNEL_WELCOME = 1400550333796716574
 LOBBY_TEXT_CHANNEL = 1402258805533970472
 TIKTOK_ANNOUNCE_CH = 1400552164979507263
 ACTIVITY_SUMMARY_CH = 1400552164979507263
-ROULETTE_CHANNEL_ID = 1408834276228730900
-ROULETTE_XP_CHANNEL_ID = ROULETTE_CHANNEL_ID
+MACHINE_A_SOUS_CHANNEL_ID = 1405170020748755034
+MACHINE_A_SOUS_XP_CHANNEL_ID = MACHINE_A_SOUS_CHANNEL_ID
 
 # ── Rappels de rôles et notifications ────────────────────────
 REMINDER_CHANNEL_ID: int = 1400552164979507263
@@ -104,17 +104,17 @@ IGNORED_ROLE_IDS: set[int] = {
 }
 """Rôles à ignorer lors des rappels."""
 
-# ── Roue de la fortune ──────────────────────────────────────
-ROULETTE_ROLE_ID: int = 1405170057792979025
-"""Rôle attribué au gagnant de la roulette."""
+# ── Machine à sous ──────────────────────────────────────────
+MACHINE_A_SOUS_ROLE_ID: int = 1405170057792979025
+"""Rôle attribué au gagnant de la machine à sous."""
 
 ANNOUNCE_CHANNEL_ID: int = 1400552164979507263
-"""Salon utilisé pour les annonces de la roulette."""
+"""Salon utilisé pour les annonces de la machine à sous."""
 
-ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
-    os.getenv("ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES", "5")
+MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
+    os.getenv("MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES", "5")
 )
-"""Intervalle en minutes entre deux vérifications de l'état de la roulette."""
+"""Intervalle en minutes entre deux vérifications de l'état de la machine à sous."""
 
 # ── Persistance et I/O ───────────────────────────────────────
 DATA_DIR: str = _resolve_data_dir()

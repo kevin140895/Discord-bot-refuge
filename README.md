@@ -73,7 +73,7 @@ Ne stockez jamais de jetons, de clés API ou d'autres informations sensibles dan
 
 ## Données persistantes
 
-Certaines fonctionnalités (XP, roulette, salons temporaires…) écrivent des
+Certaines fonctionnalités (XP, machine à sous, salons temporaires…) écrivent des
 fichiers JSON pour conserver leur état. Par défaut, ces fichiers sont stockés
 dans le dossier `/app/data` si présent (montage Railway), sinon dans `/data`.
 Vous pouvez modifier cet emplacement en définissant la variable
@@ -106,8 +106,8 @@ ces limites.
 La fréquence de vérification des noms de ces salons est définie par la constante
 `TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
 
-La vérification de l'état de la roulette est contrôlée par la constante
-`ROULETTE_BOUNDARY_CHECK_INTERVAL_MINUTES` (5 minutes par défaut).
+La vérification de l'état de la machine à sous est contrôlée par la constante
+`MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES` (5 minutes par défaut).
 
 ### Sauvegarde des sessions vocales
 
