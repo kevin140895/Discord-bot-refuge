@@ -116,7 +116,7 @@ ANNOUNCE_CHANNEL_ID: int = 1400552164979507263
 """Salon utilisé pour les annonces de la machine à sous."""
 
 MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
-    os.getenv("MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES", "60")
+    os.getenv("MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES", "1")
 )
 """Intervalle en minutes entre deux vérifications de l'état de la machine à sous."""
 
