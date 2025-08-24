@@ -107,7 +107,7 @@ La fréquence de vérification des noms de ces salons est définie par la consta
 `TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
 
 La vérification de l'état de la machine à sous est contrôlée par la constante
-`MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES` (5 minutes par défaut).
+`MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES` (60 minutes par défaut).
 
 ### Sauvegarde des sessions vocales
 
