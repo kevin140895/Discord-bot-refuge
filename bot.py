@@ -57,7 +57,10 @@ class RefugeBot(commands.Bot):
         # ``machine_a_sous`` may live outside the ``cogs`` package, ensure it
         # is still loaded.
         if "machine_a_sous" not in loaded:
-            await self.load_extension("cogs.machine_a_sous")
+            try:
+                await self.load_extension("cogs.machine_a_sous")
+            except ModuleNotFoundError:
+                pass
 
         # Sync application commands. Use guild-specific sync when ``GUILD_ID``
         # is defined so commands appear instantly on that server.
