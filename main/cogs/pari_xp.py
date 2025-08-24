@@ -57,6 +57,15 @@ class RouletteRefugeCog(commands.Cog):
                 return None
         return channel if isinstance(channel, discord.TextChannel) else None
 
+    async def _get_announce_channel(self) -> discord.TextChannel | None:
+        cfg = load_json(CONFIG_PATH, {})
+        ch_id = int(cfg.get("announce_channel_id") or 0)
+        if ch_id:
+            ch = self.bot.get_channel(ch_id) or await self.bot.fetch_channel(ch_id)
+            if ch:
+                return ch  # type: ignore[return-value]
+        return await self._get_channel()
+
     async def _ensure_hub_message(self, channel: discord.TextChannel) -> None:
         hub_id = self.state.get("hub_message_id")
         embed = self._build_hub_embed()
@@ -260,6 +269,10 @@ class RouletteRefugeCog(commands.Cog):
             description="\n".join(lines),
             color=discord.Color.green(),
         )
+        announce_channel = await self._get_announce_channel()
+        if announce_channel:
+            await announce_channel.send(embed=embed)
+            return
         await channel.send(embed=embed)
 
     async def _announce_close(self, channel: discord.TextChannel) -> None:
@@ -268,9 +281,16 @@ class RouletteRefugeCog(commands.Cog):
             description="(placeholder)",
             color=discord.Color.red(),
         )
+        announce_channel = await self._get_announce_channel()
+        if announce_channel:
+            await announce_channel.send(embed=embed)
+            return
         await channel.send(embed=embed)
 
     async def _post_daily_summary(self, channel: discord.TextChannel) -> None:
+        announce_channel = await self._get_announce_channel()
+        if announce_channel:
+            channel = announce_channel
         transactions = storage.load_json(storage.Path(TX_PATH), [])
         now = datetime.now(TZ_PARIS)
         today: date = now.date()
@@ -369,6 +389,12 @@ class RouletteRefugeCog(commands.Cog):
             await self._announce_open(channel)
             await self._update_hub_state(True)
         elif now.hour == last_call_hour and now.minute == last_call_minute:
+            announce_ch = await self._get_announce_channel()
+            if announce_ch:
+                await announce_ch.send(
+                    "⏳ Dernier appel — fermeture dans 15 minutes (02:00)."
+                )
+                return
             await channel.send(
                 "⏳ Dernier appel — fermeture dans 15 minutes (02:00)."
             )
@@ -690,6 +716,9 @@ class RouletteRefugeCog(commands.Cog):
         embed = discord.Embed(title="🎲 Résultat", description="\n".join(lines))
         await interaction.followup.send(embed=embed, ephemeral=True)
         public_channel = interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
+        announce_channel = await self._get_announce_channel()
+        if announce_channel:
+            public_channel = announce_channel
         if public_channel:
             big_win_mult = self.config.get("announce_big_win_mult_threshold", 5)
             big_loss_xp = self.config.get("announce_big_loss_xp_threshold", 100)

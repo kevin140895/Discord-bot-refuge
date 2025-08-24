@@ -6,6 +6,7 @@
   "min_balance": 10,
   "enabled": true,
   "channel_id": 1408834276228730900,
+  "announce_channel_id": 1400552164979507263,
   "game_display_name": "🤑 Roulette Refuge",
   "timezone": "Europe/Paris",
   "open_hour": 8,
