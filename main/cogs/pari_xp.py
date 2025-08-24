@@ -1,8 +1,12 @@
 import discord
 from discord.ext import commands, tasks  # noqa: F401
 from datetime import datetime
+from datetime import timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
+from discord import ui
+from utils.storage import load_json  # noqa: F401
+from utils.xp_adapter import get_user_xp, get_user_account_age_days
 
 from utils import storage, timezones
 
@@ -18,6 +22,9 @@ class RouletteRefugeCog(commands.Cog):
         self.config = storage.load_json(storage.Path(CONFIG_PATH), {})
         self.state = storage.load_json(storage.Path(STATE_PATH), {})
         self.scheduler_task.start()
+        self._cooldowns: dict[int, datetime] = {}
+        self._bets_today: dict[int, int] = {}
+        self._bets_today_date = self._now().date()
 
     def _now(self) -> datetime:
         return datetime.now(timezones.TZ_PARIS)
@@ -42,6 +49,9 @@ class RouletteRefugeCog(commands.Cog):
         hub_id = self.state.get("hub_message_id")
         embed = self._build_hub_embed()
         view = self._build_hub_view()
+        for child in view.children:
+            if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_bet":
+                child.callback = self._bet_button_callback
         message = None
         if hub_id:
             try:
@@ -176,4 +186,107 @@ class RouletteRefugeCog(commands.Cog):
     @scheduler_task.before_loop
     async def _wait_ready_scheduler(self) -> None:
         await self.bot.wait_until_ready()
+
+    async def _bet_button_callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(self._build_bet_modal())
+
+    def _build_bet_modal(self) -> ui.Modal:
+        cog = self
+
+        class BetModal(ui.Modal):
+            def __init__(self) -> None:
+                super().__init__(
+                    title="🤑 Roulette Refuge — Parier", custom_id="pari_xp_modal"
+                )
+                self.amount = ui.TextInput(
+                    label="Montant (XP)",
+                    placeholder="≥ 5",
+                    required=True,
+                    custom_id="amount",
+                )
+                self.use_ticket = ui.TextInput(
+                    label="Utiliser un ticket gratuit ? (oui/non)",
+                    placeholder="non",
+                    required=False,
+                    custom_id="use_ticket",
+                )
+                self.add_item(self.amount)
+                self.add_item(self.use_ticket)
+
+            async def on_submit(
+                self, interaction: discord.Interaction
+            ) -> None:  # type: ignore[override]
+                await cog._handle_bet_submission(
+                    interaction, self.amount.value, self.use_ticket.value or ""
+                )
+
+        return BetModal()
+
+    async def _handle_bet_submission(
+        self,
+        interaction: discord.Interaction,
+        amount_str: str,
+        use_ticket_str: str,
+    ) -> None:
+        now = self._now()
+        if not self._is_open_hours(now):
+            await interaction.response.send_message(
+                "⛔ Roulette Refuge est fermée. Réouverture à 08:00.",
+                ephemeral=True,
+            )
+            return
+        try:
+            amount = int(amount_str)
+        except Exception:
+            await interaction.response.send_message(
+                "❌ Mise minimale : 5 XP.",
+                ephemeral=True,
+            )
+            return
+        min_bet = int(self.config.get("min_bet", 5))
+        if amount < min_bet:
+            await interaction.response.send_message(
+                "❌ Mise minimale : 5 XP.",
+                ephemeral=True,
+            )
+            return
+        user_id = interaction.user.id
+        if get_user_account_age_days(user_id) < 2:
+            await interaction.response.send_message(
+                "❌ Ancienneté requise : 2 jours.",
+                ephemeral=True,
+            )
+            return
+        balance = get_user_xp(user_id)
+        min_balance_guard = int(self.config.get("min_balance_guard", 10))
+        if balance < amount or balance - amount < min_balance_guard:
+            await interaction.response.send_message(
+                "❌ Solde insuffisant (il faut conserver au moins 10 XP).",
+                ephemeral=True,
+            )
+            return
+        if self._bets_today_date != now.date():
+            self._bets_today = {}
+            self._bets_today_date = now.date()
+        cd_until = self._cooldowns.get(user_id)
+        if cd_until and cd_until > now:
+            remaining = int((cd_until - now).total_seconds())
+            await interaction.response.send_message(
+                f"⏳ Attends {remaining}s avant de rejouer.", ephemeral=True
+            )
+            return
+        self._cooldowns[user_id] = now + timedelta(seconds=15)
+        daily_cap = int(self.config.get("daily_cap", 20))
+        count = self._bets_today.get(user_id, 0)
+        if count >= daily_cap:
+            await interaction.response.send_message(
+                "📉 Tu as atteint 20 paris aujourd'hui. Reviens demain.",
+                ephemeral=True,
+            )
+            return
+        self._bets_today[user_id] = count + 1
+        _ = use_ticket_str.lower() == "oui"
+        await interaction.response.send_message(
+            "✅ Mise reçue. (Tirage à l'étape 6)", ephemeral=True
+        )
 
