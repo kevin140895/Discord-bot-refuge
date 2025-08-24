@@ -9,7 +9,6 @@ effectuer les changements.
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-from datetime import time
 
 import config
 from config import XP_VIEWER_ROLE_ID
@@ -76,9 +75,9 @@ class StatsCog(commands.Cog):
                     channels[2], f"🔊 Voc : {voice}"
                 )
 
-    @tasks.loop(time=[time(hour=10), time(hour=22)])
+    @tasks.loop(minutes=10)
     async def refresh_members(self) -> None:
-        """Met à jour le nombre de membres deux fois par jour."""
+        """Met à jour le nombre de membres toutes les dix minutes."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_members(guild)
@@ -104,4 +103,5 @@ class StatsCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
+    await rename_manager.start()
     await bot.add_cog(StatsCog(bot))
