@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import (
+    DATA_DIR,
     RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
@@ -14,6 +15,7 @@ from config import (
     RADIO_VC_ID,
     ROCK_RADIO_STREAM_URL,
 )
+from storage.radio_store import RadioStore
 from utils.rename_manager import rename_manager
 from utils.voice import ensure_voice, play_stream
 from view import RadioView
@@ -31,6 +33,7 @@ class RadioCog(commands.Cog):
         self._reconnect_task: Optional[asyncio.Task] = None
         self._original_name: Optional[str] = None
         self._previous_stream: Optional[str] = None
+        self.store = RadioStore(data_dir=DATA_DIR)
 
     async def cog_load(self) -> None:
         """Connecte la radio si le bot est déjà prêt lors du chargement du cog."""
@@ -69,6 +72,21 @@ class RadioCog(commands.Cog):
     async def _ensure_radio_message(
         self, channel: discord.abc.Messageable
     ) -> None:
+        stored = self.store.get_radio_message()
+        if stored and int(stored.get("channel_id", 0)) == getattr(channel, "id", 0):
+            try:
+                msg = await channel.fetch_message(int(stored.get("message_id", 0)))
+                for row in msg.components:
+                    for comp in row.children:
+                        if (
+                            isinstance(comp, discord.ui.Button)
+                            and comp.custom_id == "radio_24"
+                        ):
+                            return
+            except Exception as e:
+                logger.debug("Stored radio message fetch failed: %s", e)
+            self.store.clear_radio_message()
+
         try:
             async for msg in channel.history(limit=50):
                 if msg.author.id != self.bot.user.id:
@@ -79,11 +97,19 @@ class RadioCog(commands.Cog):
                             isinstance(comp, discord.ui.Button)
                             and comp.custom_id == "radio_24"
                         ):
+                            self.store.set_radio_message(
+                                str(getattr(channel, "id", 0)), str(msg.id)
+                            )
                             return
         except Exception as e:
             logger.warning("Impossible de vérifier le message radio: %s", e)
             return
-        await channel.send("Changement de radio", view=RadioView())
+
+        try:
+            msg = await channel.send("Changement de radio", view=RadioView())
+            self.store.set_radio_message(str(getattr(channel, "id", 0)), str(msg.id))
+        except Exception as e:
+            logger.warning("Impossible d'envoyer le message radio: %s", e)
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
