@@ -701,7 +701,10 @@ class RouletteRefugeCog(commands.Cog):
             return
         self._bets_today[user_id] = count + 1
         _ = use_ticket_str.lower() == "oui"
-        await interaction.response.send_message("✅ Mise reçue. (Tirage à l'étape 6)", ephemeral=True)
+        await interaction.response.send_message(
+            "✅ Mise reçue. Tirage en cours…",
+            ephemeral=True,
+        )
         if color_choice:
             outcome_color = random.choice(["rouge", "noir"])
             segment = f"color_{outcome_color}"
