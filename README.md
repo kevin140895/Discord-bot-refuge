@@ -2,6 +2,14 @@
 
 This Discord bot requires the Opus audio codec library and FFmpeg for voice features.
 
+## Entrypoint
+
+The bot launches via [`main.py`](./main.py). Docker images and Procfile run:
+
+```bash
+python main.py
+```
+
 ## System dependencies
 
 Install `libopus0` and `ffmpeg` on Debian/Ubuntu:
