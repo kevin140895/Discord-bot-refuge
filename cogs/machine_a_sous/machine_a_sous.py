@@ -430,6 +430,7 @@ class MachineASousCog(commands.Cog):
         self._last_announced_state = self.current_view_enabled
         try:
             await self._ensure_poster_message()
+            await self._ensure_state_message(self.current_view_enabled)
         except Exception as err:
             logger.warning("[MachineASous] Init failed: %s", err)
         self.maintenance_loop.start()
@@ -554,8 +555,8 @@ class MachineASousCog(commands.Cog):
             ):
                 self.current_view_enabled = enabled_now
                 await self._replace_poster_message()
-                await self._post_state_message(enabled_now)
                 self._last_announced_state = enabled_now
+            await self._ensure_state_message(enabled_now)
         except Exception as e:
             logger.error("[MachineASous] maintenance_loop boundary erreur: %s", e)
 
