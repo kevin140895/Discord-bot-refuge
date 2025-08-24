@@ -127,7 +127,10 @@ class TempVCCog(commands.Cog):
                 break
 
         if game_name:
-            status = game_name
+            # Discord limite les noms de salon à 100 caractères ; on réserve
+            # l'espace pour la base et le séparateur «  • ».
+            max_status_len = 100 - len(base) - 3
+            status = game_name[:max_status_len]
         elif any(m.voice and m.voice.self_mute for m in channel.members):
             status = "Endormie"
         else:
