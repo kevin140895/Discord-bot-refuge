@@ -31,6 +31,7 @@ class LevelFeedRouter:
         self._pending: Dict[Tuple[int, str], LevelChange] = {}
         self._tasks: Dict[Tuple[int, str], asyncio.Task] = {}
         self.metrics: Counter[str] = Counter()
+        self._pari_xp_messages: Dict[Tuple[int, str], discord.Message] = {}
 
     def setup(self, bot: discord.Client) -> None:
         self.bot = bot
@@ -67,14 +68,57 @@ class LevelFeedRouter:
             self.metrics["level_feed.skipped_no_channel"] += 1
             logger.warning("level feed channel unavailable or invalid")
             return
-        template_key = f"{event.source}_{'up' if event.new_level > event.old_level else 'down'}"
+        user = self.bot.get_user(event.user_id)
+        mention = user.mention if user else f"<@{event.user_id}>"
+        xp_delta = event.new_xp - event.old_xp
+        direction = "up" if event.new_level > event.old_level else "down"
+
+        if event.source == "pari_xp":
+            if direction == "up":
+                embed = discord.Embed(
+                    title="🆙 Niveau augmenté !",
+                    description=f"{mention} passe **niv. {event.new_level}** *(de {event.old_level})* 🎉",
+                    color=discord.Color.green(),
+                )
+                embed.add_field(name="🎰 Source", value="🤑 Roulette Refuge", inline=True)
+                embed.add_field(
+                    name="➕ Gain d'XP", value=f"**+{int(xp_delta)} XP**", inline=True
+                )
+                embed.set_footer(text="Félicitations !")
+            else:
+                embed = discord.Embed(
+                    title="⬇️ Niveau diminué",
+                    description=f"{mention} descend **niv. {event.new_level}** *(depuis {event.old_level})*",
+                    color=discord.Color.red(),
+                )
+                embed.add_field(name="🎰 Source", value="🤑 Pari XP", inline=True)
+                embed.add_field(
+                    name="➖ Perte d'XP", value=f"**{int(abs(xp_delta))} XP**", inline=True
+                )
+                embed.set_footer(text="Ça arrive… retente ta chance !")
+
+            embed.timestamp = discord.utils.utcnow()
+            key = (event.user_id, direction)
+            last_msg = self._pari_xp_messages.get(key)
+            try:
+                if last_msg:
+                    await last_msg.edit(embed=embed)
+                else:
+                    last_msg = await channel.send(embed=embed)
+                    self._pari_xp_messages[key] = last_msg
+                self.metrics[f"level_feed.sent.{event.source}"] += 1
+            except discord.Forbidden:
+                self.metrics["level_feed.skipped_no_channel"] += 1
+                logger.warning("missing permission to send level feed message")
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("failed to send level feed message: %s", exc)
+            return
+
+        template_key = f"{event.source}_{direction}"
         template = LEVEL_FEED_TEMPLATES.get(template_key)
         if not template:
             logger.warning("missing level feed template for %s", template_key)
             return
-        user = self.bot.get_user(event.user_id)
-        mention = user.mention if user else f"<@{event.user_id}>"
-        xp_delta = event.new_xp - event.old_xp
         msg = template.format(
             mention=mention,
             old_level=event.old_level,
