@@ -45,6 +45,15 @@ class RadioCog(commands.Cog):
             logger.warning("RADIO_STREAM_URL non défini")
             return
         self.voice = await ensure_voice(self.bot, self.vc_id, self.voice)
+        if self.voice is None:
+            logger.warning(
+                "Connexion au salon vocal échouée, nouvelle tentative planifiée"
+            )
+            if self._reconnect_task is None or self._reconnect_task.done():
+                self._reconnect_task = self.bot.loop.create_task(
+                    self._delayed_reconnect()
+                )
+            return
         play_stream(self.voice, self.stream_url, after=self._after_play)
 
     def _after_play(self, error: Optional[Exception]) -> None:
