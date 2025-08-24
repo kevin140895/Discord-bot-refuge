@@ -10,7 +10,7 @@ background using ``asyncio.create_task``.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from storage.xp_store import xp_store
 
@@ -29,7 +29,26 @@ def add_user_xp(user_id: int, amount: int, reason: str = "pari_xp") -> None:
     The underlying ``xp_store`` operation is asynchronous; we fire-and-forget
     the update so callers don't have to await it.  ``reason`` is currently
     unused but kept for API compatibility.
+
+    If ``user_id`` has an active double-XP buff, ``amount`` is doubled.  Buffs
+    that have expired are cleaned up lazily.
     """
+
+    if amount > 0:
+        uid = str(user_id)
+        expires = xp_store.data.get(uid, {}).get("double_xp_until")
+        if expires:
+            try:
+                exp_dt = datetime.fromisoformat(expires)
+            except ValueError:
+                exp_dt = None
+            now = datetime.utcnow()
+            if exp_dt and exp_dt > now:
+                amount *= 2
+            else:
+                # Expired or invalid timestamp: remove the buff.
+                xp_store.data.setdefault(uid, {}).pop("double_xp_until", None)
+                asyncio.create_task(xp_store.flush())
 
     asyncio.create_task(xp_store.add_xp(user_id, amount))
 
@@ -43,9 +62,18 @@ def get_user_account_age_days(user_id: int) -> int:
 
 
 def apply_double_xp_buff(user_id: int, minutes: int = 60) -> None:
-    """Placeholder for a future double-XP buff system."""
+    """Grant a temporary double-XP buff to ``user_id``.
 
-    return None
+    The buff expires ``minutes`` after application and is persisted via the
+    underlying ``xp_store``. Subsequent calls to :func:`add_user_xp` will honor
+    the buff until it expires.
+    """
+
+    uid = str(user_id)
+    expires_at = datetime.utcnow() + timedelta(minutes=minutes)
+    xp_store.data.setdefault(uid, {}).update({"double_xp_until": expires_at.isoformat()})
+    # Persist buff information so it survives restarts.
+    asyncio.create_task(xp_store.flush())
 
 
 __all__ = [
