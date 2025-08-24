@@ -7,9 +7,12 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 from discord import ui
 from discord import app_commands
-from utils.xp_adapter import get_user_xp, get_user_account_age_days
+from main.utils.xp_adapter import (
+    get_user_xp,
+    get_user_account_age_days,
+    add_user_xp,
+)
 import random
-from utils.xp_adapter import add_user_xp
 import inspect
 import re
 

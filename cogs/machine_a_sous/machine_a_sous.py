@@ -576,7 +576,7 @@ class MachineASousCog(commands.Cog):
             self.bot.add_view(MachineASousView())
         except Exception as e:
             logger.error("[MachineASous] add_view échoué: %s", e)
-        self.bot.loop.create_task(self._init_after_ready())
+        asyncio.create_task(self._init_after_ready())
 
     async def cog_unload(self):
         self.maintenance_loop.cancel()

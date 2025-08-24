@@ -175,7 +175,7 @@ class TempVCCog(commands.Cog):
             task.cancel()
         if not await self._ensure_rename_worker():
             return
-        new_task = self.bot.loop.create_task(self._rename_channel(channel))
+        new_task = asyncio.create_task(self._rename_channel(channel))
         self._rename_tasks[channel.id] = new_task
 
     async def _create_temp_vc(self, member: discord.Member) -> discord.VoiceChannel:

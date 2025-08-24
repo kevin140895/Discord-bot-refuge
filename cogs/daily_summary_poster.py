@@ -49,8 +49,8 @@ class DailySummaryPoster(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._task = self.bot.loop.create_task(self._scheduler())
-        self.bot.loop.create_task(self._startup_check())
+        self._task = asyncio.create_task(self._scheduler())
+        asyncio.create_task(self._startup_check())
 
     def cog_unload(self) -> None:  # pragma: no cover - cleanup
         self._task.cancel()

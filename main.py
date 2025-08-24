@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Optional
@@ -27,7 +28,7 @@ class DiscordCriticalHandler(logging.Handler):
             await channel.send(f"```{message}```")
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.bot.loop.create_task(self._send(self.format(record)))
+        asyncio.create_task(self._send(self.format(record)))
 
 
 def main() -> None:
