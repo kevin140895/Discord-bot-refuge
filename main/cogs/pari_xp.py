@@ -6,6 +6,7 @@ from datetime import date
 from typing import Optional
 from zoneinfo import ZoneInfo
 from discord import ui
+from discord import app_commands
 from utils.storage import load_json  # noqa: F401
 from utils.storage import save_json
 from utils.xp_adapter import get_user_xp, get_user_account_age_days
@@ -738,3 +739,32 @@ class RouletteRefugeCog(commands.Cog):
         report = await self._self_check_report()
         print(report)
         await ctx.send(str(report))
+
+    @app_commands.command(name="pari_xp_selfcheck", description="Diagnostic interne Roulette Refuge")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_pari_xp_selfcheck(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            report = await self._self_check_report()
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur self-check : {e}", ephemeral=True)
+            return
+
+        color = discord.Color.green()
+        if any(v != "PASS" for v in report.values()):
+            color = discord.Color.orange()
+
+        embed = discord.Embed(
+            title="🧪 Roulette Refuge — Self-check",
+            description="Diagnostic interne (PASS/FAIL)",
+            color=color
+        )
+        for key, val in report.items():
+            embed.add_field(name=key, value=val, inline=True)
+        embed.set_footer(text="Ce diagnostic n'altère rien (add-only).")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(RouletteRefugeCog(bot))
