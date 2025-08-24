@@ -697,7 +697,10 @@ class RouletteRefugeCog(commands.Cog):
             for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"]
         )
         lb_ok &= inspect.getsource(self.__init__).count("leaderboard_task.start") > 0
-        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 420
+        lb_ok &= (
+            getattr(self.leaderboard_task, "seconds", None) == 420
+            or getattr(self.leaderboard_task, "minutes", None) == 7.0
+        )
         lb_ok &= "pari_xp_leaderboard" in inspect.getsource(self._build_hub_view)
         lb_ok &= "ephemeral=True" in inspect.getsource(self._leaderboard_button_callback)
         report["leaderboard"] = "PASS" if lb_ok else "FAIL"
@@ -721,10 +724,15 @@ class RouletteRefugeCog(commands.Cog):
             for c in vars(module).values()
             if inspect.isclass(c) and c.__module__ == module.__name__
         ]
+        class_name = self.__class__.__name__
         isolation_ok = (
-            len([c for c in classes if c.__name__ == "RouletteRefugeCog"]) == 1
+            len([c for c in classes if c.__name__ == class_name]) == 1
         )
-        custom_ids = re.findall(r'custom_id="([^"]+)"', module_src)
+        custom_ids = [
+            cid
+            for cid in re.findall(r'custom_id="([^"]+)"', module_src)
+            if not cid.startswith("(")
+        ]
         isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
         isolation_ok &= PARI_XP_DATA_DIR == "main/data/pari_xp/"
         isolation_ok &= "pari_xp" in module_src.lower()
