@@ -30,7 +30,11 @@ class RadioCog(commands.Cog):
         self.vc_id = RADIO_VC_ID
         self.stream_url: Optional[str] = RADIO_STREAM_URL
         self.voice: Optional[discord.VoiceClient] = None
-        self._reconnect_task: Optional[asyncio.Task] = None
+        # Task used to schedule reconnection after the stream ends.
+        # ``Player.after`` callbacks are executed in a different thread
+        # than the bot's event loop, so we store the future returned by
+        # ``asyncio.run_coroutine_threadsafe`` instead of an ``asyncio.Task``.
+        self._reconnect_task: Optional[asyncio.Future] = None
         self._original_name: Optional[str] = None
         self._previous_stream: Optional[str] = None
         self.store = RadioStore(data_dir=DATA_DIR)
@@ -63,7 +67,12 @@ class RadioCog(commands.Cog):
         if error:
             logger.warning("Erreur de lecture radio: %s", error)
         if self._reconnect_task is None or self._reconnect_task.done():
-            self._reconnect_task = asyncio.create_task(self._delayed_reconnect())
+            # ``Player.after`` runs in the audio thread where no event loop is
+            # running. Use ``run_coroutine_threadsafe`` to schedule the
+            # reconnect coroutine on the bot's loop.
+            self._reconnect_task = asyncio.run_coroutine_threadsafe(
+                self._delayed_reconnect(), self.bot.loop
+            )
 
     async def _delayed_reconnect(self) -> None:
         await asyncio.sleep(5)
