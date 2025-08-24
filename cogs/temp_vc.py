@@ -53,18 +53,37 @@ class TempVCCog(commands.Cog):
 
         self.cleanup.start()
 
-        if rename_manager._worker is None:
-            async def _ensure_rename_worker() -> None:
-                await rename_manager.start()
-                logger.info("[temp_vc] rename_manager worker démarré")
-
-            asyncio.create_task(_ensure_rename_worker())
+        if rename_manager._worker is None or rename_manager._worker.done():
+            loop = getattr(self.bot, "loop", None)
+            if loop is None:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+            if loop:
+                loop.create_task(self._ensure_rename_worker())
 
     def cog_unload(self) -> None:
         self.cleanup.cancel()
         for task in self._rename_tasks.values():
             task.cancel()
         self._rename_tasks.clear()
+
+    async def _ensure_rename_worker(self) -> bool:
+        """Start the rename manager worker if it's not running.
+
+        Returns True if the worker is active, False otherwise."""
+        if rename_manager._worker is None or rename_manager._worker.done():
+            try:
+                await rename_manager.start()
+            except Exception:
+                logger.exception(
+                    "[temp_vc] échec du démarrage du worker rename_manager"
+                )
+                return False
+            else:
+                logger.info("[temp_vc] rename_manager worker démarré")
+        return True
 
     # ---------- outils internes ----------
 
@@ -129,8 +148,9 @@ class TempVCCog(commands.Cog):
 
             new = self._compute_channel_name(channel)
             if new and channel.name != new:
-                await rename_manager.request(channel, new)
-                self._last_names[channel.id] = new
+                if await self._ensure_rename_worker():
+                    await rename_manager.request(channel, new)
+                    self._last_names[channel.id] = new
         except asyncio.CancelledError:
             pass
         finally:
@@ -149,6 +169,8 @@ class TempVCCog(commands.Cog):
         task = self._rename_tasks.get(channel.id)
         if task:
             task.cancel()
+        if not await self._ensure_rename_worker():
+            return
         new_task = self.bot.loop.create_task(self._rename_channel(channel))
         self._rename_tasks[channel.id] = new_task
 
