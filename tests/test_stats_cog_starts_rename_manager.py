@@ -22,4 +22,5 @@ async def test_stats_cog_starts_rename_manager(monkeypatch):
 
     cog = bot.add_cog.call_args.args[0]
     cog.refresh_members.cancel()
-    cog.refresh_activity.cancel()
+    cog.refresh_online.cancel()
+    cog.refresh_voice.cancel()

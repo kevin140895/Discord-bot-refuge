@@ -24,11 +24,13 @@ class StatsCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.refresh_members.start()
-        self.refresh_activity.start()
+        self.refresh_online.start()
+        self.refresh_voice.start()
 
     def cog_unload(self) -> None:
         self.refresh_members.cancel()
-        self.refresh_activity.cancel()
+        self.refresh_online.cancel()
+        self.refresh_voice.cancel()
 
     async def update_members(self, guild: discord.Guild) -> None:
         """Met à jour le nombre de membres pour ``guild``."""
@@ -76,19 +78,25 @@ class StatsCog(commands.Cog):
                     channels[2], f"🔊 Voc : {voice}"
                 )
 
-    @tasks.loop(time=[time(hour=10), time(hour=22)])
+    @tasks.loop(minutes=2)
     async def refresh_members(self) -> None:
-        """Met à jour le nombre de membres deux fois par jour."""
+        """Met à jour le nombre de membres toutes les deux minutes."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_members(guild)
 
-    @tasks.loop(minutes=10)
-    async def refresh_activity(self) -> None:
-        """Met à jour l'activité du serveur toutes les dix minutes."""
+    @tasks.loop(minutes=1)
+    async def refresh_online(self) -> None:
+        """Met à jour le nombre d'utilisateurs en ligne chaque minute."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_online(guild)
+
+    @tasks.loop(hours=1)
+    async def refresh_voice(self) -> None:
+        """Met à jour le nombre d'utilisateurs en vocal toutes les heures."""
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
             await self.update_voice(guild)
 
     @app_commands.command(name="stats_refresh", description="Met à jour les salons de statistiques.")
