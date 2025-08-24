@@ -61,6 +61,9 @@ class RefugeBot(commands.Bot):
             if required not in loaded_names:
                 await self.load_extension(f"cogs.{required}")
 
+        # Explicitly load the pari_xp cog from the main package
+        await self.load_extension("main.cogs.pari_xp")
+
         # Sync application commands. Use guild-specific sync when ``GUILD_ID``
         # is defined so commands appear instantly on that server.
         if GUILD_ID:
