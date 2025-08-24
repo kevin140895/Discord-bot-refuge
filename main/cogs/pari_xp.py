@@ -196,10 +196,6 @@ class RouletteRefugeCog(commands.Cog):
             await message.edit(embed=embed)
         else:
             message = await channel.send(embed=embed)
-            try:
-                await message.pin()
-            except Exception:
-                pass
             state["leaderboard_message_id"] = message.id
             await storage.save_json(storage.Path(STATE_PATH), state)
             self.state = state
