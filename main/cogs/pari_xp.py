@@ -6,6 +6,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 from discord import ui
 from utils.storage import load_json  # noqa: F401
+from utils.storage import save_json
 from utils.xp_adapter import get_user_xp, get_user_account_age_days
 import random
 from utils.xp_adapter import add_user_xp
@@ -25,6 +26,7 @@ class RouletteRefugeCog(commands.Cog):
         self.config = storage.load_json(storage.Path(CONFIG_PATH), {})
         self.state = storage.load_json(storage.Path(STATE_PATH), {})
         self.scheduler_task.start()
+        self.leaderboard_task.start()
         self._cooldowns: dict[int, datetime] = {}
         self._bets_today: dict[int, int] = {}
         self._bets_today_date = self._now().date()
@@ -55,6 +57,8 @@ class RouletteRefugeCog(commands.Cog):
         for child in view.children:
             if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_bet":
                 child.callback = self._bet_button_callback
+            if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "pari_xp_leaderboard":
+                child.callback = self._leaderboard_button_callback
         message = None
         if hub_id:
             try:
@@ -121,6 +125,98 @@ class RouletteRefugeCog(commands.Cog):
 
         return HubView()
 
+    async def _ensure_leaderboard_message(self, channel: discord.TextChannel) -> None:
+        state = load_json(storage.Path(STATE_PATH), {})
+        msg_id = state.get("leaderboard_message_id")
+        embed = self._build_leaderboard_embed()
+        message = None
+        if msg_id:
+            try:
+                message = await channel.fetch_message(int(msg_id))
+            except Exception:
+                message = None
+        if message:
+            await message.edit(embed=embed)
+        else:
+            message = await channel.send(embed=embed)
+            try:
+                await message.pin()
+            except Exception:
+                pass
+            state["leaderboard_message_id"] = message.id
+            await save_json(storage.Path(STATE_PATH), state)
+            self.state = state
+
+    def _build_leaderboard_embed(self) -> discord.Embed:
+        tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
+        now = datetime.now(tz)
+        transactions = load_json(storage.Path(TX_PATH), [])
+        month_txs = []
+        for tx in transactions:
+            ts = tx.get("ts")
+            try:
+                dt = datetime.fromisoformat(ts)
+            except Exception:
+                continue
+            dt = dt.astimezone(tz)
+            if dt.year == now.year and dt.month == now.month:
+                month_txs.append(tx)
+        stats: dict[int, dict[str, int | str]] = {}
+        for tx in month_txs:
+            uid = tx.get("user_id")
+            username = tx.get("username", str(uid))
+            delta = int(tx.get("delta", 0))
+            user_stat = stats.setdefault(uid, {"username": username, "net": 0})
+            user_stat["net"] = int(user_stat["net"]) + delta
+        winners = sorted(
+            [v for v in stats.values() if int(v["net"]) > 0],
+            key=lambda x: int(x["net"]),
+            reverse=True,
+        )[:10]
+        losers = sorted(
+            [v for v in stats.values() if int(v["net"]) < 0],
+            key=lambda x: int(x["net"]),
+        )[:10]
+        win_lines = [
+            f"{idx+1}. {w['username']} ({int(w['net']):+} XP)"
+            for idx, w in enumerate(winners)
+        ]
+        loss_lines = [
+            f"{idx+1}. {loser['username']} ({int(loser['net']):+} XP)"
+            for idx, loser in enumerate(losers)
+        ]
+        biggest = None
+        for tx in month_txs:
+            if tx.get("delta", 0) > 0:
+                if not biggest or tx["delta"] > biggest["delta"]:
+                    biggest = tx
+        biggest_val = (
+            f"{biggest['username']} (+{biggest['delta']} XP)"
+            if biggest
+            else "N/A"
+        )
+        embed = discord.Embed(
+            title=f"📊 Roulette Refuge — Leaderboard ({now.strftime('%B %Y')})",
+            color=discord.Color.purple(),
+        )
+        embed.add_field(
+            name="🏆 Top 10 gagnants nets (mois)",
+            value="\n".join(win_lines) if win_lines else "N/A",
+            inline=False,
+        )
+        embed.add_field(
+            name="💸 Top 10 perdants (mois)",
+            value="\n".join(loss_lines) if loss_lines else "N/A",
+            inline=False,
+        )
+        embed.add_field(
+            name="💥 Plus gros gain unique (mois)",
+            value=biggest_val,
+            inline=False,
+        )
+        embed.add_field(name="🔁 Séries", value="(à venir)", inline=False)
+        return embed
+
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         self.state = storage.load_json(storage.Path(STATE_PATH), {})
@@ -128,6 +224,7 @@ class RouletteRefugeCog(commands.Cog):
         if channel:
             await self._ensure_hub_message(channel)
             # leaderboard sera géré aux étapes suivantes
+            await self._ensure_leaderboard_message(channel)
 
     async def _update_hub_state(self, is_open: bool) -> None:
         self.state["is_open"] = is_open
@@ -189,6 +286,37 @@ class RouletteRefugeCog(commands.Cog):
     @scheduler_task.before_loop
     async def _wait_ready_scheduler(self) -> None:
         await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=7.0)
+    async def leaderboard_task(self) -> None:
+        channel = await self._get_channel()
+        if not channel:
+            return
+        await self._ensure_leaderboard_message(channel)
+        state = load_json(storage.Path(STATE_PATH), {})
+        msg_id = state.get("leaderboard_message_id")
+        if not msg_id:
+            return
+        try:
+            msg = await channel.fetch_message(int(msg_id))
+            await msg.edit(embed=self._build_leaderboard_embed())
+        except Exception:
+            pass
+
+    @leaderboard_task.before_loop
+    async def _wait_ready_lb(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _leaderboard_button_callback(self, interaction: discord.Interaction) -> None:
+        state = load_json(storage.Path(STATE_PATH), {})
+        msg_id = state.get("leaderboard_message_id")
+        if msg_id:
+            url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{msg_id}"
+            await interaction.response.send_message(url, ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                "📊 Leaderboard indisponible", ephemeral=True
+            )
 
     async def _bet_button_callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(self._build_bet_modal())
