@@ -1,1 +1,18 @@
-{}
+{
+  "month": null,
+  "top_net_gainers": [],
+  "top_net_losers": [],
+  "top_biggest_single_win": [],
+  "streaks": {
+    "win": [],
+    "loss": []
+  },
+  "daily_summary_cache": {
+    "date": null,
+    "top3_gainers": [],
+    "top3_losers": [],
+    "biggest_single_win": null,
+    "total_bet": 0,
+    "total_redistributed": 0
+  }
+}
