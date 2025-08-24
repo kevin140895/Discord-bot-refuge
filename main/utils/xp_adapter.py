@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 
-from storage.xp_store import xp_store
+from typing import cast
+
+from storage.xp_store import XPUserData, xp_store
 
 DISCORD_EPOCH = 1420070400000
 
@@ -36,8 +38,9 @@ def add_user_xp(user_id: int, amount: int, reason: str = "pari_xp") -> None:
 
     if amount > 0:
         uid = str(user_id)
-        expires = xp_store.data.get(uid, {}).get("double_xp_until")
-        if expires:
+        user = xp_store.data.get(uid)
+        expires = user.get("double_xp_until") if user else None
+        if isinstance(expires, str):
             try:
                 exp_dt = datetime.fromisoformat(expires)
             except ValueError:
@@ -46,9 +49,9 @@ def add_user_xp(user_id: int, amount: int, reason: str = "pari_xp") -> None:
             if exp_dt and exp_dt > now:
                 amount *= 2
             else:
-                # Expired or invalid timestamp: remove the buff.
-                xp_store.data.setdefault(uid, {}).pop("double_xp_until", None)
-                asyncio.create_task(xp_store.flush())
+                if user and "double_xp_until" in user:
+                    user.pop("double_xp_until")
+                    asyncio.create_task(xp_store.flush())
 
     asyncio.create_task(xp_store.add_xp(user_id, amount))
 
@@ -71,7 +74,8 @@ def apply_double_xp_buff(user_id: int, minutes: int = 60) -> None:
 
     uid = str(user_id)
     expires_at = datetime.utcnow() + timedelta(minutes=minutes)
-    xp_store.data.setdefault(uid, {}).update({"double_xp_until": expires_at.isoformat()})
+    user = xp_store.data.setdefault(uid, cast(XPUserData, {"xp": 0, "level": 0}))
+    user["double_xp_until"] = expires_at.isoformat()
     # Persist buff information so it survives restarts.
     asyncio.create_task(xp_store.flush())
 
