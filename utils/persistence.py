@@ -31,12 +31,25 @@ def read_json_safe(path: str | os.PathLike[str]) -> dict:
     p = Path(path)
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        bak = p.with_suffix(p.suffix + ".bak")
-        try:
-            return json.loads(bak.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
+    except FileNotFoundError:
+        logging.warning("JSON file %s not found; trying backup", p)
+    except json.JSONDecodeError:
+        logging.warning("JSON file %s is corrupted; trying backup", p)
+    except OSError as e:
+        logging.warning("Error reading %s: %s", p, e)
+
+    bak = p.with_suffix(p.suffix + ".bak")
+    try:
+        return json.loads(bak.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logging.warning("Backup file %s not found", bak)
+        return {}
+    except json.JSONDecodeError:
+        logging.warning("Backup file %s is corrupted", bak)
+        return {}
+    except OSError as e:
+        logging.warning("Error reading backup %s: %s", bak, e)
+        return {}
 
 
 def atomic_write_json(path: str | os.PathLike[str], data: Any) -> None:
@@ -57,7 +70,7 @@ def atomic_write_json(path: str | os.PathLike[str], data: Any) -> None:
         if dest.exists():
             try:
                 os.replace(dest, backup)
-            except Exception:
+            except OSError:
                 logging.exception("Failed to rotate backup for %s", dest)
         os.replace(tmp_path, dest)
     finally:
@@ -108,8 +121,9 @@ async def schedule_checkpoint(
                 logging.info("💾 voice_times checkpoint saved")
             except asyncio.CancelledError:
                 pass
-            except Exception:
-                logging.exception("voice_times checkpoint failed")
+            except Exception as exc:
+                logging.exception("voice_times checkpoint failed: %s", exc)
+                raise
             finally:
                 # Allow future checkpoints to be scheduled
                 _checkpoint_task = None
