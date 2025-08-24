@@ -15,6 +15,7 @@ import re
 
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
+from utils.storage import load_json, save_json
 
 PARI_XP_DATA_DIR = "main/data/pari_xp/"
 CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
@@ -33,6 +34,9 @@ class RouletteRefugeCog(commands.Cog):
         self._cooldowns: dict[int, datetime] = {}
         self._bets_today: dict[int, int] = {}
         self._bets_today_date = self._now().date()
+        self._last_autoheal_hub = None
+        self._last_autoheal_lb = None
+        self._autoheal_presence_task.start()
 
     def _now(self) -> datetime:
         return datetime.now(timezones.TZ_PARIS)
@@ -228,6 +232,14 @@ class RouletteRefugeCog(commands.Cog):
             await self._ensure_hub_message(channel)
             # leaderboard sera géré aux étapes suivantes
             await self._ensure_leaderboard_message(channel)
+        try:
+            self.bot.add_view(self._build_hub_view())
+        except Exception:
+            pass
+        try:
+            await self._autoheal_presence_task()
+        except Exception:
+            pass
 
     async def _update_hub_state(self, is_open: bool) -> None:
         self.state["is_open"] = is_open
@@ -389,7 +401,71 @@ class RouletteRefugeCog(commands.Cog):
     async def _wait_ready_lb(self) -> None:
         await self.bot.wait_until_ready()
 
+    @tasks.loop(minutes=10.0)
+    async def _autoheal_presence_task(self):
+        ch = await self._get_channel()
+        if not ch:
+            return
+
+        state = load_json(storage.Path(STATE_PATH), {})
+        now = datetime.now(tz=TZ_PARIS)
+
+        # --- HUB ---
+        hub_id = state.get("hub_message_id")
+        need_heal_hub = False
+        _msg_hub = None
+        if hub_id:
+            try:
+                _msg_hub = await ch.fetch_message(int(hub_id))
+            except Exception:
+                need_heal_hub = True
+        else:
+            need_heal_hub = True
+
+        if need_heal_hub:
+            if not self._last_autoheal_hub or (now - self._last_autoheal_hub) > timedelta(hours=1):
+                try:
+                    embed = self._build_hub_embed()
+                    view = self._build_hub_view()
+                    m = await ch.send(embed=embed, view=view)
+                    state["hub_message_id"] = m.id
+                    await save_json(storage.Path(STATE_PATH), state)
+                    self.state = state
+                    self._last_autoheal_hub = now
+                except Exception:
+                    pass
+
+        # --- LEADERBOARD (si méthode dispo) ---
+        if hasattr(self, "_ensure_leaderboard_message"):
+            lb_id = state.get("leaderboard_message_id")
+            need_heal_lb = False
+            _msg_lb = None
+            if lb_id:
+                try:
+                    _msg_lb = await ch.fetch_message(int(lb_id))
+                except Exception:
+                    need_heal_lb = True
+            else:
+                need_heal_lb = True
+
+            if need_heal_lb:
+                if not self._last_autoheal_lb or (now - self._last_autoheal_lb) > timedelta(hours=1):
+                    try:
+                        await self._ensure_leaderboard_message(ch)
+                        self._last_autoheal_lb = now
+                    except Exception:
+                        pass
+
+    @_autoheal_presence_task.before_loop
+    async def _wait_ready_autoheal(self):
+        await self.bot.wait_until_ready()
+
     async def _leaderboard_button_callback(self, interaction: discord.Interaction) -> None:
+        if interaction.channel_id != int(self.config.get("channel_id", 0)):
+            return await interaction.response.send_message(
+                "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
+                ephemeral=True,
+            )
         state = storage.load_json(storage.Path(STATE_PATH), {})
         msg_id = state.get("leaderboard_message_id")
         if msg_id:
@@ -401,6 +477,11 @@ class RouletteRefugeCog(commands.Cog):
             )
 
     async def _bet_button_callback(self, interaction: discord.Interaction) -> None:
+        if interaction.channel_id != int(self.config.get("channel_id", 0)):
+            return await interaction.response.send_message(
+                "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
+                ephemeral=True,
+            )
         await interaction.response.send_modal(self._build_bet_modal())
 
     def _build_bet_modal(self) -> ui.Modal:
@@ -497,6 +578,12 @@ class RouletteRefugeCog(commands.Cog):
         self,
         interaction: discord.Interaction,
     ) -> None:
+        if interaction.channel_id != int(self.config.get("channel_id", 0)):
+            await interaction.response.send_message(
+                "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
+                ephemeral=True,
+            )
+            return
         amount_str = ""
         use_ticket_str = ""
         for row in interaction.data.get("components", []):
