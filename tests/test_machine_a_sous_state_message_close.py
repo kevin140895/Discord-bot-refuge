@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from cogs.machine_a_sous.machine_a_sous import (
     MachineASousCog,
     NOTIF_ROLE_ID,
-    CHANNEL_ID,
+    ANNOUNCE_CHANNEL_ID,
 )
 
 
@@ -33,7 +33,7 @@ async def test_post_state_message_mentions_role_when_closed(monkeypatch):
 
     await cog._post_state_message(False)
 
-    get_channel_mock.assert_called_once_with(CHANNEL_ID)
+    get_channel_mock.assert_called_once_with(ANNOUNCE_CHANNEL_ID)
     channel.send.assert_awaited_once()
     _, kwargs = channel.send.await_args
     assert f"<@&{NOTIF_ROLE_ID}>" in kwargs["content"]
