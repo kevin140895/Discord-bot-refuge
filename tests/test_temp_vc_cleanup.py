@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -51,3 +52,36 @@ async def test_repopulate_ids_when_missing(monkeypatch):
     assert ch1.id in temp_vc.TEMP_VC_IDS
     assert ch2.id not in temp_vc.TEMP_VC_IDS
     assert saved and ch1.id in saved[0]
+
+
+@pytest.mark.asyncio
+async def test_rename_task_cancelled_on_channel_delete(monkeypatch):
+    temp_vc.TEMP_VC_IDS.clear()
+    temp_vc.TEMP_VC_IDS.add(42)
+
+    loop = asyncio.get_running_loop()
+    bot = SimpleNamespace(get_channel=lambda _cid: None, loop=loop)
+
+    # Avoid starting real tasks and I/O
+    monkeypatch.setattr(temp_vc.rename_manager, "start", AsyncMock())
+    monkeypatch.setattr(temp_vc, "save_temp_vc_ids", lambda ids: None)
+
+    with patch.object(temp_vc.tasks.Loop, "start", lambda self, *a, **k: None):
+        cog = temp_vc.TempVCCog(bot)
+
+    channel = SimpleNamespace(id=42, name="Temp", members=[], delete=AsyncMock())
+    member = SimpleNamespace(id=1)
+
+    # Create a dummy rename task
+    task = loop.create_task(asyncio.sleep(3600))
+    cog._rename_tasks[channel.id] = task
+
+    before = SimpleNamespace(channel=channel)
+    after = SimpleNamespace(channel=None)
+
+    await cog.on_voice_state_update(member, before, after)
+    await asyncio.sleep(0)
+
+    channel.delete.assert_awaited_once()
+    assert channel.id not in cog._rename_tasks
+    assert task.cancelled()

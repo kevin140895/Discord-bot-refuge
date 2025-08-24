@@ -132,8 +132,9 @@ class TempVCCog(commands.Cog):
             status = "Endormie"
         else:
             status = "Chat"
-
-        return f"{base} • {status}"
+        name = f"{base} • {status}"
+        # Discord limite les noms de salon à 100 caractères
+        return name[:100]
 
     async def _rename_channel(self, channel: discord.VoiceChannel) -> None:
         """Tâche différée effectuant le renommage du salon."""
@@ -249,6 +250,9 @@ class TempVCCog(commands.Cog):
                     )
                     TEMP_VC_IDS.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
+                    task = self._rename_tasks.pop(before.channel.id, None)
+                    if task:
+                        task.cancel()
                     save_temp_vc_ids(TEMP_VC_IDS)
 
         # 3) Renommage sur changement d'état vocal

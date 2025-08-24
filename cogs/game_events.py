@@ -149,7 +149,11 @@ class GameEventsCog(commands.Cog):
             creator = guild.get_member(evt.creator_id)
             name = f"👥 {creator.display_name if creator else 'Joueur'}・{evt.game_name}"
             category = guild.get_channel(TEMP_VC_CATEGORY)
-            vc = await guild.create_voice_channel(name, category=category)
+            try:
+                vc = await guild.create_voice_channel(name, category=category)
+            except discord.HTTPException as e:
+                logger.error("[game] création salon échouée pour %s: %s", evt.id, e)
+                return
             set_voice_channel(evt, vc.id)
             await save_event(evt)
             for uid, status in evt.rsvps.items():
