@@ -9,6 +9,6 @@ def get_balance(user_id: int) -> int:
     return int(xp_store.data.get(str(user_id), {}).get("xp", 0))
 
 
-async def add_xp(user_id: int, amount: int) -> None:
-    """Add (or remove) XP for ``user_id``."""
-    await xp_store.add_xp(user_id, amount)
+async def add_xp(user_id: int, amount: int, guild_id: int, source: str) -> None:
+    """Add (or remove) XP for ``user_id`` with event metadata."""
+    await xp_store.add_xp(user_id, amount, guild_id=guild_id, source=source)

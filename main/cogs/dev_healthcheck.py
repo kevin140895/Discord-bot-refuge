@@ -121,6 +121,24 @@ class DevHealthcheckCog(commands.Cog):
                 except Exception as e:  # pragma: no cover - defensive
                     report["selfchecks"][name] = {"error": str(e)}
 
+        from config import LEVEL_FEED_CHANNEL_ID, ENABLE_GAME_LEVEL_FEED
+        from utils.messages import LEVEL_FEED_TEMPLATES
+
+        lf_checks: dict[str, str] = {}
+        ch = self.bot.get_channel(LEVEL_FEED_CHANNEL_ID)
+        if isinstance(ch, discord.TextChannel):
+            me = ch.guild.me
+            perms = ch.permissions_for(me) if me else None
+            lf_checks["channel"] = "PASS" if perms and perms.send_messages else "FAIL"
+        else:
+            lf_checks["channel"] = "FAIL"
+        expected = {"pari_xp_up", "pari_xp_down", "machine_a_sous_up"}
+        lf_checks["templates"] = (
+            "PASS" if expected <= set(LEVEL_FEED_TEMPLATES) else "FAIL"
+        )
+        lf_checks["enabled"] = "PASS" if ENABLE_GAME_LEVEL_FEED else "WARN"
+        report["selfchecks"]["level_feed"] = lf_checks
+
         # Markdown report
         md_path = Path("main/tests/health_report.md")
         try:

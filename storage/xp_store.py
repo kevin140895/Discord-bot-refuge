@@ -77,24 +77,45 @@ class XPStore:
             await atomic_write_json_async(self.path, self.data)
             logging.info("XP sauvegardé (%d utilisateurs)", len(self.data))
 
-    async def add_xp(self, user_id: int, amount: int) -> tuple[int, int, int]:
+    async def add_xp(
+        self,
+        user_id: int,
+        amount: int,
+        *,
+        guild_id: int | None = None,
+        source: str = "manual",
+    ) -> tuple[int, int, int, int]:
         uid = str(user_id)
         async with self.lock:
             user = self.data.setdefault(uid, cast(XPUserData, {"xp": 0, "level": 0}))
             old_level = int(user.get("level", 0))
+            old_xp = int(user.get("xp", 0))
             if amount != 0:
-                current_xp = int(user.get("xp", 0))
-                new_xp = max(0, current_xp + int(amount))
+                new_xp = max(0, old_xp + int(amount))
                 user["xp"] = new_xp
                 new_level = self._calc_level(new_xp)
                 if new_level != old_level:
                     user["level"] = new_level
             else:
                 new_level = old_level
-            total_xp = int(user.get("xp", 0))
+                new_xp = old_xp
         if amount != 0:
             self._schedule_flush()
-        return old_level, new_level, total_xp
+        if new_level != old_level and guild_id is not None:
+            from utils.level_feed import LevelChange, emit
+
+            emit(
+                LevelChange(
+                    user_id=user_id,
+                    guild_id=guild_id,
+                    old_level=old_level,
+                    new_level=new_level,
+                    old_xp=old_xp,
+                    new_xp=new_xp,
+                    source=source,
+                )
+            )
+        return old_level, new_level, old_xp, new_xp
 
     @staticmethod
     def _calc_level(xp: int) -> int:

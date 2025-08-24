@@ -25,12 +25,12 @@ def get_user_xp(user_id: int) -> int:
     return int(xp_store.data.get(str(user_id), {}).get("xp", 0))
 
 
-def add_user_xp(user_id: int, amount: int, reason: str = "pari_xp") -> None:
+def add_user_xp(user_id: int, amount: int, guild_id: int, source: str = "pari_xp") -> None:
     """Schedule an XP change for ``user_id``.
 
     The underlying ``xp_store`` operation is asynchronous; we fire-and-forget
-    the update so callers don't have to await it.  ``reason`` is currently
-    unused but kept for API compatibility.
+    the update so callers don't have to await it. ``source`` is recorded with
+    the level change event.
 
     If ``user_id`` has an active double-XP buff, ``amount`` is doubled.  Buffs
     that have expired are cleaned up lazily.
@@ -53,7 +53,9 @@ def add_user_xp(user_id: int, amount: int, reason: str = "pari_xp") -> None:
                     user.pop("double_xp_until")
                     asyncio.create_task(xp_store.flush())
 
-    asyncio.create_task(xp_store.add_xp(user_id, amount))
+    asyncio.create_task(
+        xp_store.add_xp(user_id, amount, guild_id=guild_id, source=source)
+    )
 
 
 def get_user_account_age_days(user_id: int) -> int:

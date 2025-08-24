@@ -120,7 +120,9 @@ async def xp_flush_cache_to_disk() -> None:
     await xp_store.flush()
     logger.info("💾 XP flush vers disque (%d utilisateurs).", len(xp_store.data))
 
-async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
+async def award_xp(
+    user_id: int, amount: int, guild_id: int | None = None, source: str = "manual"
+) -> tuple[int, int, int, int]:
     """Modifie l'XP de ``user_id`` via le :class:`XPStore`.
 
     Lorsque ``amount`` est positif et que l'utilisateur bénéficie d'un bonus
@@ -136,7 +138,9 @@ async def award_xp(user_id: int, amount: int) -> tuple[int, int, int]:
             else:
                 XP_BOOSTS.pop(str(user_id), None)
                 asyncio.create_task(save_xp_boosts_to_disk())
-    return await xp_store.add_xp(user_id, amount)
+    return await xp_store.add_xp(
+        user_id, amount, guild_id=guild_id, source=source
+    )
 
 
 def add_xp_boost(user_id: int, duration_minutes: int) -> None:
@@ -222,10 +226,15 @@ class XPCog(commands.Cog):
         if bucket.update_rate_limit():
             return
         amount = random.randint(5, 15)
-        old_lvl, new_lvl, total_xp = await award_xp(message.author.id, amount)
+        old_lvl, new_lvl, old_xp, new_xp = await award_xp(
+            message.author.id,
+            amount,
+            guild_id=message.guild.id,
+            source="message",
+        )
         if new_lvl > old_lvl:
             await self.bot.announce_level_up(
-                message.guild, message.author, old_lvl, new_lvl, total_xp
+                message.guild, message.author, old_lvl, new_lvl, new_xp
             )
 
     @commands.Cog.listener()
@@ -260,10 +269,15 @@ class XPCog(commands.Cog):
                     if event_mult != 1.0:
                         record_participant(before.channel.id, member.id)
                     xp_amount = int(xp_amount * mult)
-                old_lvl, new_lvl, total_xp = await award_xp(member.id, xp_amount)
+                old_lvl, new_lvl, old_xp, new_xp = await award_xp(
+                    member.id,
+                    xp_amount,
+                    guild_id=member.guild.id,
+                    source="voice_leave",
+                )
                 if new_lvl > old_lvl:
                     await self.bot.announce_level_up(
-                        member.guild, member, old_lvl, new_lvl, total_xp
+                        member.guild, member, old_lvl, new_lvl, new_xp
                     )
                 # Statistiques quotidiennes (en secondes)
                 day = now.date().isoformat()

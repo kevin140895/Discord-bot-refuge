@@ -26,7 +26,7 @@ async def test_double_xp_buff_applies():
     xp_store.lock = asyncio.Lock()
     uid = 100
     apply_double_xp_buff(uid, minutes=60)
-    add_user_xp(uid, 10)
+    add_user_xp(uid, 10, guild_id=0)
     await asyncio.sleep(0.05)
     assert get_user_xp(uid) == 20
 
@@ -40,7 +40,7 @@ async def test_double_xp_buff_expires():
     xp_store.data[str(uid)]["double_xp_until"] = (
         datetime.utcnow() - timedelta(seconds=1)
     ).isoformat()
-    add_user_xp(uid, 10)
+    add_user_xp(uid, 10, guild_id=0)
     await asyncio.sleep(0.05)
     assert get_user_xp(uid) == 10
     assert "double_xp_until" not in xp_store.data[str(uid)]

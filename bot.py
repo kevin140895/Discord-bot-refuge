@@ -23,6 +23,7 @@ from utils.channel_edit_manager import channel_edit_manager
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter
 from view import PlayerTypeView
+from utils import level_feed
 
 
 # global rate limiter instance
@@ -50,6 +51,7 @@ class RefugeBot(commands.Bot):
         await api_meter.start(self)
         limiter.start()
         await reset_http_error_counter()
+        level_feed.setup(self)
 
         # Load all cogs from the ``cogs`` package so every slash command is
         # registered when the bot starts. ``load_extension`` is patched to an

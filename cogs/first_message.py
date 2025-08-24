@@ -127,7 +127,12 @@ class FirstMessageCog(commands.Cog):
             self.first_message_claimed = True
             self.winner_id = message.author.id
             self.claimed_at = datetime.now()
-        old_lvl, new_lvl, total_xp = await xp_store.add_xp(message.author.id, 400)
+        old_lvl, new_lvl, old_xp, total_xp = await xp_store.add_xp(
+            message.author.id,
+            400,
+            guild_id=message.guild.id if message.guild else 0,
+            source="message",
+        )
         if new_lvl > old_lvl:
             await self.bot.announce_level_up(
                 message.guild, message.author, old_lvl, new_lvl, total_xp
