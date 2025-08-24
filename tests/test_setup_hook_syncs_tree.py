@@ -33,5 +33,5 @@ async def test_setup_hook_syncs_tree(monkeypatch):
     monkeypatch.setattr(test_bot.tree, "sync", sync_mock)
 
     await test_bot.setup_hook()
-
+    bot.api_meter.start.assert_awaited_once_with(test_bot)
     sync_mock.assert_awaited_once()

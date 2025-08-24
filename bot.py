@@ -38,7 +38,7 @@ class RefugeBot(commands.Bot):
         await xp_store.start()
         await rename_manager.start()
         await channel_edit_manager.start()
-        await api_meter.start()
+        await api_meter.start(self)
         limiter.start()
         await reset_http_error_counter()
 
