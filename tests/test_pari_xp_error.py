@@ -10,10 +10,8 @@ async def test_handle_bet_submission_exception(tmp_path, monkeypatch):
     pari_xp = importlib.import_module("main.cogs.pari_xp")
 
     # Ensure temp files to avoid touching real data
-    tickets_file = tmp_path / "tickets.json"
     tx_file = tmp_path / "tx.json"
     state_file = tmp_path / "state.json"
-    monkeypatch.setattr(pari_xp, "TICKETS_PATH", str(tickets_file))
     monkeypatch.setattr(pari_xp, "TX_PATH", str(tx_file))
     monkeypatch.setattr(pari_xp, "STATE_PATH", str(state_file))
 
@@ -33,6 +31,8 @@ async def test_handle_bet_submission_exception(tmp_path, monkeypatch):
     cog._bets_today_date = pari_xp.date.today()
     cog._now = lambda: pari_xp.datetime(2024, 1, 1, 12, 0, 0)
     cog._is_open_hours = lambda dt=None: True
+    cog.roulette_store = pari_xp.RouletteStore(data_dir=str(tmp_path))
+    cog._loss_streak = {}
 
     async def _get_channel():
         return None

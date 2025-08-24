@@ -22,13 +22,14 @@ import asyncio
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
 from utils.storage import load_json
+from storage.roulette_store import RouletteStore
+from config import DATA_DIR
 
 PARI_XP_DATA_DIR = "main/data/pari_xp/"
 CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
 STATE_PATH = PARI_XP_DATA_DIR + "state.json"
 LB_PATH = PARI_XP_DATA_DIR + "leaderboard.json"
 TX_PATH = PARI_XP_DATA_DIR + "transactions.json"
-TICKETS_PATH = PARI_XP_DATA_DIR + "tickets.json"
 
 
 class RouletteRefugeCog(commands.Cog):
@@ -45,6 +46,8 @@ class RouletteRefugeCog(commands.Cog):
         self._last_autoheal_lb = None
         self._hub_lock = asyncio.Lock()
         self._autoheal_presence_task.start()
+        self.roulette_store = RouletteStore(data_dir=DATA_DIR)
+        self._loss_streak: dict[int, int] = {}
 
     def _now(self) -> datetime:
         return datetime.now(timezones.TZ_PARIS)
@@ -548,15 +551,8 @@ class RouletteRefugeCog(commands.Cog):
                     required=False,
                     custom_id="pari_xp_color",
                 )
-                self.use_ticket: ui.TextInput = ui.TextInput(
-                    label="Utiliser un ticket gratuit ? (oui/non)",
-                    placeholder="non",
-                    required=False,
-                    custom_id="pari_xp_use_ticket",
-                )
                 self.add_item(self.amount)
                 self.add_item(self.color)
-                self.add_item(self.use_ticket)
 
             async def on_submit(self, interaction: discord.Interaction) -> None:  # type: ignore[override]
                 await cog._handle_bet_submission(interaction)
@@ -576,7 +572,6 @@ class RouletteRefugeCog(commands.Cog):
         delta = 0
         mult: Optional[float] = None
         notes = None
-        ticket = False
         double_xp = False
         if segment == "lose_0x":
             payout = 0
@@ -606,10 +601,6 @@ class RouletteRefugeCog(commands.Cog):
             payout = bet + 1000
             delta = 1000
             notes = "super jackpot"
-        elif segment == "ticket_free":
-            payout = 0
-            delta = -bet
-            ticket = True
         elif segment == "double_xp_1h":
             payout = 0
             delta = -bet
@@ -623,7 +614,6 @@ class RouletteRefugeCog(commands.Cog):
             "delta": delta,
             "mult": mult,
             "notes": notes,
-            "ticket": ticket,
             "double_xp": double_xp,
         }
 
@@ -639,7 +629,6 @@ class RouletteRefugeCog(commands.Cog):
             return
         amount_str = ""
         color_str = ""
-        use_ticket_str = ""
         data = cast(dict[str, Any], interaction.data or {})
         for row in data.get("components", []):
             for comp in row.get("components", []):
@@ -647,8 +636,6 @@ class RouletteRefugeCog(commands.Cog):
                     amount_str = comp.get("value", "")
                 elif comp.get("custom_id") == "pari_xp_color":
                     color_str = comp.get("value", "")
-                elif comp.get("custom_id") == "pari_xp_use_ticket":
-                    use_ticket_str = comp.get("value", "")
         now = self._now()
         if not self._is_open_hours(now):
             await interaction.response.send_message(
@@ -713,27 +700,6 @@ class RouletteRefugeCog(commands.Cog):
             return
         self._bets_today[user_id] = count + 1
 
-        use_ticket = use_ticket_str.lower() == "oui"
-        if use_ticket:
-            tickets = storage.load_json(storage.Path(TICKETS_PATH), [])
-            ticket = next(
-                (
-                    t
-                    for t in tickets
-                    if t.get("user_id") == user_id and not t.get("used")
-                ),
-                None,
-            )
-            if not ticket:
-                await interaction.response.send_message(
-                    "❌ Aucun ticket gratuit disponible.",
-                    ephemeral=True,
-                )
-                return
-            ticket["used"] = True
-            ticket["used_ts"] = self._now().isoformat()
-            await storage.save_json(storage.Path(TICKETS_PATH), tickets)
-
         await interaction.response.send_message(
             "✅ Mise reçue. Tirage en cours…",
             ephemeral=True,
@@ -749,14 +715,11 @@ class RouletteRefugeCog(commands.Cog):
                     "delta": delta,
                     "mult": 2.0 if color_choice == outcome_color else 0.0,
                     "notes": f"Couleur gagnante : {outcome_color}",
-                    "ticket": False,
                     "double_xp": False,
                 }
             else:
                 segment = self._draw_segment()
                 result = self._compute_result(amount, segment)
-            if use_ticket:
-                result["delta"] = cast(int, result["delta"]) + amount
             ts = self._now().isoformat()
             delta = int(cast(int, result["delta"]))
             add_user_xp(
@@ -767,10 +730,6 @@ class RouletteRefugeCog(commands.Cog):
             )
             if result.get("double_xp"):
                 apply_double_xp_buff(user_id, 60)
-            if result.get("ticket"):
-                tickets = storage.load_json(storage.Path(TICKETS_PATH), [])
-                tickets.append({"user_id": user_id, "ts": ts, "used": False})
-                await storage.save_json(storage.Path(TICKETS_PATH), tickets)
             transactions = storage.load_json(storage.Path(TX_PATH), [])
             day_key = ts.split("T")[0]
             transactions.append(
@@ -784,13 +743,23 @@ class RouletteRefugeCog(commands.Cog):
                     "delta": result["delta"],
                     "mult": result["mult"],
                     "notes": result["notes"],
-                    "ticket": result["ticket"],
                     "double_xp": result["double_xp"],
                     "day_key": day_key,
                 }
             )
             await storage.save_json(storage.Path(TX_PATH), transactions)
-    
+
+            award_ticket = False
+            if delta < 0:
+                streak = self._loss_streak.get(user_id, 0) + 1
+                self._loss_streak[user_id] = streak
+                if streak >= 10:
+                    self._loss_streak[user_id] = 0
+                    self.roulette_store.grant_ticket(str(user_id))
+                    award_ticket = True
+            else:
+                self._loss_streak[user_id] = 0
+
             # Refresh leaderboard after each bet so the ranking stays up to date
             try:
                 channel = await self._get_channel()
@@ -808,12 +777,20 @@ class RouletteRefugeCog(commands.Cog):
                 lines.insert(1, f"Pari couleur : {color_choice}")
             if result["notes"]:
                 lines.append(f"Note : {result['notes']}")
-            if result.get("ticket"):
-                lines.append("🎟️ Tu as gagné un ticket gratuit !")
-            elif result.get("double_xp"):
+            if result.get("double_xp"):
                 lines.append("⚡ Tu as gagné un boost Double XP 1h !")
             embed = discord.Embed(title="🎲 Résultat", description="\n".join(lines))
             await interaction.followup.send(embed=embed, ephemeral=True)
+            if award_ticket:
+                await interaction.followup.send(
+                    (
+                        f"🎉 Félicitations {user.display_name} !\n"
+                        "Tu viens de décrocher un 🎟️ Ticket Gratuit dans la roulette 🌀\n\n"
+                        "👉 Utilise-le dès maintenant pour tenter ta chance à la Machine à XP 🎰… sans rien miser !\n\n"
+                        "💡 Un tour gratuit = une chance de plus de toucher le jackpot 💎"
+                    ),
+                    ephemeral=True,
+                )
             public_channel = interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
             announce_channel = await self._get_announce_channel()
             if announce_channel:
@@ -862,7 +839,7 @@ class RouletteRefugeCog(commands.Cog):
         modal = self._build_bet_modal()
         ui_ok = getattr(modal, "custom_id", "") == "pari_xp_modal"
         ids = [c.custom_id for c in modal.children if isinstance(c, ui.TextInput)]
-        ui_ok &= ids == ["pari_xp_amount", "pari_xp_color", "pari_xp_use_ticket"]
+        ui_ok &= ids == ["pari_xp_amount", "pari_xp_color"]
         view = self._build_hub_view()
         btn_ids = [c.custom_id or "" for c in view.children if isinstance(c, discord.ui.Button)]
         ui_ok &= all(cid.startswith("pari_xp_") for cid in btn_ids)
@@ -882,13 +859,12 @@ class RouletteRefugeCog(commands.Cog):
 
         draw_src = inspect.getsource(self._draw_segment)
         cond_draw = "probabilities" in draw_src
-        ticket = self._compute_result(10, "ticket_free")
         double = self._compute_result(10, "double_xp_1h")
         super_jp = self._compute_result(10, "super_jackpot_plus_1000")
         cond_place = (
-            ticket.get("ticket") and double.get("double_xp") and ticket["delta"] == -10 and double["delta"] == -10 and super_jp["delta"] == 1000
+            double.get("double_xp") and double["delta"] == -10 and super_jp["delta"] == 1000
         )
-        cond_msgs = "ticket gratuit !" in src and "boost Double XP 1h !" in src
+        cond_msgs = "boost Double XP 1h !" in src
         report["draw_placeholders"] = "PASS" if cond_draw and cond_place and cond_msgs else "FAIL"
 
         announces_ok = (

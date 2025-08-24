@@ -73,6 +73,26 @@ class RouletteStore:
         self.data.get("claims", {}).pop(user_id, None)
         self._save()
 
+    # —— Tickets machine à sous ——
+    def grant_ticket(self, user_id: str):
+        tickets = self.data.setdefault("tickets", {})
+        tickets[user_id] = tickets.get(user_id, 0) + 1
+        self._save()
+
+    def has_ticket(self, user_id: str) -> bool:
+        return self.data.get("tickets", {}).get(user_id, 0) > 0
+
+    def use_ticket(self, user_id: str) -> bool:
+        tickets = self.data.get("tickets", {})
+        count = tickets.get(user_id, 0)
+        if count > 0:
+            tickets[user_id] = count - 1
+            if tickets[user_id] <= 0:
+                tickets.pop(user_id, None)
+            self._save()
+            return True
+        return False
+
     # ——— Rôles 24h ———
     def upsert_role_assignment(
         self,
