@@ -201,10 +201,30 @@ class TempVCCog(commands.Cog):
         # 1) Création quand on rejoint le lobby
         if after.channel and after.channel.id == LOBBY_VC_ID:
             new_vc = await self._create_temp_vc(member)
+            logger.info(
+                "[temp_vc] created temporary channel '%s' (ID %s) for %s (%s)",
+                new_vc.name,
+                new_vc.id,
+                member,
+                member.id,
+            )
             try:
                 await member.move_to(new_vc)
+                logger.debug(
+                    "[temp_vc] moved %s (%s) into temporary channel '%s' (ID %s)",
+                    member,
+                    member.id,
+                    new_vc.name,
+                    new_vc.id,
+                )
             except discord.HTTPException:
-                pass
+                logger.exception(
+                    "[temp_vc] failed to move %s (%s) into temporary channel '%s' (ID %s)",
+                    member,
+                    member.id,
+                    new_vc.name,
+                    new_vc.id,
+                )
             await self._update_channel_name(new_vc)
             return
 
@@ -220,12 +240,27 @@ class TempVCCog(commands.Cog):
                         "Suppression du salon %s échouée", before.channel.id
                     )
                 else:
+                    logger.info(
+                        "[temp_vc] deleted temporary channel '%s' (ID %s) after %s (%s) left",
+                        before.channel.name,
+                        before.channel.id,
+                        member,
+                        member.id,
+                    )
                     TEMP_VC_IDS.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
                     save_temp_vc_ids(TEMP_VC_IDS)
 
         # 3) Renommage sur changement d'état vocal
         if after.channel and after.channel.id in TEMP_VC_IDS:
+            if not before.channel or before.channel.id != after.channel.id:
+                logger.info(
+                    "[temp_vc] %s (%s) joined temporary channel '%s' (ID %s)",
+                    member,
+                    member.id,
+                    after.channel.name,
+                    after.channel.id,
+                )
             await self._update_channel_name(after.channel)
         if (
             before.channel
