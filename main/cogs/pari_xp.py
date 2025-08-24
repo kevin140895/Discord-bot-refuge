@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands, tasks  # noqa: F401
 from datetime import datetime
 from datetime import timedelta
+from datetime import date
 from typing import Optional
 from zoneinfo import ZoneInfo
 from discord import ui
@@ -12,6 +13,7 @@ import random
 from utils.xp_adapter import add_user_xp
 
 from utils import storage, timezones
+from utils.timezones import TZ_PARIS
 
 DATA_DIR = "main/data/pari_xp/"
 CONFIG_PATH = DATA_DIR + "config.json"
@@ -255,6 +257,84 @@ class RouletteRefugeCog(commands.Cog):
         )
         await channel.send(embed=embed)
 
+    async def _post_daily_summary(self, channel: discord.TextChannel) -> None:
+        transactions = load_json(storage.Path(TX_PATH), [])
+        now = datetime.now(TZ_PARIS)
+        today: date = now.date()
+        day_txs = []
+        for tx in transactions:
+            ts = tx.get("ts")
+            try:
+                dt = datetime.fromisoformat(ts).astimezone(TZ_PARIS)
+            except Exception:
+                continue
+            if dt.date() == today:
+                day_txs.append(tx)
+        stats: dict[int, dict[str, int | str]] = {}
+        total_bet = 0
+        total_payout = 0
+        biggest = None
+        for tx in day_txs:
+            uid = tx.get("user_id")
+            username = tx.get("username", str(uid))
+            delta = int(tx.get("delta", 0))
+            bet = int(tx.get("bet", 0))
+            payout = int(tx.get("payout", 0))
+            total_bet += bet
+            total_payout += payout
+            if delta > 0:
+                if not biggest or delta > biggest["delta"]:
+                    biggest = tx
+            user_stat = stats.setdefault(uid, {"username": username, "net": 0})
+            user_stat["net"] = int(user_stat["net"]) + delta
+        winners = sorted(
+            [v for v in stats.values() if int(v["net"]) > 0],
+            key=lambda x: int(x["net"]),
+            reverse=True,
+        )[:3]
+        losers = sorted(
+            [v for v in stats.values() if int(v["net"]) < 0],
+            key=lambda x: int(x["net"]),
+        )[:3]
+        win_lines = [
+            f"{idx+1}. {w['username']} ({int(w['net']):+} XP)"
+            for idx, w in enumerate(winners)
+        ]
+        loss_lines = [
+            f"{idx+1}. {loser['username']} ({int(loser['net']):+} XP)"
+            for idx, loser in enumerate(losers)
+        ]
+        biggest_val = (
+            f"{biggest['username']} (+{biggest['delta']} XP)" if biggest else "N/A"
+        )
+        embed = discord.Embed(
+            title="🤑 Roulette Refuge — Clôture du jour",
+            color=discord.Color.gold(),
+            timestamp=now,
+        )
+        embed.add_field(
+            name="🏆 Top 3 gagnants",
+            value="\n".join(win_lines) if win_lines else "N/A",
+            inline=False,
+        )
+        embed.add_field(
+            name="💸 Top 3 perdants",
+            value="\n".join(loss_lines) if loss_lines else "N/A",
+            inline=False,
+        )
+        embed.add_field(
+            name="💥 Plus gros gain unique",
+            value=biggest_val,
+            inline=False,
+        )
+        embed.add_field(
+            name="📊 Total misé / redistribué",
+            value=f"{total_bet} XP / {total_payout} XP",
+            inline=False,
+        )
+        embed.set_footer(text="Réouverture demain à 08:00 ⏰")
+        await channel.send(embed=embed)
+
     @tasks.loop(minutes=1.0)
     async def scheduler_task(self) -> None:
         tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
@@ -282,6 +362,7 @@ class RouletteRefugeCog(commands.Cog):
         elif now.hour == close_hour and now.minute == 0:
             await self._announce_close(channel)
             await self._update_hub_state(False)
+            await self._post_daily_summary(channel)
 
     @scheduler_task.before_loop
     async def _wait_ready_scheduler(self) -> None:
