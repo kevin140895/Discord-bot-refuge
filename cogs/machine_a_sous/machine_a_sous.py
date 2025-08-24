@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 PARIS_TZ = "Europe/Paris"
 WINNER_ROLE_NAME = "🏆 Gagnant Machine à sous"
-# Répartition des gains (total 1000)
+# Répartition des gains (poids total = 1000)
 REWARDS = [
     0,
     5,
@@ -38,7 +38,7 @@ REWARDS = [
     "double_xp",
     "shared_xp",
 ]
-WEIGHTS = [300, 250, 150, 100, 50, 10, 5, 50, 30, 55]
+WEIGHTS = [250, 230, 150, 80, 40, 15, 5, 80, 80, 70]
 SPIN_GIF_URL = "https://media.tenor.com/2roX3zvclxkAAAAC/slot-machine.gif"
 WIN_GIF_URL = "https://media.tenor.com/XwI-iYdkfVIAAAAi/lottery-winner.gif"
 
