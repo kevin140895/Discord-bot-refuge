@@ -3,6 +3,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+import logging
 
 import pytest
 import discord
@@ -94,7 +95,7 @@ async def test_voice_channel_created_without_rsvp(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_voice_channel_creation_http_exception(monkeypatch):
+async def test_voice_channel_creation_http_exception(monkeypatch, caplog):
     EVENTS.clear()
     now = datetime.now(timezone.utc)
     evt = GameEvent(
@@ -126,9 +127,11 @@ async def test_voice_channel_creation_http_exception(monkeypatch):
 
     save_mock = AsyncMock()
     with patch("cogs.game_events.save_event", save_mock):
-        await cog._process_event(evt, now)
+        with caplog.at_level(logging.ERROR):
+            await cog._process_event(evt, now)
 
     guild.create_voice_channel.assert_awaited_once()
     assert evt.voice_channel_id is None
     assert evt.state == "scheduled"
     save_mock.assert_not_awaited()
+    assert "création salon échouée" in caplog.text
