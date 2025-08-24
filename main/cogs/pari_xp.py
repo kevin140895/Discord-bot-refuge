@@ -11,6 +11,7 @@ from main.utils.xp_adapter import (
     get_user_xp,
     get_user_account_age_days,
     add_user_xp,
+    apply_double_xp_buff,
 )
 import random
 import inspect
@@ -26,6 +27,7 @@ CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
 STATE_PATH = PARI_XP_DATA_DIR + "state.json"
 LB_PATH = PARI_XP_DATA_DIR + "leaderboard.json"
 TX_PATH = PARI_XP_DATA_DIR + "transactions.json"
+TICKETS_PATH = PARI_XP_DATA_DIR + "tickets.json"
 
 
 class RouletteRefugeCog(commands.Cog):
@@ -579,6 +581,8 @@ class RouletteRefugeCog(commands.Cog):
         delta = 0
         mult: Optional[float] = None
         notes = None
+        ticket = False
+        double_xp = False
         if segment == "lose_0x":
             payout = 0
             delta = -bet
@@ -610,11 +614,11 @@ class RouletteRefugeCog(commands.Cog):
         elif segment == "ticket_free":
             payout = 0
             delta = -bet
-            notes = "placeholder ticket"
+            ticket = True
         elif segment == "double_xp_1h":
             payout = 0
             delta = -bet
-            notes = "placeholder double_xp"
+            double_xp = True
         else:
             payout = 0
             delta = -bet
@@ -624,6 +628,8 @@ class RouletteRefugeCog(commands.Cog):
             "delta": delta,
             "mult": mult,
             "notes": notes,
+            "ticket": ticket,
+            "double_xp": double_xp,
         }
 
     async def _handle_bet_submission(
@@ -708,9 +714,15 @@ class RouletteRefugeCog(commands.Cog):
         )
         segment = self._draw_segment()
         result = self._compute_result(amount, segment)
-        add_user_xp(user_id, result["delta"], reason="pari_xp")
-        transactions = storage.load_json(storage.Path(TX_PATH), [])
         ts = self._now().isoformat()
+        add_user_xp(user_id, result["delta"], reason="pari_xp")
+        if result.get("double_xp"):
+            apply_double_xp_buff(user_id, 60)
+        if result.get("ticket"):
+            tickets = storage.load_json(storage.Path(TICKETS_PATH), [])
+            tickets.append({"user_id": user_id, "ts": ts, "used": False})
+            await storage.save_json(storage.Path(TICKETS_PATH), tickets)
+        transactions = storage.load_json(storage.Path(TX_PATH), [])
         day_key = ts.split("T")[0]
         transactions.append(
             {
@@ -723,6 +735,8 @@ class RouletteRefugeCog(commands.Cog):
                 "delta": result["delta"],
                 "mult": result["mult"],
                 "notes": result["notes"],
+                "ticket": result["ticket"],
+                "double_xp": result["double_xp"],
                 "day_key": day_key,
             }
         )
@@ -735,10 +749,10 @@ class RouletteRefugeCog(commands.Cog):
         ]
         if result["notes"]:
             lines.append(f"Note : {result['notes']}")
-        if segment == "ticket_free":
-            lines.append("🎟️ Tu as gagné un ticket gratuit (placeholder)")
-        elif segment == "double_xp_1h":
-            lines.append("⚡ Tu as gagné un boost Double XP 1h (placeholder)")
+        if result.get("ticket"):
+            lines.append("🎟️ Tu as gagné un ticket gratuit !")
+        elif result.get("double_xp"):
+            lines.append("⚡ Tu as gagné un boost Double XP 1h !")
         embed = discord.Embed(title="🎲 Résultat", description="\n".join(lines))
         await interaction.followup.send(embed=embed, ephemeral=True)
         public_channel = interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
@@ -810,15 +824,15 @@ class RouletteRefugeCog(commands.Cog):
         double = self._compute_result(10, "double_xp_1h")
         super_jp = self._compute_result(10, "super_jackpot_plus_1000")
         cond_place = (
-            ticket["notes"] == "placeholder ticket"
-            and double["notes"] == "placeholder double_xp"
+            ticket.get("ticket")
+            and double.get("double_xp")
             and ticket["delta"] == -10
             and double["delta"] == -10
             and super_jp["delta"] == 1000
         )
         cond_msgs = (
-            "ticket gratuit (placeholder)" in src
-            and "boost Double XP 1h (placeholder)" in src
+            "ticket gratuit !" in src
+            and "boost Double XP 1h !" in src
         )
         report["draw_placeholders"] = (
             "PASS" if cond_draw and cond_place and cond_msgs else "FAIL"
