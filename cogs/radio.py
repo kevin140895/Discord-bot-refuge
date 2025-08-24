@@ -102,11 +102,17 @@ class RadioCog(commands.Cog):
             if self._original_name:
                 await rename_manager.request(channel, self._original_name)
 
-    @app_commands.command(name="radio_rap", description="Basculer la radio sur le flux rap")
-    async def radio_rap(self, interaction: discord.Interaction) -> None:
+    async def _switch_stream(
+        self,
+        interaction: discord.Interaction,
+        stream_url: str,
+        user_message: str,
+        rename_name: str,
+    ) -> None:
+        """Basculer vers un flux radio et renommer le salon."""
         channel = self.bot.get_channel(self.vc_id)
 
-        if self.stream_url == RADIO_RAP_STREAM_URL and self._previous_stream:
+        if self.stream_url == stream_url and self._previous_stream:
             self.stream_url = self._previous_stream
             self._previous_stream = None
             if self.voice and self.voice.is_playing():
@@ -120,67 +126,42 @@ class RadioCog(commands.Cog):
             return
 
         self._previous_stream = self.stream_url
-        self.stream_url = RADIO_RAP_STREAM_URL
+        self.stream_url = stream_url
         if self.voice and self.voice.is_playing():
             self.voice.stop()
         await self._connect_and_play()
         if isinstance(channel, discord.VoiceChannel):
-            await self._rename_for_stream(channel, RADIO_RAP_STREAM_URL)
-        await interaction.response.send_message("Radio changée pour rap")
+            await rename_manager.request(channel, rename_name)
+        await interaction.response.send_message(user_message)
+
+    @app_commands.command(name="radio_rap", description="Basculer la radio sur le flux rap")
+    async def radio_rap(self, interaction: discord.Interaction) -> None:
+        await self._switch_stream(
+            interaction,
+            RADIO_RAP_STREAM_URL,
+            "Radio changée pour rap",
+            "🔘・Radio-Rap",
+        )
 
     @app_commands.command(name="radio_rock", description="Basculer la radio sur le flux rock")
     async def radio_rock(self, interaction: discord.Interaction) -> None:
-        channel = self.bot.get_channel(self.vc_id)
-
-        if self.stream_url == ROCK_RADIO_STREAM_URL and self._previous_stream:
-            self.stream_url = self._previous_stream
-            self._previous_stream = None
-            if self.voice and self.voice.is_playing():
-                self.voice.stop()
-            await self._connect_and_play()
-            if isinstance(channel, discord.VoiceChannel):
-                await self._rename_for_stream(channel, self.stream_url)
-            await interaction.response.send_message(
-                "Radio changée pour la station précédente"
-            )
-            return
-
-        self._previous_stream = self.stream_url
-        self.stream_url = ROCK_RADIO_STREAM_URL
-        if self.voice and self.voice.is_playing():
-            self.voice.stop()
-        await self._connect_and_play()
-        if isinstance(channel, discord.VoiceChannel):
-            await self._rename_for_stream(channel, ROCK_RADIO_STREAM_URL)
-        await interaction.response.send_message("Radio changée pour rock")
+        await self._switch_stream(
+            interaction,
+            ROCK_RADIO_STREAM_URL,
+            "Radio changée pour rock",
+            "☢️・Radio-Rock",
+        )
 
     @app_commands.command(
         name="radio_rapfr", description="Basculer la radio sur le flux rap français"
     )
     async def radio_rapfr(self, interaction: discord.Interaction) -> None:
-        channel = self.bot.get_channel(self.vc_id)
-
-        if self.stream_url == RADIO_RAP_FR_STREAM_URL and self._previous_stream:
-            self.stream_url = self._previous_stream
-            self._previous_stream = None
-            if self.voice and self.voice.is_playing():
-                self.voice.stop()
-            await self._connect_and_play()
-            if isinstance(channel, discord.VoiceChannel):
-                await self._rename_for_stream(channel, self.stream_url)
-            await interaction.response.send_message(
-                "Radio changée pour la station précédente"
-            )
-            return
-
-        self._previous_stream = self.stream_url
-        self.stream_url = RADIO_RAP_FR_STREAM_URL
-        if self.voice and self.voice.is_playing():
-            self.voice.stop()
-        await self._connect_and_play()
-        if isinstance(channel, discord.VoiceChannel):
-            await self._rename_for_stream(channel, RADIO_RAP_FR_STREAM_URL)
-        await interaction.response.send_message("Radio changée pour rap français")
+        await self._switch_stream(
+            interaction,
+            RADIO_RAP_FR_STREAM_URL,
+            "Radio changée pour rap français",
+            "🔴・Radio-RapFR",
+        )
 
     @app_commands.command(
         name="radio_24", description="Revenir sur l'ancienne radio 24/7"
