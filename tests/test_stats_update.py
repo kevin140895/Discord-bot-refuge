@@ -11,11 +11,6 @@ class DummyChannel:
         self.name: str | None = None
 
 
-class DummyCategory:
-    def __init__(self, channels):
-        self.channels = channels
-
-
 class DummyMember:
     def __init__(self, status, bot=False):
         self.status = status
@@ -28,9 +23,9 @@ class DummyVoiceChannel:
 
 
 class DummyGuild:
-    def __init__(self, members, category, voice_channels):
+    def __init__(self, members, channels, voice_channels):
         self.members = members
-        self._category = category
+        self._channels = channels
         self.voice_channels = voice_channels
 
     @property
@@ -38,9 +33,7 @@ class DummyGuild:
         return len(self.members)
 
     def get_channel(self, cid):
-        if cid == config.STATS_CATEGORY_ID:
-            return self._category
-        return None
+        return self._channels.get(cid)
 
 
 @pytest.mark.asyncio
@@ -48,7 +41,11 @@ async def test_update_stats_changes_channel_names(monkeypatch):
     ch1 = DummyChannel()
     ch2 = DummyChannel()
     ch3 = DummyChannel()
-    category = DummyCategory([ch1, ch2, ch3])
+    channels = {
+        config.STATS_MEMBERS_CHANNEL_ID: ch1,
+        config.STATS_ONLINE_CHANNEL_ID: ch2,
+        config.STATS_VOICE_CHANNEL_ID: ch3,
+    }
     voice_channel = DummyVoiceChannel(
         [DummyMember(discord.Status.online), DummyMember(discord.Status.online, bot=True)]
     )
@@ -58,7 +55,7 @@ async def test_update_stats_changes_channel_names(monkeypatch):
             DummyMember(discord.Status.offline),
             DummyMember(discord.Status.online, bot=True),
         ],
-        category,
+        channels,
         [voice_channel],
     )
 

@@ -55,22 +55,24 @@ class StatsCog(commands.Cog):
             data = self.cache.get(gid)
             if not data:
                 continue
-            category = guild.get_channel(config.STATS_CATEGORY_ID)
-            if category is None:
-                continue
-            channels = getattr(category, "channels", [])
-            if len(channels) > 0 and "members" in data:
-                await rename_manager.request(
-                    channels[0], f"👥 Membres : {data['members']}"
-                )
-            if len(channels) > 1 and "online" in data:
-                await rename_manager.request(
-                    channels[1], f"🟢 En ligne : {data['online']}"
-                )
-            if len(channels) > 2 and "voice" in data:
-                await rename_manager.request(
-                    channels[2], f"🔊 Voc : {data['voice']}"
-                )
+            if "members" in data:
+                channel = guild.get_channel(config.STATS_MEMBERS_CHANNEL_ID)
+                if channel is not None:
+                    await rename_manager.request(
+                        channel, f"👥 Membres : {data['members']}"
+                    )
+            if "online" in data:
+                channel = guild.get_channel(config.STATS_ONLINE_CHANNEL_ID)
+                if channel is not None:
+                    await rename_manager.request(
+                        channel, f"🟢 En ligne : {data['online']}"
+                    )
+            if "voice" in data:
+                channel = guild.get_channel(config.STATS_VOICE_CHANNEL_ID)
+                if channel is not None:
+                    await rename_manager.request(
+                        channel, f"🔊 Voc : {data['voice']}"
+                    )
 
     def cog_unload(self) -> None:
         self.refresh_members.cancel()
@@ -80,14 +82,11 @@ class StatsCog(commands.Cog):
     async def update_members(self, guild: discord.Guild) -> None:
         """Met à jour le nombre de membres pour ``guild``."""
         with measure("stats.update_members"):
-            category = guild.get_channel(config.STATS_CATEGORY_ID)
-            if category is None:
-                return
             members = sum(1 for m in guild.members if not getattr(m, "bot", False))
-            channels = getattr(category, "channels", [])
-            if len(channels) > 0:
+            channel = guild.get_channel(config.STATS_MEMBERS_CHANNEL_ID)
+            if channel is not None:
                 await rename_manager.request(
-                    channels[0], f"👥 Membres : {members}"
+                    channel, f"👥 Membres : {members}"
                 )
             gid = str(getattr(guild, "id", 0))
             self.cache.setdefault(gid, {})["members"] = members
@@ -96,18 +95,15 @@ class StatsCog(commands.Cog):
     async def update_online(self, guild: discord.Guild) -> None:
         """Met à jour le nombre d'utilisateurs en ligne pour ``guild``."""
         with measure("stats.update_online"):
-            category = guild.get_channel(config.STATS_CATEGORY_ID)
-            if category is None:
-                return
             online = sum(
                 1
                 for m in guild.members
                 if not getattr(m, "bot", False) and m.status != discord.Status.offline
             )
-            channels = getattr(category, "channels", [])
-            if len(channels) > 1:
+            channel = guild.get_channel(config.STATS_ONLINE_CHANNEL_ID)
+            if channel is not None:
                 await rename_manager.request(
-                    channels[1], f"🟢 En ligne : {online}"
+                    channel, f"🟢 En ligne : {online}"
                 )
             gid = str(getattr(guild, "id", 0))
             self.cache.setdefault(gid, {})["online"] = online
@@ -116,17 +112,14 @@ class StatsCog(commands.Cog):
     async def update_voice(self, guild: discord.Guild) -> None:
         """Met à jour le nombre d'utilisateurs en vocal pour ``guild``."""
         with measure("stats.update_voice"):
-            category = guild.get_channel(config.STATS_CATEGORY_ID)
-            if category is None:
-                return
             voice = sum(
                 len([m for m in vc.members if not getattr(m, "bot", False)])
                 for vc in getattr(guild, "voice_channels", [])
             )
-            channels = getattr(category, "channels", [])
-            if len(channels) > 2:
+            channel = guild.get_channel(config.STATS_VOICE_CHANNEL_ID)
+            if channel is not None:
                 await rename_manager.request(
-                    channels[2], f"🔊 Voc : {voice}"
+                    channel, f"🔊 Voc : {voice}"
                 )
             gid = str(getattr(guild, "id", 0))
             self.cache.setdefault(gid, {})["voice"] = voice

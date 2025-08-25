@@ -32,7 +32,9 @@ except AttributeError:
     pass
 
 # ── Salons statistiques ───────────────────────────────────────
-STATS_CATEGORY_ID = 1406435187520307350  # Catégorie "📊 Statistiques"
+STATS_MEMBERS_CHANNEL_ID = 1406435185813098537
+STATS_ONLINE_CHANNEL_ID = 1406435187520307350
+STATS_VOICE_CHANNEL_ID = 1406435190607184085
 
 # ── Rôles plateformes et notifications ───────────────────────
 ROLE_PC = 1400560541529018408
