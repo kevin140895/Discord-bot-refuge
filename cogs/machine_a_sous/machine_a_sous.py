@@ -525,7 +525,7 @@ class MachineASousCog(commands.Cog):
                 allowed = discord.AllowedMentions(roles=True)
                 description = (
                     "💡 Les néons s’éteignent… ⛔\n"
-                    "À demain pour de nouvelles mises et, peut-être, le gros lot 💰."
+                    "À demain pour peut-être tirer le gros lot 💰."
                 )
                 color = 0xED4245
             embed = discord.Embed(title=title, description=description, color=color)
