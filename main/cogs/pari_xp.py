@@ -463,23 +463,27 @@ class RouletteRefugeCog(commands.Cog):
             except Exception:
                 pass
 
+        # --- Gestion ouverture/fermeture + "dernier appel" ---
+        open_hour = int(self.config.get("open_hour", 8))
         is_open_now = self._is_open_hours(now)
+
+        # Eviter de spam l'annonce d'ouverture : une seule fois par jour
         last_open_ts = self.state.get("last_open_announce_ts")
         last_open_date = (
             datetime.fromisoformat(last_open_ts).date() if last_open_ts else None
         )
 
         if is_open_now:
-            if (
-                not self.state.get("is_open", False)
-                or last_open_date != now.date()
-            ):
+            # (Ré)ouverture (ou hub manquant) → annonce + maj hub
+            if (not self.state.get("is_open", False)) or (last_open_date != now.date()):
                 await self._announce_open(channel)
                 await self._update_hub_state(True)
             elif not self.state.get("hub_message_id"):
                 await self._update_hub_state(True)
             else:
                 await self._ensure_hub_message(channel)
+
+            # Dernier appel 15 min avant fermeture
             if (
                 self.state.get("is_open", False)
                 and now.hour == last_call_hour
@@ -489,9 +493,14 @@ class RouletteRefugeCog(commands.Cog):
                 msg = f"⏳ Dernier appel — fermeture dans 15 minutes ({close_hour:02d}:00)."
                 if announce_ch:
                     await announce_ch.send(msg)
-                    return
-                await channel.send(msg)
+                else:
+                    await channel.send(msg)
+
         elif self.state.get("is_open", False):
+            # On sort de la plage d'ouverture → clôture + récap + fermeture
+            await self._announce_close(channel)
+            await self._update_hub_state(False)
+            await self._post_daily_summary(channel)
             await self._announce_close(channel)
             await self._update_hub_state(False)
             await self._post_daily_summary(channel)
