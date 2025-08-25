@@ -8,7 +8,7 @@ from typing import Final, Iterator, List
 # Static list of cog module names for the benefit of type checkers.  At runtime
 # a dynamic discovery still happens through :func:`iter_cog_names` so new files
 # are picked up automatically.
-COG_MODULES: Final[List[str]] = ["pari_xp", "dev_healthcheck"]
+COG_MODULES: Final[List[str]] = ["pari_xp"]
 
 
 def iter_cog_names() -> Iterator[str]:

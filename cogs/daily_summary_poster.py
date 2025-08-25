@@ -16,11 +16,9 @@ from datetime import datetime, timedelta, time, timezone
 from typing import Dict, Any
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-from config import ACTIVITY_SUMMARY_CH, DATA_DIR, XP_VIEWER_ROLE_ID
-from utils.interactions import safe_respond
+from config import ACTIVITY_SUMMARY_CH, DATA_DIR
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 logger = logging.getLogger(__name__)
 
@@ -164,23 +162,6 @@ class DailySummaryPoster(commands.Cog):
         await self.bot.wait_until_ready()
         data = read_json_safe(DAILY_RANK_FILE)
         await self._maybe_post(data)
-
-    # ── Slash command -------------------------------------------------
-    @app_commands.command(
-        name="test_classement2", description="Prévisualise le message du jour"
-    )
-    async def test_classement2(
-        self, interaction: discord.Interaction
-    ) -> None:
-        if not any(r.id == XP_VIEWER_ROLE_ID for r in getattr(interaction.user, "roles", [])):
-            await safe_respond(interaction, "Accès refusé.", ephemeral=True)
-            return
-        data = read_json_safe(DAILY_RANK_FILE)
-        if not data:
-            await safe_respond(interaction, "Aucun classement disponible.", ephemeral=True)
-            return
-        message = self._build_message(data)
-        await safe_respond(interaction, message, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - integration

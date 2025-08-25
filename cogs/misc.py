@@ -1,8 +1,7 @@
 """Commandes diverses ne nécessitant pas de persistance.
 
-Cette cog regroupe plusieurs commandes utilitaires (sondages, liens,
-purge, choix du type de joueur) qui n'enregistrent aucune donnée de
-manière permanente.
+Cette cog regroupe plusieurs commandes utilitaires (purge, choix du type
+de joueur) qui n'enregistrent aucune donnée de manière permanente.
 """
 
 import logging
@@ -23,7 +22,7 @@ class MiscCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="type_joueur", description="Choisir PC, Console ou Mobile")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_role(1403510368340410550)
     async def type_joueur(self, interaction: discord.Interaction) -> None:
         with measure("slash:type_joueur"):
             if interaction.guild is None:
@@ -41,32 +40,6 @@ class MiscCog(commands.Cog):
             channel = interaction.guild.get_channel(CHANNEL_ROLES)
         if channel:
             await channel.send("Quel type de joueur es-tu ?", view=PlayerTypeView())
-
-    @app_commands.command(name="sondage", description="Créer un sondage Oui/Non")
-    @app_commands.describe(question="La question à poser")
-    async def sondage(self, interaction: discord.Interaction, question: str) -> None:
-        with measure("slash:sondage"):
-            ch = interaction.channel
-            if ch is None:
-                await safe_respond(
-                    interaction, "Salon introuvable.", ephemeral=True
-                )
-                return
-            msg = await ch.send(
-                f"📊 **{question}**\n> ✅ = Oui   ❌ = Non\n_Posé par {interaction.user.mention}_"
-            )
-            await msg.add_reaction("✅")
-            await msg.add_reaction("❌")
-            await safe_respond(interaction, "Sondage créé ✔️", ephemeral=True)
-
-    @app_commands.command(name="lien", description="Affiche le lien pour rejoindre le serveur Discord")
-    async def lien(self, interaction: discord.Interaction) -> None:
-        with measure("slash:lien"):
-            await safe_respond(
-                interaction,
-                "🔗 Voici le lien pour rejoindre notre serveur :\nhttps://discord.com/invite/lerefuge57",
-                ephemeral=False,
-            )
 
     @app_commands.command(name="purge", description="Supprime N messages récents de ce salon (réservé à Kevin)")
     @app_commands.describe(nb="Nombre de messages à supprimer (1-100)")

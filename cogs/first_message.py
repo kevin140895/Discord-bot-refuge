@@ -8,12 +8,10 @@ import os
 from datetime import date, datetime, time
 
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
 
 from config import DATA_DIR
 from storage.xp_store import xp_store
-from utils.interactions import safe_respond
 from utils.persistence import (
     atomic_write_json_async,
     ensure_dir,
@@ -146,35 +144,6 @@ class FirstMessageCog(commands.Cog):
         )
 
     # ── Commands ─────────────────────────────────────────────
-    @app_commands.command(name="xpreset", description="Réinitialise le challenge du premier message.")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def xpreset(self, interaction: discord.Interaction) -> None:
-        """Réinitialise manuellement le challenge du jour."""
-        self._reset_state()
-        await safe_respond(interaction, "Challenge réinitialisé.")
-
-    @app_commands.command(name="xptoday", description="Affiche le gagnant du jour pour le premier message.")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def xptoday(self, interaction: discord.Interaction) -> None:
-        """Affiche le gagnant du jour."""
-        if self.winner_id:
-            member = interaction.guild.get_member(self.winner_id) if interaction.guild else None
-            if member is None and interaction.guild is not None:
-                try:
-                    member = await interaction.guild.fetch_member(self.winner_id)
-                except discord.NotFound:
-                    member = None
-            mention = member.mention if member else f"<@{self.winner_id}>"
-            await safe_respond(
-                interaction,
-                f"Le gagnant du jour est {mention}.",
-            )
-        else:
-            await safe_respond(
-                interaction,
-                "Personne n'a encore gagné aujourd'hui.",
-            )
-
 
 async def setup(bot: commands.Bot) -> None:
     """Charge le cog dans le bot."""

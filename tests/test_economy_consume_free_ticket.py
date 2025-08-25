@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 
 from utils.economy_tickets import consume_free_ticket
 import utils.economy_tickets as et

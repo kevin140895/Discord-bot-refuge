@@ -15,12 +15,10 @@ from pathlib import Path
 from typing import Dict
 
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from config import DATA_DIR, XP_VIEWER_ROLE_ID
-from utils.interactions import safe_respond
+from config import DATA_DIR
 from utils.metrics import measure
 from utils.persistence import atomic_write_json_async, ensure_dir, read_json_safe
 from utils.rename_manager import rename_manager
@@ -175,17 +173,6 @@ class StatsCog(commands.Cog):
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self.update_voice(guild)
-
-    @app_commands.command(name="stats_refresh", description="Met à jour les salons de statistiques.")
-    async def slash_stats_refresh(self, interaction: discord.Interaction) -> None:
-        if not any(r.id == XP_VIEWER_ROLE_ID for r in interaction.user.roles):
-            await safe_respond(interaction, "Accès refusé.", ephemeral=True)
-            return
-        with measure("slash:stats_refresh"):
-            await self.update_members(interaction.guild)
-            await self.update_online(interaction.guild)
-            await self.update_voice(interaction.guild)
-            await safe_respond(interaction, "Statistiques mises à jour", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
