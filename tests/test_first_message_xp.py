@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch

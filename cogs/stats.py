@@ -31,6 +31,14 @@ STATS_CACHE_FILE = Path(DATA_DIR) / "stats_cache.json"
 ensure_dir(STATS_CACHE_FILE.parent)
 
 
+async def _ensure_rename_manager_started() -> None:
+    """Start ``rename_manager`` if its worker is inactive."""
+    worker = getattr(rename_manager, "_worker", None)
+    if worker is None or worker.done():
+        logger.warning("rename_manager inactive; starting worker")
+        await rename_manager.start()
+
+
 class StatsCog(commands.Cog):
     """Gestion des salons de statistiques (membres, activité, etc.)."""
 
@@ -90,6 +98,7 @@ class StatsCog(commands.Cog):
 
     async def update_members(self, guild: discord.Guild) -> None:
         """Met à jour le nombre de membres pour ``guild``."""
+        await _ensure_rename_manager_started()
         with measure("stats.update_members"):
             members = guild.member_count - sum(
                 1 for m in guild.members if getattr(m, "bot", False)
@@ -105,6 +114,7 @@ class StatsCog(commands.Cog):
 
     async def update_online(self, guild: discord.Guild) -> None:
         """Met à jour le nombre d'utilisateurs en ligne pour ``guild``."""
+        await _ensure_rename_manager_started()
         with measure("stats.update_online"):
             online = sum(
                 1
@@ -122,6 +132,7 @@ class StatsCog(commands.Cog):
 
     async def update_voice(self, guild: discord.Guild) -> None:
         """Met à jour le nombre d'utilisateurs en vocal pour ``guild``."""
+        await _ensure_rename_manager_started()
         with measure("stats.update_voice"):
             voice = sum(
                 len([m for m in vc.members if not getattr(m, "bot", False)])

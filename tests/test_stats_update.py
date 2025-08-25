@@ -150,7 +150,7 @@ async def test_startup_updates_channels_on_empty_cache(monkeypatch, tmp_path):
         loop=asyncio.get_event_loop(),
     )
 
-    cog = StatsCog(bot)
+    StatsCog(bot)
     await captured_tasks[0]
 
     members = guild.member_count - sum(1 for m in guild.members if m.bot)

@@ -476,7 +476,6 @@ class RouletteRefugeCog(commands.Cog):
                 pass
 
         # --- Gestion ouverture/fermeture + "dernier appel" ---
-        open_hour = int(self.config.get("open_hour", 8))
         is_open_now = self._is_open_hours(now)
 
         # Eviter de spam l'annonce d'ouverture : une seule fois par jour
