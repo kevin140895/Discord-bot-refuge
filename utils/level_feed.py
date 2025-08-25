@@ -10,6 +10,7 @@ import discord
 
 from config import LEVEL_FEED_CHANNEL_ID, ENABLE_GAME_LEVEL_FEED
 from utils.messages import LEVEL_FEED_TEMPLATES
+from utils.discord_utils import safe_message_edit
 
 logger = logging.getLogger("level_feed")
 
@@ -102,7 +103,7 @@ class LevelFeedRouter:
             last_msg = self._pari_xp_messages.get(key)
             try:
                 if last_msg:
-                    await last_msg.edit(embed=embed)
+                    await safe_message_edit(last_msg, embed=embed)
                 else:
                     last_msg = await channel.send(embed=embed)
                     self._pari_xp_messages[key] = last_msg

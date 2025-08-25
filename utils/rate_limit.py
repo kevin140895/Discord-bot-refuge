@@ -102,3 +102,10 @@ class GlobalRateLimiter:
                 self.errors.clear()
             self._requests = 0
             self._total_wait = 0.0
+
+
+# shared global rate limiter instance
+limiter = GlobalRateLimiter()
+
+
+__all__ = ["GlobalRateLimiter", "limiter"]

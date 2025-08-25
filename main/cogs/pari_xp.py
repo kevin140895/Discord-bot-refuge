@@ -24,6 +24,7 @@ from utils.timezones import TZ_PARIS
 from utils.storage import load_json
 from storage.roulette_store import RouletteStore
 from config import DATA_DIR
+from utils.discord_utils import safe_message_edit
 
 PARI_XP_DATA_DIR = "main/data/pari_xp/"
 CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
@@ -136,7 +137,7 @@ class RouletteRefugeCog(commands.Cog):
             if not message:
                 message = await self._find_hub_message(channel)
             if message:
-                await message.edit(embed=embed, view=view)
+                await safe_message_edit(message, embed=embed, view=view)
             else:
                 message = await channel.send(embed=embed, view=view)
                 self.state["hub_message_id"] = message.id
@@ -199,7 +200,7 @@ class RouletteRefugeCog(commands.Cog):
             message = await self._find_leaderboard_message(channel)
             state = self.state
         if message:
-            await message.edit(embed=embed)
+            await safe_message_edit(message, embed=embed)
         else:
             message = await channel.send(embed=embed)
             state["leaderboard_message_id"] = message.id
@@ -215,7 +216,7 @@ class RouletteRefugeCog(commands.Cog):
             if not msg_id:
                 return
             msg = await channel.fetch_message(int(msg_id))
-            await msg.edit(embed=self._build_leaderboard_embed())
+            await safe_message_edit(msg, embed=self._build_leaderboard_embed())
         except Exception:
             pass
 
