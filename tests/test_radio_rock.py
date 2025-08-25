@@ -9,11 +9,11 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 import cogs.radio as radio_mod
 from cogs.radio import RadioCog
-from config import RADIO_RAP_STREAM_URL, RADIO_STREAM_URL, RADIO_VC_ID
+from config import ROCK_RADIO_STREAM_URL, RADIO_STREAM_URL, RADIO_VC_ID
 
 
 @pytest.mark.asyncio
-async def test_radio_rap_command_toggles_stream(monkeypatch):
+async def test_radio_rock_toggles_stream(monkeypatch):
     class FakeVoiceChannel(SimpleNamespace):
         pass
 
@@ -31,20 +31,19 @@ async def test_radio_rap_command_toggles_stream(monkeypatch):
         response=SimpleNamespace(send_message=AsyncMock()),
     )
 
-    await RadioCog.radio_rap.callback(cog, interaction)
+    await cog.radio_rock(interaction)
 
-    assert cog.stream_url == RADIO_RAP_STREAM_URL
+    assert cog.stream_url == ROCK_RADIO_STREAM_URL
     assert cog._previous_stream == RADIO_STREAM_URL
-    rename_mock.assert_awaited_once_with(channel, "🔘・Radio-Rap")
+    rename_mock.assert_awaited_once_with(channel, "☢️・Radio-Rock")
     interaction.response.send_message.assert_awaited_once()
 
     interaction.response.send_message.reset_mock()
     rename_mock.reset_mock()
 
-    await RadioCog.radio_rap.callback(cog, interaction)
+    await cog.radio_rock(interaction)
 
     assert cog.stream_url == RADIO_STREAM_URL
     assert cog._previous_stream is None
     rename_mock.assert_awaited_once_with(channel, "📻・Radio-HipHop")
     interaction.response.send_message.assert_awaited_once()
-

@@ -13,7 +13,7 @@ from config import RADIO_RAP_FR_STREAM_URL, RADIO_STREAM_URL, RADIO_VC_ID
 
 
 @pytest.mark.asyncio
-async def test_radio_rapfr_command_toggles_stream(monkeypatch):
+async def test_radio_rapfr_toggles_stream(monkeypatch):
     class FakeVoiceChannel(SimpleNamespace):
         pass
 
@@ -31,7 +31,7 @@ async def test_radio_rapfr_command_toggles_stream(monkeypatch):
         response=SimpleNamespace(send_message=AsyncMock()),
     )
 
-    await RadioCog.radio_rapfr.callback(cog, interaction)
+    await cog.radio_rapfr(interaction)
 
     assert cog.stream_url == RADIO_RAP_FR_STREAM_URL
     assert cog._previous_stream == RADIO_STREAM_URL
@@ -41,7 +41,7 @@ async def test_radio_rapfr_command_toggles_stream(monkeypatch):
     interaction.response.send_message.reset_mock()
     rename_mock.reset_mock()
 
-    await RadioCog.radio_rapfr.callback(cog, interaction)
+    await cog.radio_rapfr(interaction)
 
     assert cog.stream_url == RADIO_STREAM_URL
     assert cog._previous_stream is None

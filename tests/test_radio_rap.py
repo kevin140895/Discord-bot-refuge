@@ -13,7 +13,7 @@ from config import RADIO_RAP_STREAM_URL, RADIO_STREAM_URL, RADIO_VC_ID
 
 
 @pytest.mark.asyncio
-async def test_radio_hiphop_command_restores_default(monkeypatch):
+async def test_radio_rap_toggles_stream(monkeypatch):
     class FakeVoiceChannel(SimpleNamespace):
         pass
 
@@ -22,8 +22,6 @@ async def test_radio_hiphop_command_restores_default(monkeypatch):
     bot = SimpleNamespace(loop=asyncio.get_event_loop(), get_channel=lambda cid: channel)
     cog = RadioCog(bot)
     cog._original_name = "Radio"
-    cog.stream_url = RADIO_RAP_STREAM_URL
-    cog.voice = SimpleNamespace(is_playing=lambda: True, stop=lambda: None)
     monkeypatch.setattr(cog, "_connect_and_play", AsyncMock())
     rename_mock = AsyncMock()
     monkeypatch.setattr(radio_mod.rename_manager, "request", rename_mock)
@@ -33,10 +31,20 @@ async def test_radio_hiphop_command_restores_default(monkeypatch):
         response=SimpleNamespace(send_message=AsyncMock()),
     )
 
-    await RadioCog.radio_hiphop.callback(cog, interaction)
+    await cog.radio_rap(interaction)
+
+    assert cog.stream_url == RADIO_RAP_STREAM_URL
+    assert cog._previous_stream == RADIO_STREAM_URL
+    rename_mock.assert_awaited_once_with(channel, "🔘・Radio-Rap")
+    interaction.response.send_message.assert_awaited_once()
+
+    interaction.response.send_message.reset_mock()
+    rename_mock.reset_mock()
+
+    await cog.radio_rap(interaction)
 
     assert cog.stream_url == RADIO_STREAM_URL
     assert cog._previous_stream is None
     rename_mock.assert_awaited_once_with(channel, "📻・Radio-HipHop")
-    cog._connect_and_play.assert_awaited_once()
     interaction.response.send_message.assert_awaited_once()
+

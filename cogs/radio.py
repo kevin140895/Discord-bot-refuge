@@ -3,7 +3,6 @@ import logging
 from typing import Optional
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 from config import (
@@ -182,7 +181,6 @@ class RadioCog(commands.Cog):
             await rename_manager.request(channel, rename_name)
         await interaction.response.send_message(user_message)
 
-    @app_commands.command(name="radio_rap", description="Basculer la radio sur le flux rap")
     async def radio_rap(self, interaction: discord.Interaction) -> None:
         await self._switch_stream(
             interaction,
@@ -191,7 +189,6 @@ class RadioCog(commands.Cog):
             "🔘・Radio-Rap",
         )
 
-    @app_commands.command(name="radio_rock", description="Basculer la radio sur le flux rock")
     async def radio_rock(self, interaction: discord.Interaction) -> None:
         await self._switch_stream(
             interaction,
@@ -200,9 +197,6 @@ class RadioCog(commands.Cog):
             "☢️・Radio-Rock",
         )
 
-    @app_commands.command(
-        name="radio_rapfr", description="Basculer la radio sur le flux rap français"
-    )
     async def radio_rapfr(self, interaction: discord.Interaction) -> None:
         await self._switch_stream(
             interaction,
@@ -211,9 +205,6 @@ class RadioCog(commands.Cog):
             "🔴・Radio-RapFR",
         )
 
-    @app_commands.command(
-        name="radio_hiphop", description="Revenir sur la radio Hip-Hop"
-    )
     async def radio_hiphop(self, interaction: discord.Interaction) -> None:
         channel = self.bot.get_channel(self.vc_id)
         self.stream_url = RADIO_STREAM_URL

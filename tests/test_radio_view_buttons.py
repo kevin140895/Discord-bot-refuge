@@ -10,7 +10,7 @@ from view import RadioView
 
 
 @pytest.mark.asyncio
-async def test_radio_view_buttons_call_commands():
+async def test_radio_view_buttons_call_methods():
     view = RadioView()
     mapping = {
         "radio_rapfr": "radio_rapfr",
@@ -23,7 +23,7 @@ async def test_radio_view_buttons_call_commands():
             child for child in view.children if getattr(child, "custom_id", None) == custom_id
         )
         mock = AsyncMock()
-        cog = SimpleNamespace(**{cmd_name: SimpleNamespace(callback=mock)})
+        cog = SimpleNamespace(**{cmd_name: mock})
         interaction = SimpleNamespace(
             client=SimpleNamespace(get_cog=lambda name, c=cog: c)
         )
