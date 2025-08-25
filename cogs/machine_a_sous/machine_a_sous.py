@@ -638,6 +638,23 @@ class MachineASousCog(commands.Cog):
     )
 
     @group.command(
+        name="ticket",
+        description="Accorder un ticket de machine à sous",
+    )
+    @app_commands.describe(member="Membre à créditer")
+    @app_commands.checks.has_role(1403510368340410550)
+    async def ticket(
+        self, interaction: discord.Interaction, member: discord.Member
+    ) -> None:
+        with measure("slash:machine_ticket"):
+            self.store.grant_ticket(str(member.id))
+            self.store.unmark_claimed(str(member.id))
+            await interaction.response.send_message(
+                f"✅ Ticket accordé à {member.mention}.",
+                ephemeral=True,
+            )
+
+    @group.command(
         name="refresh",
         description="Republier le message de la machine à sous",
     )
