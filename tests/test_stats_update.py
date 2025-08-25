@@ -23,14 +23,13 @@ class DummyVoiceChannel:
 
 
 class DummyGuild:
-    def __init__(self, members, channels, voice_channels):
+    def __init__(self, members, channels, voice_channels, member_count=None):
         self.members = members
         self._channels = channels
         self.voice_channels = voice_channels
-
-    @property
-    def member_count(self):
-        return len(self.members)
+        self.member_count = (
+            member_count if member_count is not None else len(self.members)
+        )
 
     def get_channel(self, cid):
         return self._channels.get(cid)
@@ -57,6 +56,7 @@ async def test_update_stats_changes_channel_names(monkeypatch):
         ],
         channels,
         [voice_channel],
+        member_count=5,
     )
 
     async def fake_request(channel, name):
@@ -74,7 +74,7 @@ async def test_update_stats_changes_channel_names(monkeypatch):
     await cog.update_online(guild)
     await cog.update_voice(guild)
 
-    members = sum(1 for m in guild.members if not m.bot)
+    members = guild.member_count - sum(1 for m in guild.members if m.bot)
     assert ch1.name == f"👥 Membres : {members}"
     online = sum(
         1 for m in guild.members if not m.bot and m.status != discord.Status.offline

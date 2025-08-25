@@ -82,7 +82,9 @@ class StatsCog(commands.Cog):
     async def update_members(self, guild: discord.Guild) -> None:
         """Met à jour le nombre de membres pour ``guild``."""
         with measure("stats.update_members"):
-            members = sum(1 for m in guild.members if not getattr(m, "bot", False))
+            members = guild.member_count - sum(
+                1 for m in guild.members if getattr(m, "bot", False)
+            )
             channel = guild.get_channel(config.STATS_MEMBERS_CHANNEL_ID)
             if channel is not None:
                 await rename_manager.request(
