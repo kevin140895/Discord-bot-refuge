@@ -7,7 +7,21 @@ import typing
 import discord
 from discord.ext import commands
 
-from storage.economy import ECONOMY_DIR, SHOP_FILE, load_ui, save_ui
+from datetime import datetime, timedelta, timezone
+
+from storage.economy import (
+    ECONOMY_DIR,
+    SHOP_FILE,
+    load_boosts,
+    load_tickets,
+    load_ui,
+    save_boosts,
+    save_tickets,
+    save_ui,
+    transactions,
+)
+from utils import xp_adapter
+import config
 
 CHANNEL_ID = 1409633293791400108
 
@@ -19,41 +33,26 @@ class ShopView(discord.ui.View):
 
     def __init__(self) -> None:
         super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="Ticket Royal",
-        style=discord.ButtonStyle.green,
-        custom_id="shop_buy:ticket_royal",
-    )
-    async def buy_ticket_royal(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await interaction.response.send_message(
-            "🎟️ Ticket Royal acheté !", ephemeral=True
+        self.add_item(
+            discord.ui.Button(
+                label="Ticket Royal",
+                style=discord.ButtonStyle.green,
+                custom_id="shop_buy:ticket_royal",
+            )
         )
-
-    @discord.ui.button(
-        label="Double XP 1h",
-        style=discord.ButtonStyle.green,
-        custom_id="shop_buy:double_xp_1h",
-    )
-    async def buy_double_xp(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await interaction.response.send_message(
-            "⚡ Bonus XP 1h acheté !", ephemeral=True
+        self.add_item(
+            discord.ui.Button(
+                label="Double XP 1h",
+                style=discord.ButtonStyle.green,
+                custom_id="shop_buy:double_xp_1h",
+            )
         )
-
-    @discord.ui.button(
-        label="VIP 24h",
-        style=discord.ButtonStyle.green,
-        custom_id="shop_buy:vip_24h",
-    )
-    async def buy_vip(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await interaction.response.send_message(
-            "👑 VIP 24h acheté !", ephemeral=True
+        self.add_item(
+            discord.ui.Button(
+                label="VIP 24h",
+                style=discord.ButtonStyle.green,
+                custom_id="shop_buy:vip_24h",
+            )
         )
 
 
@@ -132,6 +131,89 @@ class EconomyUICog(commands.Cog):
             await save_ui(ui_data)
         except Exception as e:  # pragma: no cover - best effort
             logger.warning("Écriture ui.json échouée: %s", e)
+
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        custom_id = getattr(getattr(interaction, "data", {}), "get", lambda _key: None)(
+            "custom_id"
+        )
+        if not isinstance(custom_id, str) or not custom_id.startswith("shop_buy:"):
+            return
+        item_key = custom_id.split(":", 1)[1]
+        await self._handle_shop_purchase(interaction, item_key)
+
+    async def _handle_shop_purchase(
+        self, interaction: discord.Interaction, item_key: str
+    ) -> None:
+        try:
+            shop = json.loads(SHOP_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            await interaction.response.send_message(
+                "Boutique indisponible.", ephemeral=True
+            )
+            return
+        item = shop.get(item_key)
+        if not item:
+            await interaction.response.send_message("Article inconnu.", ephemeral=True)
+            return
+        price = int(item.get("price", 0))
+        user_id = interaction.user.id
+        balance = xp_adapter.get_balance(user_id)
+        if balance < price:
+            await interaction.response.send_message(
+                "Solde insuffisant.", ephemeral=True
+            )
+            return
+        await xp_adapter.add_xp(
+            user_id,
+            amount=-price,
+            guild_id=interaction.guild_id or 0,
+            source="shop",
+        )
+
+        if item_key == "ticket_royal":
+            tickets = load_tickets()
+            key = str(user_id)
+            tickets[key] = int(tickets.get(key, 0)) + 1
+            await save_tickets(tickets)
+        elif item_key == "double_xp_1h":
+            boosts = load_boosts()
+            key = str(user_id)
+            boost_list = boosts.setdefault(key, [])
+            until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            boost_list.append({"type": "double_xp", "until": until})
+            await save_boosts(boosts)
+        elif item_key == "vip_24h":
+            boosts = load_boosts()
+            key = str(user_id)
+            boost_list = boosts.setdefault(key, [])
+            until = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+            boost_list.append({"type": "vip", "until": until})
+            await save_boosts(boosts)
+            role_id = getattr(config, "VIP_24H_ROLE_ID", 0)
+            if role_id and interaction.guild:
+                role = interaction.guild.get_role(role_id)
+                if role:
+                    try:
+                        await interaction.user.add_roles(
+                            role, reason="Achat VIP 24h"
+                        )
+                    except Exception:  # pragma: no cover - best effort
+                        logger.warning("Impossible d'ajouter le rôle VIP", exc_info=True)
+
+        await transactions.add(
+            {
+                "type": "buy",
+                "user_id": user_id,
+                "item": item_key,
+                "price": price,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        await interaction.response.send_message(
+            f"Achat de {item.get('name', item_key)} effectué !", ephemeral=True
+        )
 
     async def _ensure_message(
         self,
