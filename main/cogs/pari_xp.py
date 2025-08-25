@@ -149,6 +149,7 @@ class RouletteRefugeCog(commands.Cog):
 
     def _build_hub_embed(self) -> discord.Embed:
         title = f"🎰 {self.config.get('game_display_name', '🤑 Roulette Refuge')} 🎰"
+        is_open = self.state.get("is_open", self._is_open_hours())
         lines = [
             "━━━━━━━━━━━━━━━",
             "💵 Mise minimum : 5 XP",
@@ -161,7 +162,7 @@ class RouletteRefugeCog(commands.Cog):
             "━━━━━━━━━━━━━━━",
             (
                 f"🟢 État : Ouvert — ferme à ⏰ {int(self.config.get('close_hour', 2)):02d}:00"
-                if self._is_open_hours()
+                if is_open
                 else f"🔴 État : Fermé — ouvre à ⏰ {int(self.config.get('open_hour', 8)):02d}:00"
             ),
         ]
@@ -169,7 +170,7 @@ class RouletteRefugeCog(commands.Cog):
 
     def _build_hub_view(self) -> discord.ui.View:
         cog = self
-        is_open = self._is_open_hours()
+        is_open = self.state.get("is_open", self._is_open_hours())
 
         class HubView(discord.ui.View):
             def __init__(self) -> None:
