@@ -22,6 +22,7 @@ from config import (
     MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES,
 )
 from utils.discord_utils import safe_message_edit
+from utils.economy_tickets import consume_free_ticket
 logger = logging.getLogger(__name__)
 
 PARIS_TZ = "Europe/Paris"
@@ -302,6 +303,11 @@ class MachineASousView(discord.ui.View):
         # Utilise d'abord un ticket disponible, même si l'utilisateur n'a pas
         # encore effectué son tirage quotidien. Cela permet d'utiliser un
         # ticket « en réserve » sans consommer l'essai journalier.
+        if consume_free_ticket(int(uid)):
+            await interaction.response.defer(ephemeral=True)
+            await self._single_spin(interaction, cog, free=True)
+            return
+
         if cog.store.use_ticket(uid):
             await interaction.response.defer(ephemeral=True)
             await self._single_spin(interaction, cog, free=True)

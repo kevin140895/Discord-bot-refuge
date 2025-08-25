@@ -25,6 +25,7 @@ from utils.storage import load_json
 from storage.roulette_store import RouletteStore
 from config import DATA_DIR
 from utils.discord_utils import safe_message_edit
+from utils.economy_tickets import consume_free_ticket
 
 PARI_XP_DATA_DIR = "main/data/pari_xp/"
 CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
@@ -772,7 +773,8 @@ class RouletteRefugeCog(commands.Cog):
                 outcome_color = random.choice(["rouge", "noir"])
                 segment = f"color_{outcome_color}"
                 payout = amount * 2 if color_choice == outcome_color else 0
-                delta = payout - amount
+                ticket_used = consume_free_ticket(user_id)
+                delta = payout if ticket_used else payout - amount
                 result = {
                     "payout": payout,
                     "delta": delta,
@@ -783,8 +785,11 @@ class RouletteRefugeCog(commands.Cog):
             else:
                 segment = self._draw_segment()
                 result = self._compute_result(amount, segment)
+                ticket_used = consume_free_ticket(user_id)
+                payout = int(cast(int, result["payout"]))
+                result["delta"] = payout if ticket_used else result["delta"]
+                delta = int(cast(int, result["delta"]))
             ts = self._now().isoformat()
-            delta = int(cast(int, result["delta"]))
             add_user_xp(
                 user_id,
                 delta,
