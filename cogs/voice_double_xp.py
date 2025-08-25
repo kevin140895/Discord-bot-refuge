@@ -87,6 +87,8 @@ class DoubleVoiceXP(commands.Cog):
         self.bot = bot
         self._tasks: List[asyncio.Task] = []
         self.state: Dict[str, Any] = {}
+        # Empêche les appels concurrents à ``_prepare_today``.
+        self._prepare_lock = asyncio.Lock()
         self.daily_planner.start()
         asyncio.create_task(self._startup())
 
@@ -111,44 +113,45 @@ class DoubleVoiceXP(commands.Cog):
     async def _prepare_today(self, force: bool = False) -> None:
         """Lire/initialiser l'état du jour puis planifier ou reprendre les sessions."""
 
-        # Cancel any previously scheduled tasks to avoid duplicates.
-        for task in self._tasks:
-            task.cancel()
-        self._tasks.clear()
+        async with self._prepare_lock:
+            # Cancel any previously scheduled tasks to avoid duplicates.
+            for task in self._tasks:
+                task.cancel()
+            self._tasks.clear()
 
-        today = datetime.now(PARIS_TZ).date()
-        state = _read_state()
-        if force or state.get("date") != today.isoformat():
-            sessions = [
-                {"hm": hm, "started": False, "end": None, "ended": False}
-                for hm in _random_sessions()
-            ]
-            state = {"date": today.isoformat(), "sessions": sessions}
-            await _write_state(state)
-        else:
-            sessions = state.get("sessions", [])
-            if sessions and isinstance(sessions[0], str):  # rétro-compatibilité
+            today = datetime.now(PARIS_TZ).date()
+            state = _read_state()
+            if force or state.get("date") != today.isoformat():
                 sessions = [
                     {"hm": hm, "started": False, "end": None, "ended": False}
-                    for hm in sessions
+                    for hm in _random_sessions()
                 ]
-                state["sessions"] = sessions
+                state = {"date": today.isoformat(), "sessions": sessions}
                 await _write_state(state)
-
-        self.state = state
-        now = datetime.now(PARIS_TZ)
-        for sess in sessions:
-            dt = _hm_to_dt(sess["hm"], today)
-            if sess.get("started") and not sess.get("ended"):
-                end_iso = sess.get("end")
-                if end_iso:
-                    end_dt = datetime.fromisoformat(end_iso)
-                    if end_dt > now:
-                        self._resume_session(sess, (end_dt - now).total_seconds())
-                    else:
-                        await self._end_session(sess, announce=False)
             else:
-                self._schedule_session(dt, sess)
+                sessions = state.get("sessions", [])
+                if sessions and isinstance(sessions[0], str):  # rétro-compatibilité
+                    sessions = [
+                        {"hm": hm, "started": False, "end": None, "ended": False}
+                        for hm in sessions
+                    ]
+                    state["sessions"] = sessions
+                    await _write_state(state)
+
+            self.state = state
+            now = datetime.now(PARIS_TZ)
+            for sess in sessions:
+                dt = _hm_to_dt(sess["hm"], today)
+                if sess.get("started") and not sess.get("ended"):
+                    end_iso = sess.get("end")
+                    if end_iso:
+                        end_dt = datetime.fromisoformat(end_iso)
+                        if end_dt > now:
+                            self._resume_session(sess, (end_dt - now).total_seconds())
+                        else:
+                            await self._end_session(sess, announce=False)
+                else:
+                    self._schedule_session(dt, sess)
 
     def _schedule_session(self, dt: datetime, session: Dict[str, Any]) -> None:
         """Planifier ``session`` pour démarrer à ``dt``."""

@@ -14,7 +14,8 @@ __all__ = [
     "schedule_checkpoint",
 ]
 
-_write_lock = asyncio.Lock()
+_write_lock: asyncio.Lock | None = None
+_write_lock_loop: asyncio.AbstractEventLoop | None = None
 
 
 def ensure_dir(path: str | os.PathLike[str]) -> None:
@@ -83,9 +84,14 @@ def atomic_write_json(path: str | os.PathLike[str], data: Any) -> None:
 async def atomic_write_json_async(path: str | os.PathLike[str], data: Any) -> None:
     """Asynchronously write JSON data using :func:`atomic_write_json`.
 
-    The write is executed in a thread and serialized with a lock to avoid
-    concurrent writes.
+    The write is executed in a thread and serialized with an event-loop-aware
+    lock to avoid concurrent writes across different loops.
     """
+    global _write_lock, _write_lock_loop
+    loop = asyncio.get_running_loop()
+    if _write_lock is None or _write_lock_loop is not loop:
+        _write_lock = asyncio.Lock()
+        _write_lock_loop = loop
     async with _write_lock:
         await asyncio.to_thread(atomic_write_json, path, data)
 
