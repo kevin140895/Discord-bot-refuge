@@ -21,6 +21,7 @@ from config import (
     DATA_DIR,
     ANNOUNCE_CHANNEL_ID,
 )
+from utils.timezones import PARIS_TZ
 from utils.interactions import safe_respond
 from utils.persistence import (
     atomic_write_json_async,
@@ -221,7 +222,7 @@ class XPCog(commands.Cog):
         if message.author.bot or message.guild is None:
             return
         # Statistiques quotidiennes
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = datetime.now(PARIS_TZ).date().isoformat()
         async with DAILY_LOCK:
             day = DAILY_STATS.setdefault(today, {})
             user = day.setdefault(str(message.author.id), {"messages": 0, "voice": 0})
@@ -260,7 +261,7 @@ class XPCog(commands.Cog):
             await schedule_checkpoint(save_voice_times_to_disk)
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(PARIS_TZ)
         uid = str(member.id)
 
         # Déconnexion ou changement de salon : calculer la durée et attribuer l'XP
