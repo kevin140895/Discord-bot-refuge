@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
-from typing import Any, Optional
+import typing
 
 import discord
 from discord.ext import commands
 
+from storage.economy import ECONOMY_DIR, SHOP_FILE, load_ui, save_ui
+
 CHANNEL_ID = 1409633293791400108
-DATA_DIR = Path(__file__).parent.parent / "data" / "economy"
-UI_FILE = DATA_DIR / "ui.json"
-SHOP_FILE = DATA_DIR / "shop.json"
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +94,12 @@ class EconomyUICog(commands.Cog):
 
     async def cog_load(self) -> None:  # pragma: no cover - requires discord context
         logger.info("Chargement de l'interface économie")
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        ui_data: dict[str, Any] = {}
-        if UI_FILE.exists():
-            try:
-                ui_data = json.loads(UI_FILE.read_text(encoding="utf-8"))
-            except Exception as e:  # pragma: no cover - best effort
-                logger.warning("Lecture ui.json échouée: %s", e)
+        ECONOMY_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            ui_data = load_ui()
+        except Exception as e:  # pragma: no cover - best effort
+            logger.warning("Lecture ui.json échouée: %s", e)
+            ui_data = {}
         channel = self.bot.get_channel(CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             logger.warning("Salon économie introuvable (%s)", CHANNEL_ID)
@@ -132,21 +129,19 @@ class EconomyUICog(commands.Cog):
             ui_data["bank_message_id"] = bank_id
 
         try:
-            UI_FILE.write_text(
-                json.dumps(ui_data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            await save_ui(ui_data)
         except Exception as e:  # pragma: no cover - best effort
             logger.warning("Écriture ui.json échouée: %s", e)
 
     async def _ensure_message(
         self,
         channel: discord.TextChannel,
-        message_id: Optional[int],
+        message_id: typing.Optional[int],
         content: str,
         view: discord.ui.View,
         label: str,
-    ) -> Optional[int]:
-        msg: Optional[discord.Message] = None
+    ) -> typing.Optional[int]:
+        msg: typing.Optional[discord.Message] = None
         if message_id:
             try:
                 msg = await channel.fetch_message(int(message_id))
