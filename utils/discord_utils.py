@@ -68,9 +68,16 @@ async def safe_message_edit(message: discord.Message, **kwargs) -> discord.Messa
 
     same_embed = True
     if "embed" in kwargs:
-        same_embed = len(current_embeds) == 1 and current_embeds[0].to_dict() == kwargs["embed"].to_dict()
+        embed = kwargs["embed"]
+        if embed is None:
+            same_embed = len(current_embeds) == 0
+        else:
+            same_embed = (
+                len(current_embeds) == 1
+                and current_embeds[0].to_dict() == embed.to_dict()
+            )
     elif "embeds" in kwargs:
-        new_embeds = kwargs["embeds"]
+        new_embeds = kwargs.get("embeds") or []
         same_embed = len(current_embeds) == len(new_embeds) and all(
             m.to_dict() == n.to_dict() for m, n in zip(current_embeds, new_embeds)
         )
