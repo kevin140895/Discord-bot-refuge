@@ -55,7 +55,11 @@ class RouletteRefugeCog(commands.Cog):
 
     def _is_open_hours(self, dt: Optional[datetime] = None) -> bool:
         dt = dt or self._now()
-        return dt.hour >= 8 or dt.hour < 2
+        open_hour = int(self.config.get("open_hour", 8))
+        close_hour = int(self.config.get("close_hour", 2))
+        if open_hour < close_hour:
+            return open_hour <= dt.hour < close_hour
+        return dt.hour >= open_hour or dt.hour < close_hour
 
     async def _get_channel(self) -> Optional[discord.TextChannel]:
         channel_id = self.config.get("channel_id")
@@ -156,9 +160,9 @@ class RouletteRefugeCog(commands.Cog):
             "",
             "━━━━━━━━━━━━━━━",
             (
-                "🟢 État : Ouvert — ferme à ⏰ 02:00"
+                f"🟢 État : Ouvert — ferme à ⏰ {int(self.config.get('close_hour', 2)):02d}:00"
                 if self._is_open_hours()
-                else "🔴 État : Fermé — ouvre à ⏰ 08:00"
+                else f"🔴 État : Fermé — ouvre à ⏰ {int(self.config.get('open_hour', 8)):02d}:00"
             ),
         ]
         return discord.Embed(title=title, description="\n".join(lines))
@@ -306,8 +310,10 @@ class RouletteRefugeCog(commands.Cog):
             await self._ensure_hub_message(channel)
 
     async def _announce_open(self, channel: discord.TextChannel) -> None:
+        open_hour = int(self.config.get("open_hour", 8))
+        close_hour = int(self.config.get("close_hour", 2))
         lines = [
-            "Horaires : 08:00→02:00",
+            f"Horaires : {open_hour:02d}:00→{close_hour:02d}:00",
             "Mise min : 5 XP",
             "Cooldown : 15s",
             "Cap : 20/jour",
@@ -427,7 +433,8 @@ class RouletteRefugeCog(commands.Cog):
             value=f"{total_bet} XP / {total_payout} XP",
             inline=False,
         )
-        embed.set_footer(text="Réouverture demain à 08:00 ⏰")
+        open_hour = int(self.config.get("open_hour", 8))
+        embed.set_footer(text=f"Réouverture demain à {open_hour:02d}:00 ⏰")
         await channel.send(embed=embed)
 
     @tasks.loop(minutes=1.0)
@@ -459,10 +466,11 @@ class RouletteRefugeCog(commands.Cog):
             await self._update_hub_state(True)
         elif now.hour == last_call_hour and now.minute == last_call_minute:
             announce_ch = await self._get_announce_channel()
+            msg = f"⏳ Dernier appel — fermeture dans 15 minutes ({int(close_hour):02d}:00)."
             if announce_ch:
-                await announce_ch.send("⏳ Dernier appel — fermeture dans 15 minutes (02:00).")
+                await announce_ch.send(msg)
                 return
-            await channel.send("⏳ Dernier appel — fermeture dans 15 minutes (02:00).")
+            await channel.send(msg)
         elif now.hour == close_hour and now.minute == 0:
             await self._announce_close(channel)
             await self._update_hub_state(False)
@@ -652,8 +660,9 @@ class RouletteRefugeCog(commands.Cog):
                     color_str = comp.get("value", "")
         now = self._now()
         if not self._is_open_hours(now):
+            open_hour = int(self.config.get("open_hour", 8))
             await interaction.response.send_message(
-                "⛔ Roulette Refuge est fermée. Réouverture à 08:00.",
+                f"⛔ Roulette Refuge est fermée. Réouverture à {open_hour:02d}:00.",
                 ephemeral=True,
             )
             return
@@ -838,18 +847,24 @@ class RouletteRefugeCog(commands.Cog):
         report: dict[str, str] = {}
 
         tz = TZ_PARIS
+        open_hour = int(self.config.get("open_hour", 8))
+        close_hour = int(self.config.get("close_hour", 2))
         open_ok = (
-            not self._is_open_hours(datetime(2023, 1, 1, 2, 0, tzinfo=tz))
-            and not self._is_open_hours(datetime(2023, 1, 1, 7, 59, tzinfo=tz))
-            and self._is_open_hours(datetime(2023, 1, 1, 8, 0, tzinfo=tz))
-            and self._is_open_hours(datetime(2023, 1, 1, 1, 59, tzinfo=tz))
+            not self._is_open_hours(datetime(2023, 1, 1, close_hour, 0, tzinfo=tz))
+            and not self._is_open_hours(
+                datetime(2023, 1, 1, (open_hour - 1) % 24, 59, tzinfo=tz)
+            )
+            and self._is_open_hours(datetime(2023, 1, 1, open_hour, 0, tzinfo=tz))
+            and self._is_open_hours(
+                datetime(2023, 1, 1, (close_hour - 1) % 24, 59, tzinfo=tz)
+            )
         )
         report["hours"] = "PASS" if open_ok else "FAIL"
 
         desc = self._build_hub_embed().description or ""
         hub_ok = (
-            "🟢 État : Ouvert — ferme à ⏰ 02:00" in desc
-            or "🔴 État : Fermé — ouvre à ⏰ 08:00" in desc
+            f"🟢 État : Ouvert — ferme à ⏰ {close_hour:02d}:00" in desc
+            or f"🔴 État : Fermé — ouvre à ⏰ {open_hour:02d}:00" in desc
         )
         report["hub_embed"] = "PASS" if hub_ok else "FAIL"
 

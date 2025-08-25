@@ -54,6 +54,8 @@ async def test_post_daily_summary_uses_daily_stats(monkeypatch):
 
     cog = object.__new__(pari_xp.RouletteRefugeCog)
 
+    cog.config = {"open_hour": 9}
+
     async def _get_announce_channel():
         return None
 
@@ -92,3 +94,4 @@ async def test_post_daily_summary_uses_daily_stats(monkeypatch):
     assert "A (+5 XP)" in winners_field.value
     losers_field = next(f for f in sent["embed"].fields if f.name == "💸 Top 3 perdants")
     assert "B (-5 XP)" in losers_field.value
+    assert sent["embed"].footer.text == "Réouverture demain à 09:00 ⏰"
