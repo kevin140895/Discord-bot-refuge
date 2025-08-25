@@ -323,7 +323,7 @@ class RouletteRefugeCog(commands.Cog):
             return
         await channel.send(embed=embed)
 
-    async def _announce_close(self, channel: discord.TextChannel) -> None:
+    def _daily_stats(self) -> dict[str, Any]:
         transactions = storage.load_json(storage.Path(TX_PATH), [])
         now = datetime.now(TZ_PARIS)
         today: date = now.date()
@@ -336,10 +336,22 @@ class RouletteRefugeCog(commands.Cog):
                 continue
             if dt.date() == today:
                 day_txs.append(tx)
-
         total_bet = sum(int(tx.get("bet", 0)) for tx in day_txs)
         total_payout = sum(int(tx.get("payout", 0)) for tx in day_txs)
         net = total_payout - total_bet
+        return {
+            "day_txs": day_txs,
+            "total_bet": total_bet,
+            "total_payout": total_payout,
+            "net": net,
+        }
+
+    async def _announce_close(self, channel: discord.TextChannel) -> None:
+        stats = self._daily_stats()
+        day_txs = stats["day_txs"]
+        total_bet = stats["total_bet"]
+        total_payout = stats["total_payout"]
+        net = stats["net"]
         lines = [
             f"Paris : {len(day_txs)}",
             f"Total misé : {total_bet} XP",
@@ -361,43 +373,30 @@ class RouletteRefugeCog(commands.Cog):
         announce_channel = await self._get_announce_channel()
         if announce_channel:
             channel = announce_channel
-        transactions = storage.load_json(storage.Path(TX_PATH), [])
         now = datetime.now(TZ_PARIS)
-        today: date = now.date()
-        day_txs = []
-        for tx in transactions:
-            ts = tx.get("ts")
-            try:
-                dt = datetime.fromisoformat(ts).astimezone(TZ_PARIS)
-            except Exception:
-                continue
-            if dt.date() == today:
-                day_txs.append(tx)
-        stats: dict[int, dict[str, int | str]] = {}
-        total_bet = 0
-        total_payout = 0
+        daily = self._daily_stats()
+        day_txs = daily["day_txs"]
+        total_bet = daily["total_bet"]
+        total_payout = daily["total_payout"]
+        user_stats: dict[int, dict[str, int | str]] = {}
         biggest = None
         for tx in day_txs:
             uid = tx.get("user_id")
             username = tx.get("username", str(uid))
             delta = int(tx.get("delta", 0))
-            bet = int(tx.get("bet", 0))
-            payout = int(tx.get("payout", 0))
-            total_bet += bet
-            total_payout += payout
             if delta > 0:
                 if not biggest or delta > biggest["delta"]:
                     biggest = tx
-            user_stat = stats.setdefault(uid, {"username": username, "net": 0})
+            user_stat = user_stats.setdefault(uid, {"username": username, "net": 0})
             user_stat["username"] = username
             user_stat["net"] = int(user_stat["net"]) + delta
         winners = sorted(
-            [v for v in stats.values() if int(v["net"]) > 0],
+            [v for v in user_stats.values() if int(v["net"]) > 0],
             key=lambda x: int(x["net"]),
             reverse=True,
         )[:3]
         losers = sorted(
-            [v for v in stats.values() if int(v["net"]) < 0],
+            [v for v in user_stats.values() if int(v["net"]) < 0],
             key=lambda x: int(x["net"]),
         )[:3]
         win_lines = [f"{idx + 1}. {w['username']} ({int(w['net']):+} XP)" for idx, w in enumerate(winners)]
