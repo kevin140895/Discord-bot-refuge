@@ -443,7 +443,6 @@ class RouletteRefugeCog(commands.Cog):
         """Gère l'ouverture et la fermeture automatiques selon la configuration."""
         tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
         now = datetime.now(tz)
-        open_hour = int(self.config.get("open_hour", 8))
         last_call_hour = int(self.config.get("last_call_hour", 1))
         last_call_minute = int(self.config.get("last_call_minute", 45))
         close_hour = int(self.config.get("close_hour", 2))
@@ -463,20 +462,26 @@ class RouletteRefugeCog(commands.Cog):
             except Exception:
                 pass
 
-        if now.hour == open_hour and now.minute == 0:
+        is_open_now = self._is_open_hours(now)
+
+        if is_open_now and not self.state.get("is_open", False):
             await self._announce_open(channel)
             await self._update_hub_state(True)
-        elif now.hour == last_call_hour and now.minute == last_call_minute:
+        elif not is_open_now and self.state.get("is_open", False):
+            await self._announce_close(channel)
+            await self._update_hub_state(False)
+            await self._post_daily_summary(channel)
+        elif (
+            self.state.get("is_open", False)
+            and now.hour == last_call_hour
+            and now.minute == last_call_minute
+        ):
             announce_ch = await self._get_announce_channel()
             msg = f"⏳ Dernier appel — fermeture dans 15 minutes ({close_hour:02d}:00)."
             if announce_ch:
                 await announce_ch.send(msg)
                 return
             await channel.send(msg)
-        elif now.hour == close_hour and now.minute == 0:
-            await self._announce_close(channel)
-            await self._update_hub_state(False)
-            await self._post_daily_summary(channel)
 
     @scheduler_task.before_loop
     async def _wait_ready_scheduler(self) -> None:
