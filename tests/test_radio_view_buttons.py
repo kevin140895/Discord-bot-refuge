@@ -10,6 +10,22 @@ from view import RadioView
 
 
 @pytest.mark.asyncio
+async def test_radio_view_has_expected_buttons():
+    view = RadioView()
+    expected = {
+        "radio_rapfr": "Rap FR",
+        "radio_rap": "Rap US",
+        "radio_rock": "Rock",
+        "radio_hiphop": "Radio Hip-Hop",
+    }
+    for custom_id, label in expected.items():
+        button = next(
+            child for child in view.children if getattr(child, "custom_id", None) == custom_id
+        )
+        assert button.label == label
+
+
+@pytest.mark.asyncio
 async def test_radio_view_buttons_call_commands():
     view = RadioView()
     mapping = {
