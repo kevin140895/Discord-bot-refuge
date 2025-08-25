@@ -125,7 +125,10 @@ class DailyRankingAndRoles(commands.Cog):
             if now >= target:
                 target += timedelta(days=1)
             await asyncio.sleep((target - now).total_seconds())
-            await self._run_daily_task()
+            try:
+                await self._run_daily_task()
+            except Exception:
+                logger.exception("[daily_ranking] Échec de _run_daily_task")
 
     async def _run_daily_task(self) -> None:
         now = datetime.now(PARIS_TZ)
