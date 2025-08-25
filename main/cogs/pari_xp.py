@@ -85,8 +85,8 @@ class RouletteRefugeCog(commands.Cog):
         async for msg in channel.history(limit=50):
             if msg.author == self.bot.user and msg.embeds:
                 embed = msg.embeds[0]
-                title = self.config.get("game_display_name", "🤑 Roulette Refuge")
-                if embed.title == title:
+                expected_title = f"🎰 {self.config.get('game_display_name', '🤑 Roulette Refuge')} 🎰"
+                if embed.title == expected_title:
                     self.state["hub_message_id"] = msg.id
                     await storage.save_json(storage.Path(STATE_PATH), self.state)
                     return msg
