@@ -293,12 +293,15 @@ class TempVCCog(commands.Cog):
 
     @tasks.loop(seconds=TEMP_VC_CHECK_INTERVAL_SECONDS)
     async def cleanup(self) -> None:
-        for channel_id in list(TEMP_VC_IDS):
-            channel = self.bot.get_channel(channel_id)
-            if isinstance(channel, discord.VoiceChannel):
-                await self._update_channel_name(channel)
-        await delete_untracked_temp_vcs(self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
-        save_temp_vc_ids(TEMP_VC_IDS)
+        try:
+            for channel_id in list(TEMP_VC_IDS):
+                channel = self.bot.get_channel(channel_id)
+                if isinstance(channel, discord.VoiceChannel):
+                    await self._update_channel_name(channel)
+            await delete_untracked_temp_vcs(self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
+            save_temp_vc_ids(TEMP_VC_IDS)
+        except Exception:
+            logger.exception("Erreur dans cleanup")
 
     @cleanup.before_loop
     async def before_cleanup(self) -> None:

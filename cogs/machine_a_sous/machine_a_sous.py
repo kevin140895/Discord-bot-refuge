@@ -671,4 +671,6 @@ class MachineASousCog(commands.Cog):
         self.maintenance_loop.cancel()
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(MachineASousCog(bot))
+    cog = MachineASousCog(bot)
+    await bot.add_cog(cog)
+    bot.tree.add_command(cog.group)

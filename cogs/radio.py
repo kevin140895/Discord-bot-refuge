@@ -259,4 +259,5 @@ class RadioCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
+    bot.add_view(RadioView())
     await bot.add_cog(RadioCog(bot))
