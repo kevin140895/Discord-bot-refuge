@@ -1,21 +1,32 @@
 """Mise à jour des salons de statistiques du serveur.
 
-La cog renomme périodiquement les canaux affichant le nombre de
-membres, les utilisateurs en ligne et l'activité vocale. Elle ne recourt
-à aucune persistance, s'appuyant seulement sur ``rename_manager`` pour
-effectuer les changements.
+La cog renomme périodiquement les canaux affichant le nombre de membres,
+les utilisateurs en ligne et l'activité vocale. Les valeurs sont
+maintenant persistées dans ``stats_cache.json`` pour survivre aux
+redémarrages.
 """
 
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, time
+from pathlib import Path
+from typing import Dict
+
 import discord
-from discord.ext import commands, tasks
 from discord import app_commands
-from datetime import time
+from discord.ext import commands, tasks
 
 import config
-from config import XP_VIEWER_ROLE_ID
-from utils.rename_manager import rename_manager
+from config import DATA_DIR, XP_VIEWER_ROLE_ID
 from utils.interactions import safe_respond
 from utils.metrics import measure
+from utils.persistence import atomic_write_json_async, ensure_dir, read_json_safe
+from utils.rename_manager import rename_manager
+
+
+STATS_CACHE_FILE = Path(DATA_DIR) / "stats_cache.json"
+ensure_dir(STATS_CACHE_FILE.parent)
 
 
 class StatsCog(commands.Cog):
@@ -23,9 +34,43 @@ class StatsCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        # Cache {guild_id: {"members": int, "online": int, "voice": int}}
+        self.cache: Dict[str, Dict[str, int]] = read_json_safe(STATS_CACHE_FILE) or {}
+        # Lancement différé pour appliquer le cache avant les boucles
+        asyncio.create_task(self._startup())
+
+    async def _startup(self) -> None:
+        try:
+            await self.bot.wait_until_ready()
+        except Exception:
+            pass
+        await self._apply_cache()
         self.refresh_members.start()
         self.refresh_online.start()
         self.refresh_voice.start()
+
+    async def _apply_cache(self) -> None:
+        for guild in self.bot.guilds:
+            gid = str(getattr(guild, "id", 0))
+            data = self.cache.get(gid)
+            if not data:
+                continue
+            category = guild.get_channel(config.STATS_CATEGORY_ID)
+            if category is None:
+                continue
+            channels = getattr(category, "channels", [])
+            if len(channels) > 0 and "members" in data:
+                await rename_manager.request(
+                    channels[0], f"👥 Membres : {data['members']}"
+                )
+            if len(channels) > 1 and "online" in data:
+                await rename_manager.request(
+                    channels[1], f"🟢 En ligne : {data['online']}"
+                )
+            if len(channels) > 2 and "voice" in data:
+                await rename_manager.request(
+                    channels[2], f"🔊 Voc : {data['voice']}"
+                )
 
     def cog_unload(self) -> None:
         self.refresh_members.cancel()
@@ -44,6 +89,9 @@ class StatsCog(commands.Cog):
                 await rename_manager.request(
                     channels[0], f"👥 Membres : {members}"
                 )
+            gid = str(getattr(guild, "id", 0))
+            self.cache.setdefault(gid, {})["members"] = members
+            await atomic_write_json_async(STATS_CACHE_FILE, self.cache)
 
     async def update_online(self, guild: discord.Guild) -> None:
         """Met à jour le nombre d'utilisateurs en ligne pour ``guild``."""
@@ -61,6 +109,9 @@ class StatsCog(commands.Cog):
                 await rename_manager.request(
                     channels[1], f"🟢 En ligne : {online}"
                 )
+            gid = str(getattr(guild, "id", 0))
+            self.cache.setdefault(gid, {})["online"] = online
+            await atomic_write_json_async(STATS_CACHE_FILE, self.cache)
 
     async def update_voice(self, guild: discord.Guild) -> None:
         """Met à jour le nombre d'utilisateurs en vocal pour ``guild``."""
@@ -77,11 +128,22 @@ class StatsCog(commands.Cog):
                 await rename_manager.request(
                     channels[2], f"🔊 Voc : {voice}"
                 )
+            gid = str(getattr(guild, "id", 0))
+            self.cache.setdefault(gid, {})["voice"] = voice
+            await atomic_write_json_async(STATS_CACHE_FILE, self.cache)
 
     @tasks.loop(time=time(hour=0))
     async def refresh_members(self) -> None:
         """Met à jour le nombre de membres une fois par jour."""
         await self.bot.wait_until_ready()
+        # Reset du cache au début de chaque mois
+        if datetime.utcnow().day == 1:
+            for p in [STATS_CACHE_FILE, STATS_CACHE_FILE.with_suffix(STATS_CACHE_FILE.suffix + ".bak")]:
+                try:
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
+            self.cache.clear()
         for guild in self.bot.guilds:
             await self.update_members(guild)
 
