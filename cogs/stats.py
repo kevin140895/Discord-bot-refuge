@@ -9,6 +9,7 @@ redémarrages.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, time
 from pathlib import Path
 from typing import Dict
@@ -24,6 +25,7 @@ from utils.metrics import measure
 from utils.persistence import atomic_write_json_async, ensure_dir, read_json_safe
 from utils.rename_manager import rename_manager
 
+logger = logging.getLogger(__name__)
 
 STATS_CACHE_FILE = Path(DATA_DIR) / "stats_cache.json"
 ensure_dir(STATS_CACHE_FILE.parent)
@@ -37,21 +39,23 @@ class StatsCog(commands.Cog):
         # Cache {guild_id: {"members": int, "online": int, "voice": int}}
         self.cache: Dict[str, Dict[str, int]] = read_json_safe(STATS_CACHE_FILE) or {}
         # Lancement différé pour appliquer le cache avant les boucles
-        asyncio.create_task(self._startup())
+        self._startup_task = asyncio.create_task(self._startup())
 
     async def _startup(self) -> None:
         try:
             await self.bot.wait_until_ready()
-        except Exception:
-            pass
-        await self._apply_cache()
-        for guild in self.bot.guilds:
-            await self.update_members(guild)
-            await self.update_online(guild)
-            await self.update_voice(guild)
-        self.refresh_members.start()
-        self.refresh_online.start()
-        self.refresh_voice.start()
+            await self._apply_cache()
+            for guild in self.bot.guilds:
+                await self.update_members(guild)
+                await self.update_online(guild)
+                await self.update_voice(guild)
+            self.refresh_members.start()
+            self.refresh_online.start()
+            self.refresh_voice.start()
+        except asyncio.CancelledError:  # pragma: no cover - task cancellation
+            raise
+        except Exception:  # pragma: no cover - unexpected errors
+            logger.exception("Erreur inattendue lors du démarrage de StatsCog")
 
     async def _apply_cache(self) -> None:
         for guild in self.bot.guilds:
@@ -82,6 +86,7 @@ class StatsCog(commands.Cog):
         self.refresh_members.cancel()
         self.refresh_online.cancel()
         self.refresh_voice.cancel()
+        self._startup_task.cancel()
 
     async def update_members(self, guild: discord.Guild) -> None:
         """Met à jour le nombre de membres pour ``guild``."""
