@@ -89,7 +89,7 @@ class RadioCog(commands.Cog):
                     for comp in row.children:
                         if (
                             isinstance(comp, discord.ui.Button)
-                            and comp.custom_id == "radio_24"
+                            and comp.custom_id == "radio_hiphop"
                         ):
                             return
             except Exception as e:
@@ -104,7 +104,7 @@ class RadioCog(commands.Cog):
                     for comp in row.children:
                         if (
                             isinstance(comp, discord.ui.Button)
-                            and comp.custom_id == "radio_24"
+                            and comp.custom_id == "radio_hiphop"
                         ):
                             self.store.set_radio_message(
                                 str(getattr(channel, "id", 0)), str(msg.id)
@@ -212,9 +212,9 @@ class RadioCog(commands.Cog):
         )
 
     @app_commands.command(
-        name="radio_24", description="Revenir sur l'ancienne radio 24/7"
+        name="radio_hiphop", description="Revenir sur la radio Hip-Hop"
     )
-    async def radio_24(self, interaction: discord.Interaction) -> None:
+    async def radio_hiphop(self, interaction: discord.Interaction) -> None:
         channel = self.bot.get_channel(self.vc_id)
         self.stream_url = RADIO_STREAM_URL
         self._previous_stream = None
@@ -224,7 +224,7 @@ class RadioCog(commands.Cog):
         if isinstance(channel, discord.VoiceChannel):
             await self._rename_for_stream(channel, RADIO_STREAM_URL)
         await interaction.response.send_message(
-            "Radio changée pour la station 24/7"
+            "Radio changée pour la station Hip-Hop"
         )
 
     @commands.Cog.listener()

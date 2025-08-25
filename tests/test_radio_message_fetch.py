@@ -14,7 +14,7 @@ async def test_ensure_radio_message_uses_stored_id():
     channel = SimpleNamespace(id=123)
     cog.store.set_radio_message(str(channel.id), "456")
 
-    btn = discord.ui.Button(custom_id="radio_24")
+    btn = discord.ui.Button(custom_id="radio_hiphop")
     row = SimpleNamespace(children=[btn])
     msg = SimpleNamespace(components=[row])
 

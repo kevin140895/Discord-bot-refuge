@@ -200,11 +200,21 @@ class RadioView(discord.ui.View):
         if command:
             await command.callback(cog, interaction)
 
-    @discord.ui.button(label="24/7", style=discord.ButtonStyle.primary, custom_id="radio_24")
-    async def btn_radio_24(
+    @discord.ui.button(
+        label="Rap FR", style=discord.ButtonStyle.primary, custom_id="radio_rapfr"
+    )
+    async def btn_radio_rapfr(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        await self._dispatch(interaction, "radio_24")
+        await self._dispatch(interaction, "radio_rapfr")
+
+    @discord.ui.button(
+        label="Rap US", style=discord.ButtonStyle.primary, custom_id="radio_rap"
+    )
+    async def btn_radio_rap(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._dispatch(interaction, "radio_rap")
 
     @discord.ui.button(
         label="Rock", style=discord.ButtonStyle.secondary, custom_id="radio_rock"
@@ -214,19 +224,13 @@ class RadioView(discord.ui.View):
     ) -> None:
         await self._dispatch(interaction, "radio_rock")
 
-    @discord.ui.button(label="Rap", style=discord.ButtonStyle.primary, custom_id="radio_rap")
-    async def btn_radio_rap(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._dispatch(interaction, "radio_rap")
-
     @discord.ui.button(
-        label="Rap FR", style=discord.ButtonStyle.primary, custom_id="radio_rapfr"
+        label="Radio Hip-Hop", style=discord.ButtonStyle.primary, custom_id="radio_hiphop"
     )
-    async def btn_radio_rapfr(
+    async def btn_radio_hiphop(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        await self._dispatch(interaction, "radio_rapfr")
+        await self._dispatch(interaction, "radio_hiphop")
 
 
 class RSVPView(discord.ui.View):
