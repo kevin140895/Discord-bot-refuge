@@ -26,8 +26,11 @@ class RadioStore:
         except Exception as e:
             logging.error("[RadioStore] Écriture échouée pour %s: %s", self.data_file, e)
 
-    def set_radio_message(self, channel_id: str, message_id: str) -> None:
-        self.data["message"] = {"channel_id": channel_id, "message_id": message_id}
+    def set_radio_message(self, channel_id: int | str, message_id: int | str) -> None:
+        self.data["message"] = {
+            "channel_id": str(channel_id),
+            "message_id": str(message_id),
+        }
         self._save()
 
     def get_radio_message(self) -> Optional[dict]:
