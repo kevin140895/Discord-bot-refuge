@@ -115,7 +115,11 @@ class RadioCog(commands.Cog):
             return
 
         try:
-            msg = await channel.send("Changement de radio", view=RadioView())
+            msg = await channel.send(
+                "📻 Sélectionne ta radio !\n"
+                "Clique sur un bouton ci-dessous pour changer de station.",
+                view=RadioView(),
+            )
             self.store.set_radio_message(str(getattr(channel, "id", 0)), str(msg.id))
         except Exception as e:
             logger.warning("Impossible d'envoyer le message radio: %s", e)
