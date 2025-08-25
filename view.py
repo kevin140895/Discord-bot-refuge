@@ -1,5 +1,6 @@
 import logging
 import discord
+from discord import app_commands
 
 from config import ROLE_PC, ROLE_CONSOLE, ROLE_MOBILE, ROLE_NOTIFICATION
 
@@ -198,7 +199,10 @@ class RadioView(discord.ui.View):
             return
         command = getattr(cog, cmd, None)
         if command:
-            await command.callback(cog, interaction)
+            if isinstance(command, app_commands.Command):
+                await command.callback(cog, interaction)
+            else:
+                await command(interaction)
 
     @discord.ui.button(
         label="Rap FR", style=discord.ButtonStyle.primary, custom_id="radio_rapfr"
