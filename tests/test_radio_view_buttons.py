@@ -13,10 +13,10 @@ from view import RadioView
 async def test_radio_view_buttons_call_commands():
     view = RadioView()
     mapping = {
-        "radio_24": "radio_24",
-        "radio_rock": "radio_rock",
-        "radio_rap": "radio_rap",
         "radio_rapfr": "radio_rapfr",
+        "radio_rap": "radio_rap",
+        "radio_rock": "radio_rock",
+        "radio_hiphop": "radio_hiphop",
     }
     for custom_id, cmd_name in mapping.items():
         button = next(
