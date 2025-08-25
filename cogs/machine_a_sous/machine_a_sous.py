@@ -297,11 +297,17 @@ class MachineASousView(discord.ui.View):
             )
 
         uid = str(interaction.user.id)
-        if cog.store.has_claimed_today(uid, tz=PARIS_TZ):
-            if cog.store.use_ticket(uid):
-                await interaction.response.defer(ephemeral=True)
-                await self._single_spin(interaction, cog, free=True)
-                return
+        has_claimed = cog.store.has_claimed_today(uid, tz=PARIS_TZ)
+
+        # Utilise d'abord un ticket disponible, même si l'utilisateur n'a pas
+        # encore effectué son tirage quotidien. Cela permet d'utiliser un
+        # ticket « en réserve » sans consommer l'essai journalier.
+        if cog.store.use_ticket(uid):
+            await interaction.response.defer(ephemeral=True)
+            await self._single_spin(interaction, cog, free=True)
+            return
+
+        if has_claimed:
             now = datetime.now(cog.tz)
             tomorrow = (
                 now + timedelta(days=1)
@@ -316,7 +322,7 @@ class MachineASousView(discord.ui.View):
             return await interaction.response.send_message(
                 f"🗓️ Tu as déjà joué **aujourd’hui**.\n"
                 f"⏳ Tu pourras rejouer dans **{h}h{m:02d}** (après minuit).",
-                ephemeral=True
+                ephemeral=True,
             )
 
         await interaction.response.defer(ephemeral=True)
