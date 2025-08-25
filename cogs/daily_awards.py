@@ -218,7 +218,10 @@ class DailyAwards(commands.Cog):
                 target += timedelta(days=1)
             await asyncio.sleep((target - now).total_seconds())
             data = read_json_safe(DAILY_RANK_FILE)
-            await self._maybe_award(data)
+            try:
+                await self._maybe_award(data)
+            except Exception:
+                logger.exception("[daily_awards] Échec de _maybe_award")
 
     async def _startup_check(self) -> None:
         await self.bot.wait_until_ready()
