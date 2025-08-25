@@ -131,3 +131,37 @@ async def test_shop_buy_vip(tmp_path, monkeypatch):
     send_mock.assert_awaited()
     assert send_mock.call_args.kwargs["ephemeral"] is True
 
+
+
+@pytest.mark.asyncio
+async def test_shop_buy_ticket(tmp_path, monkeypatch):
+    shop_file = _setup_paths(tmp_path, monkeypatch)
+    shop_file.write_text(
+        json.dumps({"ticket_royal": {"name": "Ticket", "price": 100}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(economy_ui.xp_adapter, "get_balance", lambda _uid: 500)
+    add_xp_mock = AsyncMock()
+    monkeypatch.setattr(economy_ui.xp_adapter, "add_xp", add_xp_mock)
+
+    cog = EconomyUICog(object())
+
+    send_mock = AsyncMock()
+    interaction = SimpleNamespace(
+        data={"custom_id": "shop_buy:ticket_royal"},
+        user=SimpleNamespace(id=1, add_roles=AsyncMock()),
+        guild=None,
+        guild_id=123,
+        response=SimpleNamespace(send_message=send_mock),
+    )
+
+    await cog.on_interaction(interaction)
+
+    add_xp_mock.assert_awaited_once_with(1, amount=-100, guild_id=123, source="shop")
+    tickets = economy.load_tickets()
+    assert tickets["1"] == 1
+    txs = await economy.transactions.all()
+    assert txs[0]["item"] == "ticket_royal"
+    send_mock.assert_awaited()
+    assert send_mock.call_args.kwargs["ephemeral"] is True

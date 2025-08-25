@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from utils.storage import load_json
@@ -12,6 +13,8 @@ async def test_pari_xp_uses_free_ticket(tmp_path, monkeypatch):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     pari_xp = importlib.import_module("main.cogs.pari_xp")
     economy_tickets = importlib.import_module("utils.economy_tickets")
+    consume_mock = MagicMock(side_effect=pari_xp.consume_free_ticket)
+    monkeypatch.setattr(pari_xp, "consume_free_ticket", consume_mock)
 
     ticket_path = tmp_path / "tickets.json"
     tx_path = tmp_path / "transactions.json"
@@ -70,3 +73,4 @@ async def test_pari_xp_uses_free_ticket(tmp_path, monkeypatch):
     await asyncio.sleep(0)
     assert balance[123] == 140
     assert load_json(ticket_path, {}) == {}
+    consume_mock.assert_called_once()

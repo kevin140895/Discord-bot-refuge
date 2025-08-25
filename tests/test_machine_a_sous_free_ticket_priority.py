@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,6 +22,8 @@ async def test_free_ticket_prioritized_over_store(tmp_path, monkeypatch):
     atomic_write_json(ticket_path, {"123": 1})
     et.TICKETS_FILE = ticket_path
     et.transactions = TransactionStore(tx_path)
+    consume_mock = MagicMock(side_effect=et.consume_free_ticket)
+    monkeypatch.setattr("cogs.machine_a_sous.machine_a_sous.consume_free_ticket", consume_mock)
 
     view = MachineASousView()
     flag = SimpleNamespace(free=None)
@@ -64,3 +67,4 @@ async def test_free_ticket_prioritized_over_store(tmp_path, monkeypatch):
     assert flag.free is True
     assert cog.store.has_ticket(uid)
     assert load_json(ticket_path, {}) == {}
+    consume_mock.assert_called_once()
