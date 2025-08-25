@@ -81,47 +81,59 @@ class RadioCog(commands.Cog):
         self, channel: discord.abc.Messageable
     ) -> None:
         stored = self.store.get_radio_message()
+        channel_id = getattr(channel, "id", 0)
+
+        def is_radio_message(msg: discord.Message) -> bool:
+            return any(
+                isinstance(comp, discord.ui.Button) and comp.custom_id == "radio_hiphop"
+                for row in getattr(msg, "components", [])
+                for comp in getattr(row, "children", [])
+            )
+
+        # 1) Try using stored message id to avoid duplicates
+        if stored and int(stored.get("channel_id", 0)) == channel_id:
+            fetch = getattr(channel, "fetch_message", None)
+            if fetch:
+                try:
+                    msg = await fetch(int(stored.get("message_id", 0)))
+                    if is_radio_message(msg):
+                        return  # Stored message is still valid
+                except Exception as e:  # pragma: no cover - network issues
+                    logger.debug("Failed to fetch stored radio message: %s", e)
+
+        # 2) Search the history for an existing radio message
         found = None
         try:
             async for msg in channel.history(limit=None):
                 if msg.author.id != self.bot.user.id:
                     continue
-                has_button = any(
-                    isinstance(comp, discord.ui.Button)
-                    and comp.custom_id == "radio_hiphop"
-                    for row in msg.components
-                    for comp in row.children
-                )
-                if has_button:
-                    if found is None:
-                        found = msg
-                    else:
-                        try:
-                            await msg.delete()
-                        except Exception as e:
-                            logger.debug(
-                                "Failed to delete duplicate radio message: %s", e
-                            )
+                if not is_radio_message(msg):
+                    continue
+                if found is None:
+                    found = msg
+                else:
+                    try:
+                        await msg.delete()
+                    except Exception as e:  # pragma: no cover - best effort
+                        logger.debug(
+                            "Failed to delete duplicate radio message: %s", e
+                        )
         except Exception as e:
             logger.warning("Impossible de vérifier le message radio: %s", e)
             return
 
         if found:
-            if (
-                not stored
-                or int(stored.get("channel_id", 0)) != getattr(channel, "id", 0)
-                or int(stored.get("message_id", 0)) != found.id
-            ):
-                self.store.set_radio_message(getattr(channel, "id", 0), found.id)
+            self.store.set_radio_message(channel_id, found.id)
             return
 
+        # 3) No message found -> create one
         try:
             msg = await channel.send(
                 "📻 Sélectionne ta radio !\n"
                 "Clique sur un bouton ci-dessous pour changer de station.",
                 view=RadioView(),
             )
-            self.store.set_radio_message(getattr(channel, "id", 0), msg.id)
+            self.store.set_radio_message(channel_id, msg.id)
         except Exception as e:
             logger.warning("Impossible d'envoyer le message radio: %s", e)
 

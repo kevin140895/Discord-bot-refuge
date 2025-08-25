@@ -21,23 +21,23 @@ async def test_ensure_radio_message_uses_stored_id():
 
     btn = discord.ui.Button(custom_id="radio_hiphop")
     row = SimpleNamespace(children=[btn])
-    msg = SimpleNamespace(
-        id=456,
-        author=SimpleNamespace(id=1),
-        components=[row],
-        delete=AsyncMock(),
+    msg = SimpleNamespace(id=456, author=SimpleNamespace(id=1), components=[row])
+
+    fetch_message = AsyncMock(return_value=msg)
+    history_mock = MagicMock()
+    channel = SimpleNamespace(
+        id=123,
+        fetch_message=fetch_message,
+        history=history_mock,
+        send=AsyncMock(),
     )
-
-    async def history(limit=None):
-        yield msg
-
-    channel = SimpleNamespace(id=123, history=history, send=AsyncMock())
 
     await cog._ensure_radio_message(channel)
 
     channel.send.assert_not_called()
     set_radio_message.assert_not_called()
-    msg.delete.assert_not_called()
+    fetch_message.assert_awaited_once()
+    history_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
