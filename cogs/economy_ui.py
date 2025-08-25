@@ -6,7 +6,7 @@ import re
 import typing
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from datetime import datetime, timedelta, timezone
 
@@ -234,8 +234,67 @@ class EconomyUICog(commands.Cog):
         self.shop_view = ShopView()
         self.bank_view = BankView()
 
+    @tasks.loop(minutes=5)
+    async def boosts_cleanup(self) -> None:
+        await self._cleanup_boosts_once()
+
+    @boosts_cleanup.before_loop
+    async def before_boosts_cleanup(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _cleanup_boosts_once(self) -> None:
+        try:
+            boosts = load_boosts()
+        except Exception as e:
+            logger.warning("Lecture boosts.json échouée: %s", e)
+            return
+
+        now = datetime.now(timezone.utc)
+        changed = False
+        guild = self.bot.get_guild(getattr(config, "GUILD_ID", 0))
+
+        for uid, entries in list(boosts.items()):
+            new_entries = []
+            for entry in entries:
+                until_str = entry.get("until")
+                try:
+                    until = datetime.fromisoformat(until_str)
+                except Exception:
+                    changed = True
+                    continue
+                if until <= now:
+                    changed = True
+                    role_id = int(entry.get("role_id", 0))
+                    if entry.get("type") == "vip" and not role_id:
+                        role_id = getattr(config, "VIP_24H_ROLE_ID", 0)
+                    if role_id and guild:
+                        member = guild.get_member(int(uid))
+                        role = guild.get_role(role_id)
+                        if member and role:
+                            try:
+                                await member.remove_roles(
+                                    role, reason="Boost expiré"
+                                )
+                            except Exception:  # pragma: no cover - best effort
+                                logger.warning(
+                                    "Impossible de retirer le rôle %s de %s",
+                                    role_id,
+                                    uid,
+                                    exc_info=True,
+                                )
+                else:
+                    new_entries.append(entry)
+            if new_entries:
+                boosts[uid] = new_entries
+            else:
+                boosts.pop(uid, None)
+
+        if changed:
+            await save_boosts(boosts)
+
     async def cog_load(self) -> None:  # pragma: no cover - requires discord context
         logger.info("Chargement de l'interface économie")
+        self.boosts_cleanup.start()
         ECONOMY_DIR.mkdir(parents=True, exist_ok=True)
         try:
             ui_data = load_ui()
@@ -274,6 +333,9 @@ class EconomyUICog(commands.Cog):
             await save_ui(ui_data)
         except Exception as e:  # pragma: no cover - best effort
             logger.warning("Écriture ui.json échouée: %s", e)
+
+    def cog_unload(self) -> None:
+        self.boosts_cleanup.cancel()
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction) -> None:
