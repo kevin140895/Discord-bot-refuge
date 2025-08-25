@@ -10,6 +10,9 @@ data/**/*.json
 # Allow committing Roulette Refuge data
 !data/pari_xp/
 !data/pari_xp/*.json
+# Allow committing economy UI configuration
+!data/economy/
+!data/economy/*.json
 # Allow necessary configuration files
 !config.json
 
