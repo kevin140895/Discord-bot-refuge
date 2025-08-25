@@ -45,6 +45,10 @@ class StatsCog(commands.Cog):
         except Exception:
             pass
         await self._apply_cache()
+        for guild in self.bot.guilds:
+            await self.update_members(guild)
+            await self.update_online(guild)
+            await self.update_voice(guild)
         self.refresh_members.start()
         self.refresh_online.start()
         self.refresh_voice.start()
