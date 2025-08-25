@@ -62,6 +62,12 @@ class APIMeter:
         self.summary_task: asyncio.Task | None = None
         self.alert_cooldowns: Dict[str, float] = {}
         self.alert_messages: Deque[Tuple[str, float]] = deque()
+        # Aggregated statistics per route and source
+        self.route_totals: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self.source_totals: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self._save_lock = asyncio.Lock()
+        self.persist_task: asyncio.Task | None = None
+        self.current_month: str | None = None
 
     # ------------------------------------------------------------------
     # Context helpers
@@ -93,6 +99,61 @@ class APIMeter:
         cutoff = now - 3600  # keep last hour of data
         while self.events and self.events[0][0] < cutoff:
             self.events.popleft()
+
+        # Update aggregated stats
+        route_key = f"{ctx.method} {ctx.route}"
+        rs = self.route_totals[route_key]
+        rs["calls"] += 1
+        rs["errors"] += 1 if ctx.status >= 400 else 0
+        rs["429"] += 1 if ctx.status == 429 else 0
+        rs["slow"] += 1 if ctx.duration_ms > config.API_SLOW_CALL_MS else 0
+        rs["dur_ms"] += ctx.duration_ms
+
+        source = data.get("caller") or f"{data.get('cog') or ''}:{data.get('command') or ''}".strip(":")
+        ss = self.source_totals[source]
+        ss["calls"] += 1
+        ss["errors"] += 1 if ctx.status >= 400 else 0
+        ss["429"] += 1 if ctx.status == 429 else 0
+        ss["slow"] += 1 if ctx.duration_ms > config.API_SLOW_CALL_MS else 0
+        ss["dur_ms"] += ctx.duration_ms
+
+        if not self.persist_task or self.persist_task.done():
+            self.persist_task = asyncio.create_task(self._save_aggregates_async())
+
+    # ------------------------------------------------------------------
+    def _stats_path(self, dt: datetime | None = None) -> Path:
+        dt = dt or datetime.now(ZoneInfo("Europe/Paris"))
+        return self.data_dir / f"api_metrics-{dt:%Y-%m}.json"
+
+    def _write_stats(self, routes: Dict[str, Dict[str, float]], sources: Dict[str, Dict[str, float]]) -> None:
+        path = self._stats_path()
+        tmp = path.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump({"routes": routes, "sources": sources}, f, ensure_ascii=False)
+        os.replace(tmp, path)
+
+    async def _save_aggregates_async(self) -> None:
+        async with self._save_lock:
+            routes = {k: dict(v) for k, v in self.route_totals.items()}
+            sources = {k: dict(v) for k, v in self.source_totals.items()}
+            await asyncio.to_thread(self._write_stats, routes, sources)
+
+    def _load_aggregates(self, dt: datetime | None = None) -> None:
+        dt = dt or datetime.now(ZoneInfo("Europe/Paris"))
+        self.current_month = f"{dt:%Y-%m}"
+        self.route_totals.clear()
+        self.source_totals.clear()
+        path = self._stats_path(dt)
+        if path.exists():
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for key, stats in data.get("routes", {}).items():
+                    self.route_totals[key].update(stats)
+                for key, stats in data.get("sources", {}).items():
+                    self.source_totals[key].update(stats)
+            except Exception:
+                self.logger.exception("failed to load api metrics")
 
     # ------------------------------------------------------------------
     async def _writer_loop(self) -> None:
@@ -195,6 +256,11 @@ class APIMeter:
     async def _summary_loop(self) -> None:
         while True:
             await asyncio.sleep(config.API_REPORT_INTERVAL_MIN * 60)
+            now = datetime.now(ZoneInfo("Europe/Paris"))
+            month = f"{now:%Y-%m}"
+            if self.current_month and month != self.current_month:
+                await self._save_aggregates_async()
+                self._load_aggregates(now)
             routes = self.get_top_routes(10, 5)
             total = sum(r["calls"] for r in routes)
             errors = sum(r["errors"] for r in routes)
@@ -248,6 +314,7 @@ class APIMeter:
     # ------------------------------------------------------------------
     async def start(self, bot: Any) -> None:
         self.bot = bot
+        self._load_aggregates()
         if self.writer_task is None:
             self.writer_task = asyncio.create_task(self._writer_loop())
         if self.summary_task is None:
@@ -264,6 +331,7 @@ class APIMeter:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.summary_task
             self.summary_task = None
+        await self._save_aggregates_async()
 
 
 # Global instance
