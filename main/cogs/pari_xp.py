@@ -143,21 +143,35 @@ class RouletteRefugeCog(commands.Cog):
                 await storage.save_json(storage.Path(STATE_PATH), self.state)
 
     def _build_hub_embed(self) -> discord.Embed:
-        title = self.config.get("game_display_name", "🤑 Roulette Refuge")
+        title = f"🎰 {self.config.get('game_display_name', '🤑 Roulette Refuge')} 🎰"
         lines = [
-            "💵 **Mise min**: 5 XP · 🛑 **Cooldown**: 15s · 🎲 **Cap**: 20/jour",
-            "Résultats privés (éphémères). Gros événements annoncés publiquement.",
-            "—",
-            "État : " + ("🟢 **Ouvert — ferme à 02:00**" if self._is_open_hours() else "🔴 **Fermé — ouvre à 08:00**"),
+            "━━━━━━━━━━━━━━━",
+            "💵 Mise minimum : 5 XP",
+            "🛑 Cooldown : 15 secondes",
+            "🎲 Limite : 20 tirages / jour",
+            "",
+            "📩 Résultats privés (éphémères)",
+            "📢 Les gros événements sont annoncés publiquement",
+            "",
+            "━━━━━━━━━━━━━━━",
+            (
+                "🟢 État : Ouvert — ferme à ⏰ 02:00"
+                if self._is_open_hours()
+                else "🔴 État : Fermé — ouvre à ⏰ 08:00"
+            ),
         ]
         return discord.Embed(title=title, description="\n".join(lines))
 
     def _build_hub_view(self) -> discord.ui.View:
         cog = self
+        is_open = self._is_open_hours()
 
         class HubView(discord.ui.View):
             def __init__(self) -> None:
                 super().__init__(timeout=None)
+                if not is_open:
+                    for child in list(self.children):
+                        self.remove_item(child)
 
             @discord.ui.button(
                 custom_id="pari_xp_bet",
@@ -833,7 +847,10 @@ class RouletteRefugeCog(commands.Cog):
         report["hours"] = "PASS" if open_ok else "FAIL"
 
         desc = self._build_hub_embed().description or ""
-        hub_ok = "🟢 **Ouvert — ferme à 02:00**" in desc or "🔴 **Fermé — ouvre à 08:00**" in desc
+        hub_ok = (
+            "🟢 État : Ouvert — ferme à ⏰ 02:00" in desc
+            or "🔴 État : Fermé — ouvre à ⏰ 08:00" in desc
+        )
         report["hub_embed"] = "PASS" if hub_ok else "FAIL"
 
         modal = self._build_bet_modal()
