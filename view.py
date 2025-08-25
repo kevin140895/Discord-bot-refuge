@@ -221,7 +221,7 @@ class RadioView(discord.ui.View):
         await self._dispatch(interaction, "radio_rap")
 
     @discord.ui.button(
-        label="Rock", style=discord.ButtonStyle.secondary, custom_id="radio_rock"
+        label="Rock", style=discord.ButtonStyle.primary, custom_id="radio_rock"
     )
     async def btn_radio_rock(
         self, interaction: discord.Interaction, button: discord.ui.Button

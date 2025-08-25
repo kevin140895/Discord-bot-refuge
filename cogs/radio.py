@@ -168,7 +168,7 @@ class RadioCog(commands.Cog):
             if isinstance(channel, discord.VoiceChannel):
                 await self._rename_for_stream(channel, self.stream_url)
             await interaction.response.send_message(
-                "Radio changée pour la station précédente"
+                "Radio changée pour la station précédente", ephemeral=True
             )
             return
 
@@ -179,7 +179,7 @@ class RadioCog(commands.Cog):
         await self._connect_and_play()
         if isinstance(channel, discord.VoiceChannel):
             await rename_manager.request(channel, rename_name)
-        await interaction.response.send_message(user_message)
+        await interaction.response.send_message(user_message, ephemeral=True)
 
     async def radio_rap(self, interaction: discord.Interaction) -> None:
         await self._switch_stream(
@@ -215,7 +215,7 @@ class RadioCog(commands.Cog):
         if isinstance(channel, discord.VoiceChannel):
             await self._rename_for_stream(channel, RADIO_STREAM_URL)
         await interaction.response.send_message(
-            "Radio changée pour la station Hip-Hop"
+            "Radio changée pour la station Hip-Hop", ephemeral=True
         )
 
     @commands.Cog.listener()
