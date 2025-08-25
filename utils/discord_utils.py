@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from utils.channel_edit_manager import channel_edit_manager
+from utils.rate_limit import limiter
 
 _CHANNEL_CACHE: Dict[int, Tuple[discord.abc.GuildChannel, float]] = {}
 _CACHE_TTL = 300.0  # seconds
@@ -50,4 +51,34 @@ async def ensure_channel_has_message(
 async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None:
     """Schedule a channel edit respecting configured rate limits."""
     await channel_edit_manager.request(channel, **kwargs)
+
+
+async def safe_message_edit(message: discord.Message, **kwargs) -> discord.Message | None:
+    """Safely edit a message.
+
+    Skips edits when content and embeds are unchanged and throttles requests
+    using the shared rate limiter.  Returns the original message when no update
+    is performed.
+    """
+    same_content = "content" not in kwargs or kwargs["content"] == getattr(message, "content", None)
+
+    current_embeds = list(getattr(message, "embeds", []))
+    if not current_embeds and getattr(message, "embed", None) is not None:
+        current_embeds = [message.embed]  # type: ignore[attr-defined]
+
+    same_embed = True
+    if "embed" in kwargs:
+        same_embed = len(current_embeds) == 1 and current_embeds[0].to_dict() == kwargs["embed"].to_dict()
+    elif "embeds" in kwargs:
+        new_embeds = kwargs["embeds"]
+        same_embed = len(current_embeds) == len(new_embeds) and all(
+            m.to_dict() == n.to_dict() for m, n in zip(current_embeds, new_embeds)
+        )
+
+    if same_content and same_embed:
+        return message
+
+    channel_id = getattr(getattr(message, "channel", None), "id", 0)
+    await limiter.acquire(bucket=f"channel:{channel_id}")
+    return await message.edit(**kwargs)
 

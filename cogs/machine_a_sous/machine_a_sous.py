@@ -21,6 +21,7 @@ from config import (
     DATA_DIR,
     MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES,
 )
+from utils.discord_utils import safe_message_edit
 logger = logging.getLogger(__name__)
 
 PARIS_TZ = "Europe/Paris"
@@ -260,7 +261,7 @@ class MachineASousView(discord.ui.View):
             ephemeral=True,
         )
         await asyncio.sleep(5)
-        await spin_msg.edit(content=msg, embed=None)
+        await safe_message_edit(spin_msg, content=msg, embed=None)
 
         if gain == "ticket":
             await self._single_spin(interaction, cog, free=True)

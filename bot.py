@@ -21,13 +21,13 @@ from storage.xp_store import xp_store
 from utils.api_meter import api_meter
 from utils.channel_edit_manager import channel_edit_manager
 from utils.rename_manager import rename_manager
-from utils.rate_limit import GlobalRateLimiter
+from utils.rate_limit import GlobalRateLimiter, limiter as _limiter
 from view import PlayerTypeView
 from utils import level_feed
 
 
 # global rate limiter instance
-limiter: Final[GlobalRateLimiter] = GlobalRateLimiter()
+limiter: Final[GlobalRateLimiter] = _limiter
 
 
 async def reset_http_error_counter() -> None:
