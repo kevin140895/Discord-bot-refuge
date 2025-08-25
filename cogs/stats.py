@@ -158,21 +158,30 @@ class StatsCog(commands.Cog):
                     pass
             self.cache.clear()
         for guild in self.bot.guilds:
-            await self.update_members(guild)
+            try:
+                await self.update_members(guild)
+            except Exception:
+                logger.exception("Erreur refresh_members")
 
     @tasks.loop(minutes=15)
     async def refresh_online(self) -> None:
         """Met à jour le nombre d'utilisateurs en ligne toutes les 15 minutes."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
-            await self.update_online(guild)
+            try:
+                await self.update_online(guild)
+            except Exception:
+                logger.exception("Erreur refresh_online")
 
     @tasks.loop(minutes=3)
     async def refresh_voice(self) -> None:
         """Met à jour le nombre d'utilisateurs en vocal toutes les 3 minutes."""
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
-            await self.update_voice(guild)
+            try:
+                await self.update_voice(guild)
+            except Exception:
+                logger.exception("Erreur refresh_voice")
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -104,7 +104,10 @@ class DoubleVoiceXP(commands.Cog):
 
     @tasks.loop(time=time(hour=0, minute=1, tzinfo=PARIS_TZ))
     async def daily_planner(self) -> None:
-        await self._prepare_today(force=True)
+        try:
+            await self._prepare_today(force=True)
+        except Exception:
+            logger.exception("Erreur dans daily_planner")
 
     @daily_planner.before_loop
     async def before_daily_planner(self) -> None:  # pragma: no cover - simple wait

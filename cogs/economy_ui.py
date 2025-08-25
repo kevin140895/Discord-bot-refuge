@@ -236,7 +236,10 @@ class EconomyUICog(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def boosts_cleanup(self) -> None:
-        await self._cleanup_boosts_once()
+        try:
+            await self._cleanup_boosts_once()
+        except Exception:
+            logger.exception("Erreur dans boosts_cleanup")
 
     @boosts_cleanup.before_loop
     async def before_boosts_cleanup(self) -> None:
