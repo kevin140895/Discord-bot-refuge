@@ -1,0 +1,5 @@
+{
+  "ticket_royal": {"name": "Ticket Royal", "price": 1000},
+  "double_xp_1h": {"name": "Double XP 1h", "price": 500},
+  "vip_24h": {"name": "VIP 24h", "price": 2000}
+}
