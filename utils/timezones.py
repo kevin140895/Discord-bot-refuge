@@ -4,10 +4,12 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-TZ_PARIS = ZoneInfo("Europe/Paris")
-PARIS = TZ_PARIS  # backward compatibility
+# Central timezone object for Europe/Paris
+PARIS_TZ = ZoneInfo("Europe/Paris")
+TZ_PARIS = PARIS_TZ  # backward compatibility
+PARIS = PARIS_TZ  # backward compatibility
 
 
 def now_paris() -> datetime:
     """Return current time in Europe/Paris timezone."""
-    return datetime.now(TZ_PARIS)
+    return datetime.now(PARIS_TZ)
