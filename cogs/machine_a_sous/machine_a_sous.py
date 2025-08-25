@@ -660,17 +660,6 @@ class MachineASousCog(commands.Cog):
                 ephemeral=True,
             )
 
-    @group.command(
-        name="refresh",
-        description="Republier le message de la machine à sous",
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def refresh_machine(self, interaction: discord.Interaction):
-        with measure("slash:machine_refresh"):
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            await self._replace_poster_message()
-            await interaction.followup.send("✅ Message machine à sous rafraîchi.", ephemeral=True)
-
     async def cog_load(self):
         try:
             self.bot.add_view(MachineASousView())

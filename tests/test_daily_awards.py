@@ -1,10 +1,9 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from cogs.daily_awards import DailyAwards
-from config import MVP_ROLE_ID, WRITER_ROLE_ID, VOICE_ROLE_ID, XP_VIEWER_ROLE_ID
+from config import MVP_ROLE_ID, WRITER_ROLE_ID, VOICE_ROLE_ID
 
 
 class DummyRole:
@@ -73,33 +72,3 @@ async def test_roles_reassigned():
     assert vc not in other.roles
 
 
-@pytest.mark.asyncio
-async def test_test_classements_permission_and_send():
-    cog = DailyAwards.__new__(DailyAwards)
-    cog.bot = SimpleNamespace(get_channel=lambda _id: None)
-
-    interaction = SimpleNamespace(user=SimpleNamespace(roles=[]))
-    command = DailyAwards.test_classements
-    with patch("cogs.daily_awards.safe_respond", new_callable=AsyncMock) as respond:
-        await command.callback(cog, interaction)
-    respond.assert_awaited_once_with(interaction, "Accès refusé.", ephemeral=True)
-
-    viewer_role = SimpleNamespace(id=XP_VIEWER_ROLE_ID)
-    interaction = SimpleNamespace(user=SimpleNamespace(roles=[viewer_role]))
-    data = {
-        "top3": {
-            "mvp": [{"id": 1, "score": 1, "messages": 1, "voice": 1}],
-            "msg": [{"id": 2, "count": 5}],
-            "vc": [{"id": 3, "minutes": 10}],
-        },
-        "winners": {"mvp": 1, "msg": 2, "vc": 3},
-        "date": "2024-01-01",
-    }
-    channel = SimpleNamespace(send=AsyncMock())
-    cog.bot.get_channel = lambda _id: channel
-    with patch("cogs.daily_awards.safe_respond", new_callable=AsyncMock) as respond, \
-        patch("cogs.daily_awards.read_json_safe", return_value=data), \
-        patch.object(DailyAwards, "_build_message", new=AsyncMock(return_value="msg")):
-        await command.callback(cog, interaction)
-    channel.send.assert_awaited_once_with("msg")
-    respond.assert_awaited()

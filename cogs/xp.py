@@ -35,12 +35,6 @@ from utils.game_events import get_multiplier, record_participant
 from utils.voice_bonus import get_voice_multiplier
 logger = logging.getLogger(__name__)
 
-BOT_OWNER_ID = 541417878314942495
-
-
-def _is_owner(interaction: discord.Interaction) -> bool:
-    return interaction.user.id == BOT_OWNER_ID
-
 # Fichiers de persistance
 VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
 DAILY_STATS_FILE = os.path.join(DATA_DIR, "daily_stats.json")
@@ -324,7 +318,7 @@ class XPCog(commands.Cog):
 
 
     @app_commands.command(name="don_xp", description="Donne de l'XP à un membre")
-    @app_commands.check(_is_owner)
+    @app_commands.checks.has_role(1403510368340410550)
     @app_commands.describe(
         membre="Membre qui reçoit l'XP",
         montant="Quantité d'XP à ajouter",
