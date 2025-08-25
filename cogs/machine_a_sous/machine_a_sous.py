@@ -421,16 +421,22 @@ class MachineASousCog(commands.Cog):
                 ch = self.bot.get_channel(stored_ch_id)
                 if isinstance(ch, (discord.TextChannel, discord.Thread)):
                     try:
-                        await ch.fetch_message(int(poster.get("message_id", 0)))
+                        msg = await ch.fetch_message(int(poster.get("message_id", 0)))
+                        has_view = bool(msg.components)
+                        if has_view != self.current_view_enabled:
+                            await self._replace_poster_message()
                         return
                     except discord.NotFound as e:
                         logger.debug("Poster message missing: %s", e)
         existing = await self._find_existing_poster()
         if existing:
-            self.store.set_poster(
-                channel_id=str(existing.channel.id),
-                message_id=str(existing.id),
-            )
+            if bool(existing.components) != self.current_view_enabled:
+                await self._replace_poster_message()
+            else:
+                self.store.set_poster(
+                    channel_id=str(existing.channel.id),
+                    message_id=str(existing.id),
+                )
         else:
             await self._replace_poster_message()
 
