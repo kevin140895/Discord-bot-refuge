@@ -244,20 +244,32 @@ class RouletteRefugeCog(commands.Cog):
             uid = tx.get("user_id")
             username = tx.get("username", str(uid))
             delta = int(tx.get("delta", 0))
-            user_stat = stats.setdefault(uid, {"username": username, "net": 0})
+            user_stat = stats.setdefault(
+                uid, {"username": username, "won": 0, "lost": 0}
+            )
             user_stat["username"] = username
-            user_stat["net"] = int(user_stat["net"]) + delta
+            if delta > 0:
+                user_stat["won"] = int(user_stat["won"]) + delta
+            elif delta < 0:
+                user_stat["lost"] = int(user_stat["lost"]) - delta
         winners = sorted(
-            [v for v in stats.values() if int(v["net"]) > 0],
-            key=lambda x: int(x["net"]),
+            [v for v in stats.values() if int(v["won"]) > 0],
+            key=lambda x: int(x["won"]),
             reverse=True,
         )[:10]
         losers = sorted(
-            [v for v in stats.values() if int(v["net"]) < 0],
-            key=lambda x: int(x["net"]),
+            [v for v in stats.values() if int(v["lost"]) > 0],
+            key=lambda x: int(x["lost"]),
+            reverse=True,
         )[:10]
-        win_lines = [f"{idx + 1}. {w['username']} ({int(w['net']):+} XP)" for idx, w in enumerate(winners)]
-        loss_lines = [f"{idx + 1}. {loser['username']} ({int(loser['net']):+} XP)" for idx, loser in enumerate(losers)]
+        win_lines = [
+            f"{idx + 1}. {w['username']} (+{int(w['won'])} XP)"
+            for idx, w in enumerate(winners)
+        ]
+        loss_lines = [
+            f"{idx + 1}. {loser['username']} (-{int(loser['lost'])} XP)"
+            for idx, loser in enumerate(losers)
+        ]
         biggest = None
         for tx in month_txs:
             if tx.get("delta", 0) > 0:
@@ -269,7 +281,7 @@ class RouletteRefugeCog(commands.Cog):
             color=discord.Color.purple(),
         )
         embed.add_field(
-            name="🏆 Top 10 gagnants nets (mois)",
+            name="🏆 Top 10 gagnants (mois)",
             value="\n".join(win_lines) if win_lines else "N/A",
             inline=False,
         )
