@@ -87,6 +87,7 @@ class DoubleVoiceXP(commands.Cog):
         self.bot = bot
         self._tasks: List[asyncio.Task] = []
         self.state: Dict[str, Any] = {}
+        self._prepare_lock = asyncio.Lock()
         self.daily_planner.start()
         asyncio.create_task(self._startup())
 
@@ -110,7 +111,10 @@ class DoubleVoiceXP(commands.Cog):
 
     async def _prepare_today(self, force: bool = False) -> None:
         """Lire/initialiser l'état du jour puis planifier ou reprendre les sessions."""
+        async with self._prepare_lock:
+            await self._prepare_today_locked(force)
 
+    async def _prepare_today_locked(self, force: bool = False) -> None:
         # Cancel any previously scheduled tasks to avoid duplicates.
         for task in self._tasks:
             task.cancel()
