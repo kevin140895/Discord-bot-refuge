@@ -41,9 +41,11 @@ class DailyRankingAndRoles(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._task = asyncio.create_task(self._scheduler())
+        self._startup_task = asyncio.create_task(self._startup_check())
 
     def cog_unload(self) -> None:
         self._task.cancel()
+        self._startup_task.cancel()
 
     # ── Persistence helpers ──────────────────────────────────
 
@@ -91,6 +93,29 @@ class DailyRankingAndRoles(commands.Cog):
         return {"top3": {"msg": top_msg, "vc": top_vc, "mvp": top_mvp}, "winners": winners}
 
     # ── Main task ───────────────────────────────────────────
+
+    async def _startup_check(self) -> None:
+        await self.bot.wait_until_ready()
+        today = datetime.now(PARIS_TZ).date()
+        async with DAILY_LOCK:
+            pending = [
+                day
+                for day in DAILY_STATS.keys()
+                if datetime.fromisoformat(day).date() < today
+            ]
+        for day in sorted(pending):
+            logger.info("[daily_ranking] Traitement au démarrage pour %s", day)
+            async with DAILY_LOCK:
+                stats = DAILY_STATS.pop(day, {})
+            if not stats:
+                logger.info("[daily_ranking] Aucune statistique pour %s", day)
+                await save_daily_stats_to_disk()
+                continue
+            ranking = self._compute_ranking(stats)
+            ranking["date"] = day
+            self._write_persistence(ranking)
+            await save_daily_stats_to_disk()
+            logger.info("[daily_ranking] Classement %s sauvegardé", day)
 
     async def _scheduler(self) -> None:
         await self.bot.wait_until_ready()
