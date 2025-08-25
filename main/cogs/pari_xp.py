@@ -327,8 +327,9 @@ class RouletteRefugeCog(commands.Cog):
         announce_channel = await self._get_announce_channel()
         if announce_channel:
             await announce_channel.send(embed=embed)
-            return
-        await channel.send(embed=embed)
+        else:
+            await channel.send(embed=embed)
+        self.state["last_open_announce_ts"] = self._now().isoformat()
 
     def _daily_stats(self) -> dict[str, Any]:
         transactions = storage.load_json(storage.Path(TX_PATH), [])
@@ -443,7 +444,6 @@ class RouletteRefugeCog(commands.Cog):
         """Gère l'ouverture et la fermeture automatiques selon la configuration."""
         tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
         now = datetime.now(tz)
-        open_hour = int(self.config.get("open_hour", 8))
         last_call_hour = int(self.config.get("last_call_hour", 1))
         last_call_minute = int(self.config.get("last_call_minute", 45))
         close_hour = int(self.config.get("close_hour", 2))
@@ -463,17 +463,35 @@ class RouletteRefugeCog(commands.Cog):
             except Exception:
                 pass
 
-        if now.hour == open_hour and now.minute == 0:
-            await self._announce_open(channel)
-            await self._update_hub_state(True)
-        elif now.hour == last_call_hour and now.minute == last_call_minute:
-            announce_ch = await self._get_announce_channel()
-            msg = f"⏳ Dernier appel — fermeture dans 15 minutes ({close_hour:02d}:00)."
-            if announce_ch:
-                await announce_ch.send(msg)
-                return
-            await channel.send(msg)
-        elif now.hour == close_hour and now.minute == 0:
+        is_open_now = self._is_open_hours(now)
+        last_open_ts = self.state.get("last_open_announce_ts")
+        last_open_date = (
+            datetime.fromisoformat(last_open_ts).date() if last_open_ts else None
+        )
+
+        if is_open_now:
+            if (
+                not self.state.get("is_open", False)
+                or last_open_date != now.date()
+            ):
+                await self._announce_open(channel)
+                await self._update_hub_state(True)
+            elif not self.state.get("hub_message_id"):
+                await self._update_hub_state(True)
+            else:
+                await self._ensure_hub_message(channel)
+            if (
+                self.state.get("is_open", False)
+                and now.hour == last_call_hour
+                and now.minute == last_call_minute
+            ):
+                announce_ch = await self._get_announce_channel()
+                msg = f"⏳ Dernier appel — fermeture dans 15 minutes ({close_hour:02d}:00)."
+                if announce_ch:
+                    await announce_ch.send(msg)
+                    return
+                await channel.send(msg)
+        elif self.state.get("is_open", False):
             await self._announce_close(channel)
             await self._update_hub_state(False)
             await self._post_daily_summary(channel)
