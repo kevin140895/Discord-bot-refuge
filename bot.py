@@ -103,6 +103,7 @@ def create_bot() -> RefugeBot:
     intents: discord.Intents = discord.Intents(
         guilds=True,
         members=True,
+        presences=True,
         messages=True,
         reactions=True,
         voice_states=True,
