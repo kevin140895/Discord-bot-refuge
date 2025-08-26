@@ -59,6 +59,8 @@ class RefugeBot(commands.Bot):
         discovered = list(pkgutil.iter_modules(cogs.__path__))
         loaded_names = set()
         for module in discovered:
+            if module.name == "pari_xp":
+                continue
             await self.load_extension(f"{cogs.__name__}.{module.name}")
             loaded_names.add(module.name)
 
