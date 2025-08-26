@@ -114,19 +114,19 @@ class TempVCCog(commands.Cog):
         base = self._base_name_from_members(channel.members)
 
         # Priorité : nom du jeu > "Endormie" > "Chat"
-        game_name = None
+        game_counts: Dict[str, int] = {}
         for m in channel.members:
             for act in m.activities:
                 if isinstance(act, discord.Game) or (
                     isinstance(act, discord.Activity)
                     and act.type is discord.ActivityType.playing
                 ):
-                    game_name = act.name
+                    game_counts[act.name] = game_counts.get(act.name, 0) + 1
                     break
-            if game_name:
-                break
 
-        if game_name:
+        if game_counts:
+            # Choisit le jeu le plus représenté dans le salon
+            game_name = max(game_counts, key=game_counts.get)
             # Discord limite les noms de salon à 100 caractères ; on réserve
             # l'espace pour la base et le séparateur «  • ».
             max_status_len = 100 - len(base) - 3
