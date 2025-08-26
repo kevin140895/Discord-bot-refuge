@@ -49,7 +49,7 @@ class TempVCCog(commands.Cog):
                         TEMP_VC_IDS.add(ch.id)
                         self._last_names[ch.id] = ch.name
                 if TEMP_VC_IDS:
-                    save_temp_vc_ids(TEMP_VC_IDS)
+                    save_temp_vc_ids(TEMP_VC_IDS.copy())
 
         self.cleanup.start()
 
@@ -190,7 +190,7 @@ class TempVCCog(commands.Cog):
 
         TEMP_VC_IDS.add(channel.id)
         self._last_names[channel.id] = channel.name
-        save_temp_vc_ids(TEMP_VC_IDS)
+        save_temp_vc_ids(TEMP_VC_IDS.copy())
         return channel
 
     # ----------- événements Discord -----------
@@ -232,7 +232,7 @@ class TempVCCog(commands.Cog):
                 await new_vc.delete(reason="Échec du déplacement du membre")
                 TEMP_VC_IDS.discard(new_vc.id)
                 self._last_names.pop(new_vc.id, None)
-                save_temp_vc_ids(TEMP_VC_IDS)
+                save_temp_vc_ids(TEMP_VC_IDS.copy())
                 return
             await self._update_channel_name(new_vc)
             return
@@ -261,7 +261,7 @@ class TempVCCog(commands.Cog):
                     )
                     TEMP_VC_IDS.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
-                    save_temp_vc_ids(TEMP_VC_IDS)
+                    save_temp_vc_ids(TEMP_VC_IDS.copy())
 
         # 3) Renommage sur changement d'état vocal
         if after.channel and after.channel.id in TEMP_VC_IDS:
@@ -298,8 +298,10 @@ class TempVCCog(commands.Cog):
                 channel = self.bot.get_channel(channel_id)
                 if isinstance(channel, discord.VoiceChannel):
                     await self._update_channel_name(channel)
-            await delete_untracked_temp_vcs(self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS)
-            save_temp_vc_ids(TEMP_VC_IDS)
+            await delete_untracked_temp_vcs(
+                self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS.copy()
+            )
+            save_temp_vc_ids(TEMP_VC_IDS.copy())
         except Exception:
             logger.exception("Erreur dans cleanup")
 
