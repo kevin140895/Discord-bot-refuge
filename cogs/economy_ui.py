@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_SHOP: dict[str, dict[str, typing.Any]] = {
     "ticket_royal": {"name": "Ticket Royal", "price": 500},
     "double_xp_1h": {"name": "Double XP 1h", "price": 300},
-    "vip_24h": {"name": "VIP 24h", "price": 500},
 }
 
 
@@ -68,13 +67,6 @@ class ShopView(discord.ui.View):
                 label="Double XP 1h",
                 style=discord.ButtonStyle.green,
                 custom_id="shop_buy:double_xp_1h",
-            )
-        )
-        self.add_item(
-            discord.ui.Button(
-                label="VIP 24h",
-                style=discord.ButtonStyle.green,
-                custom_id="shop_buy:vip_24h",
             )
         )
 
@@ -446,23 +438,6 @@ class EconomyUICog(commands.Cog):
             until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
             boost_list.append({"type": "double_xp", "until": until})
             await save_boosts(boosts)
-        elif item_key == "vip_24h":
-            boosts = load_boosts()
-            key = str(user_id)
-            boost_list = boosts.setdefault(key, [])
-            until = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-            boost_list.append({"type": "vip", "until": until})
-            await save_boosts(boosts)
-            role_id = getattr(config, "VIP_24H_ROLE_ID", 0)
-            if role_id and interaction.guild:
-                role = interaction.guild.get_role(role_id)
-                if role:
-                    try:
-                        await interaction.user.add_roles(
-                            role, reason="Achat VIP 24h"
-                        )
-                    except Exception:  # pragma: no cover - best effort
-                        logger.warning("Impossible d'ajouter le rôle VIP", exc_info=True)
 
         await transactions.add(
             {
