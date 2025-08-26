@@ -304,7 +304,16 @@ class EconomyUICog(commands.Cog):
         except Exception as e:  # pragma: no cover - best effort
             logger.warning("Lecture ui.json échouée: %s", e)
             ui_data = {}
-        channel = self.bot.get_channel(CHANNEL_ID)
+        try:
+            channel = await self.bot.fetch_channel(CHANNEL_ID)
+        except discord.NotFound:
+            logger.warning("Salon économie introuvable (%s)", CHANNEL_ID)
+            return
+        except discord.Forbidden:
+            logger.warning(
+                "Accès refusé au salon économie (%s)", CHANNEL_ID
+            )
+            return
         if not isinstance(channel, discord.TextChannel):
             logger.warning("Salon économie introuvable (%s)", CHANNEL_ID)
             return
