@@ -10,7 +10,6 @@ import asyncio
 import io
 import logging
 import os
-import random
 from datetime import datetime, timezone, timedelta
 
 import discord
@@ -226,7 +225,7 @@ class XPCog(commands.Cog):
         bucket = self._message_cooldown.get_bucket(message)
         if bucket.update_rate_limit():
             return
-        amount = random.randint(5, 15)
+        amount = 8
         old_lvl, new_lvl, old_xp, new_xp = await award_xp(
             message.author.id,
             amount,
@@ -263,7 +262,7 @@ class XPCog(commands.Cog):
             start = voice_times.pop(uid, None)
             if start is not None:
                 duration = now - start
-                xp_amount = int(duration.total_seconds() // 60)
+                xp_amount = int(duration.total_seconds() // 60) * 3
                 if before.channel is not None:
                     event_mult = get_multiplier(before.channel.id, member.id)
                     mult = get_voice_multiplier(event_mult)
