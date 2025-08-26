@@ -19,6 +19,8 @@ import re
 import logging
 import asyncio
 
+from pathlib import Path
+
 from utils import storage, timezones
 from utils.timezones import TZ_PARIS
 from utils.storage import load_json
@@ -27,18 +29,19 @@ from config import DATA_DIR
 from utils.discord_utils import safe_message_edit
 from utils.economy_tickets import consume_any_ticket, consume_free_ticket
 
-PARI_XP_DATA_DIR = "main/data/pari_xp/"
-CONFIG_PATH = PARI_XP_DATA_DIR + "config.json"
-STATE_PATH = PARI_XP_DATA_DIR + "state.json"
-LB_PATH = PARI_XP_DATA_DIR + "leaderboard.json"
-TX_PATH = PARI_XP_DATA_DIR + "transactions.json"
+PARI_XP_DATA_DIR = Path(DATA_DIR) / "pari_xp"
+PARI_XP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_PATH = PARI_XP_DATA_DIR / "config.json"
+STATE_PATH = PARI_XP_DATA_DIR / "state.json"
+LB_PATH = PARI_XP_DATA_DIR / "leaderboard.json"
+TX_PATH = PARI_XP_DATA_DIR / "transactions.json"
 
 
 class RouletteRefugeCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.config = storage.load_json(storage.Path(CONFIG_PATH), {})
-        self.state = storage.load_json(storage.Path(STATE_PATH), {})
+        self.config = storage.load_json(CONFIG_PATH, {})
+        self.state = storage.load_json(STATE_PATH, {})
         self.scheduler_task.start()
         self.leaderboard_task.start()
         self._cooldowns: dict[int, datetime] = {}
@@ -75,7 +78,7 @@ class RouletteRefugeCog(commands.Cog):
         return channel if isinstance(channel, discord.TextChannel) else None
 
     async def _get_announce_channel(self) -> discord.TextChannel | None:
-        cfg = load_json(storage.Path(CONFIG_PATH), {})
+        cfg = load_json(CONFIG_PATH, {})
         ch_id = int(cfg.get("announce_channel_id") or 0)
         if ch_id:
             ch = self.bot.get_channel(ch_id) or await self.bot.fetch_channel(ch_id)
@@ -93,7 +96,7 @@ class RouletteRefugeCog(commands.Cog):
                 expected_title = f"🎰 {self.config.get('game_display_name', '🤑 Roulette Refuge')} 🎰"
                 if embed.title == expected_title:
                     self.state["hub_message_id"] = msg.id
-                    await storage.save_json(storage.Path(STATE_PATH), self.state)
+                    await storage.save_json(STATE_PATH, self.state)
                     return msg
         return None
 
@@ -111,14 +114,14 @@ class RouletteRefugeCog(commands.Cog):
                 for embed in msg.embeds:
                     if embed.title and embed.title.startswith(title_prefix):
                         self.state["leaderboard_message_id"] = msg.id
-                        await storage.save_json(storage.Path(STATE_PATH), self.state)
+                        await storage.save_json(STATE_PATH, self.state)
                         return msg
         async for msg in channel.history(limit=50):
             if msg.author == self.bot.user:
                 for embed in msg.embeds:
                     if embed.title and embed.title.startswith(title_prefix):
                         self.state["leaderboard_message_id"] = msg.id
-                        await storage.save_json(storage.Path(STATE_PATH), self.state)
+                        await storage.save_json(STATE_PATH, self.state)
                         return msg
         return None
 
@@ -146,7 +149,7 @@ class RouletteRefugeCog(commands.Cog):
             else:
                 message = await channel.send(embed=embed, view=view)
                 self.state["hub_message_id"] = message.id
-                await storage.save_json(storage.Path(STATE_PATH), self.state)
+                await storage.save_json(STATE_PATH, self.state)
 
     def _build_hub_embed(self) -> discord.Embed:
         title = f"🎰 {self.config.get('game_display_name', '🤑 Roulette Refuge')} 🎰"
@@ -193,7 +196,7 @@ class RouletteRefugeCog(commands.Cog):
         return HubView()
 
     async def _ensure_leaderboard_message(self, channel: discord.TextChannel) -> None:
-        state = storage.load_json(storage.Path(STATE_PATH), self.state)
+        state = storage.load_json(STATE_PATH, self.state)
         msg_id = state.get("leaderboard_message_id")
         embed = self._build_leaderboard_embed()
         message = None
@@ -210,14 +213,14 @@ class RouletteRefugeCog(commands.Cog):
         else:
             message = await channel.send(embed=embed)
             state["leaderboard_message_id"] = message.id
-            await storage.save_json(storage.Path(STATE_PATH), state)
+            await storage.save_json(STATE_PATH, state)
             self.state = state
 
     async def _refresh_leaderboard(self, channel: discord.TextChannel) -> None:
         """Ensure leaderboard message exists and refresh its embed."""
         try:
             await self._ensure_leaderboard_message(channel)
-            state = storage.load_json(storage.Path(STATE_PATH), {})
+            state = storage.load_json(STATE_PATH, {})
             msg_id = state.get("leaderboard_message_id")
             if not msg_id:
                 return
@@ -229,7 +232,9 @@ class RouletteRefugeCog(commands.Cog):
     def _build_leaderboard_embed(self) -> discord.Embed:
         tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
         now = datetime.now(tz)
-        transactions = storage.load_json(storage.Path(TX_PATH), [])
+        transactions = storage.load_json(TX_PATH, [])
+        if not isinstance(transactions, list):
+            transactions = []
         month_txs = []
         for tx in transactions:
             ts = tx.get("ts")
@@ -301,7 +306,7 @@ class RouletteRefugeCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        self.state = storage.load_json(storage.Path(STATE_PATH), {})
+        self.state = storage.load_json(STATE_PATH, {})
         channel = await self._get_channel()
         if channel:
             await self._ensure_hub_message(channel)
@@ -318,7 +323,7 @@ class RouletteRefugeCog(commands.Cog):
 
     async def _update_hub_state(self, is_open: bool) -> None:
         self.state["is_open"] = is_open
-        await storage.save_json(storage.Path(STATE_PATH), self.state)
+        await storage.save_json(STATE_PATH, self.state)
         channel = await self._get_channel()
         if channel:
             await self._ensure_hub_message(channel)
@@ -345,7 +350,9 @@ class RouletteRefugeCog(commands.Cog):
         self.state["last_open_announce_ts"] = self._now().isoformat()
 
     def _daily_stats(self) -> dict[str, Any]:
-        transactions = storage.load_json(storage.Path(TX_PATH), [])
+        transactions = storage.load_json(TX_PATH, [])
+        if not isinstance(transactions, list):
+            transactions = []
         now = datetime.now(TZ_PARIS)
         today: date = now.date()
         day_txs = []
@@ -463,14 +470,14 @@ class RouletteRefugeCog(commands.Cog):
 
         if now.hour == 0 and now.minute == 0:
             self.state["daily_cap_counter"] = 0
-            await storage.save_json(storage.Path(STATE_PATH), self.state)
+            await storage.save_json(STATE_PATH, self.state)
 
         channel = await self._get_channel()
         if not channel:
             return
 
         if now.day == 1 and now.hour == 0 and now.minute == 0:
-            await storage.save_json(storage.Path(TX_PATH), [])
+            await storage.save_json(TX_PATH, [])
             try:
                 await self._refresh_leaderboard(channel)
             except Exception:
@@ -537,7 +544,7 @@ class RouletteRefugeCog(commands.Cog):
         if not ch:
             return
 
-        state = load_json(storage.Path(STATE_PATH), self.state)
+        state = load_json(STATE_PATH, self.state)
         now = datetime.now(tz=TZ_PARIS)
 
         # --- HUB ---
@@ -798,7 +805,9 @@ class RouletteRefugeCog(commands.Cog):
             )
             if result.get("double_xp"):
                 apply_double_xp_buff(user_id, 60)
-            transactions = storage.load_json(storage.Path(TX_PATH), [])
+            transactions = storage.load_json(TX_PATH, [])
+            if not isinstance(transactions, list):
+                transactions = []
             day_key = ts.split("T")[0]
             transactions.append(
                 {
@@ -815,7 +824,7 @@ class RouletteRefugeCog(commands.Cog):
                     "day_key": day_key,
                 }
             )
-            await storage.save_json(storage.Path(TX_PATH), transactions)
+            await storage.save_json(TX_PATH, transactions)
 
             award_ticket = False
             if delta < 0:
@@ -983,7 +992,7 @@ class RouletteRefugeCog(commands.Cog):
             isolation_ok &= all(cid.startswith("pari_xp_") for cid in custom_ids)
         else:
             isolation_ok = False
-        isolation_ok &= PARI_XP_DATA_DIR == "main/data/pari_xp/"
+        isolation_ok &= PARI_XP_DATA_DIR == Path(DATA_DIR) / "pari_xp"
         isolation_ok &= "pari_xp" in module_src.lower()
         report["isolation"] = "PASS" if isolation_ok else "FAIL"
 
