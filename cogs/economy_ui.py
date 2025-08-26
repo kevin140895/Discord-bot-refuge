@@ -28,6 +28,29 @@ CHANNEL_ID = 1409633293791400108
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SHOP: dict[str, dict[str, typing.Any]] = {
+    "ticket_royal": {"name": "Ticket Royal", "price": 500},
+    "double_xp_1h": {"name": "Double XP 1h", "price": 300},
+    "vip_24h": {"name": "VIP 24h", "price": 500},
+}
+
+
+def _load_shop() -> typing.Optional[dict[str, typing.Any]]:
+    try:
+        return json.loads(SHOP_FILE.read_text(encoding="utf-8"))
+    except Exception as e:  # pragma: no cover - best effort
+        logger.warning("Lecture shop.json échouée: %s", e)
+        try:
+            SHOP_FILE.write_text(
+                json.dumps(DEFAULT_SHOP, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            logger.info("shop.json créé avec le contenu par défaut")
+            return DEFAULT_SHOP.copy()
+        except Exception as e2:  # pragma: no cover - best effort
+            logger.error("Création de shop.json impossible: %s", e2)
+            return None
+
 
 class ShopView(discord.ui.View):
     """Vue persistante pour la boutique."""
@@ -362,9 +385,8 @@ class EconomyUICog(commands.Cog):
     async def _handle_shop_purchase(
         self, interaction: discord.Interaction, item_key: str
     ) -> None:
-        try:
-            shop = json.loads(SHOP_FILE.read_text(encoding="utf-8"))
-        except Exception:
+        shop = _load_shop()
+        if not shop:
             await interaction.response.send_message(
                 "Boutique indisponible.", ephemeral=True
             )
@@ -463,10 +485,8 @@ class EconomyUICog(commands.Cog):
         return getattr(msg, "id", None)
 
     def _build_shop_text(self) -> str:
-        try:
-            data = json.loads(SHOP_FILE.read_text(encoding="utf-8"))
-        except Exception as e:  # pragma: no cover - best effort
-            logger.warning("Lecture shop.json échouée: %s", e)
+        data = _load_shop()
+        if not data:
             return "Boutique indisponible."
         lines = ["🛒 **Boutique du Refuge**"]
         for key, item in data.items():
