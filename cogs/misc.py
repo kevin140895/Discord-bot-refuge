@@ -13,7 +13,7 @@ from discord.ext import commands
 from utils.interactions import safe_respond
 from utils.metrics import measure
 from view import PlayerTypeView
-from config import CHANNEL_ROLES, OWNER_ID
+from config import CHANNEL_ROLES, OWNER_ID, XP_VIEWER_ROLE_ID
 logger = logging.getLogger(__name__)
 
 
@@ -22,7 +22,7 @@ class MiscCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="type_joueur", description="Choisir PC, Console ou Mobile")
-    @app_commands.checks.has_role(1403510368340410550)
+    @app_commands.checks.has_role(XP_VIEWER_ROLE_ID)
     async def type_joueur(self, interaction: discord.Interaction) -> None:
         with measure("slash:type_joueur"):
             if interaction.guild is None:

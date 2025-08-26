@@ -19,6 +19,7 @@ from discord.ext import commands, tasks
 from config import (
     DATA_DIR,
     ANNOUNCE_CHANNEL_ID,
+    XP_VIEWER_ROLE_ID,
 )
 from utils.timezones import PARIS_TZ
 from utils.interactions import safe_respond
@@ -317,7 +318,7 @@ class XPCog(commands.Cog):
 
 
     @app_commands.command(name="don_xp", description="Donne de l'XP à un membre")
-    @app_commands.checks.has_role(1403510368340410550)
+    @app_commands.checks.has_role(XP_VIEWER_ROLE_ID)
     @app_commands.describe(
         membre="Membre qui reçoit l'XP",
         montant="Quantité d'XP à ajouter",

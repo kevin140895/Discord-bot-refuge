@@ -7,8 +7,9 @@ from discord.app_commands import errors
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 import cogs.xp as xp
+from config import XP_VIEWER_ROLE_ID
 
-ROLE_ID = 1403510368340410550
+ROLE_ID = XP_VIEWER_ROLE_ID
 
 
 def _member_with_roles(role_ids):
