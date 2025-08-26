@@ -5,7 +5,6 @@ import json
 import pytest
 
 import cogs.economy_ui as economy_ui
-from cogs.economy_ui import BankTransferModal
 from storage import economy
 from storage.transaction_store import TransactionStore
 from storage.xp_store import XPStore
@@ -22,13 +21,10 @@ async def test_bank_transfer_sends_dm(tmp_path, monkeypatch):
     add_xp_mock = AsyncMock()
     monkeypatch.setattr(economy_ui.xp_adapter, "add_xp", add_xp_mock)
 
-    modal = BankTransferModal(beneficiary_id=2)
-    modal.amount = SimpleNamespace(value="200")
-
     recipient = SimpleNamespace(id=2, send=AsyncMock())
     client = SimpleNamespace(get_user=lambda _id: recipient)
 
-    response = SimpleNamespace(send_message=AsyncMock())
+    response = SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False)
     interaction = SimpleNamespace(
         user=SimpleNamespace(id=1, mention="@User"),
         guild=None,
@@ -38,7 +34,7 @@ async def test_bank_transfer_sends_dm(tmp_path, monkeypatch):
         followup=SimpleNamespace(send=AsyncMock()),
     )
 
-    await modal.on_submit(interaction)
+    await economy_ui._process_transfer(interaction, 2, "200")
 
     add_xp_mock.assert_has_awaits(
         [
@@ -91,12 +87,9 @@ async def test_bank_transfer_uses_persisted_balance(tmp_path, monkeypatch):
     add_xp_mock = AsyncMock()
     monkeypatch.setattr(economy_ui.xp_adapter, "add_xp", add_xp_mock)
 
-    modal = BankTransferModal(beneficiary_id=2)
-    modal.amount = SimpleNamespace(value="200")
-
     recipient = SimpleNamespace(id=2, send=AsyncMock())
     client = SimpleNamespace(get_user=lambda _id: recipient)
-    response = SimpleNamespace(send_message=AsyncMock())
+    response = SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False)
     interaction = SimpleNamespace(
         user=SimpleNamespace(id=1, mention="@User"),
         guild=None,
@@ -106,7 +99,7 @@ async def test_bank_transfer_uses_persisted_balance(tmp_path, monkeypatch):
         followup=SimpleNamespace(send=AsyncMock()),
     )
 
-    await modal.on_submit(interaction)
+    await economy_ui._process_transfer(interaction, 2, "200")
 
     add_xp_mock.assert_has_awaits(
         [
