@@ -32,6 +32,12 @@ DEFAULT_SHOP: dict[str, dict[str, typing.Any]] = {
     "double_xp_1h": {"name": "Double XP 1h", "price": 300},
 }
 
+# Limites d'achats par utilisateur pour certains articles
+PURCHASE_LIMITS: dict[str, int] = {
+    "ticket_royal": 3,
+    "double_xp_1h": 2,
+}
+
 
 def _load_shop() -> typing.Optional[dict[str, typing.Any]]:
     try:
@@ -209,8 +215,24 @@ class EconomyUICog(commands.Cog):
         ).lower():
             await interaction.response.send_message("Article inconnu.", ephemeral=True)
             return
-        price = int(item.get("price", 0))
         user_id = interaction.user.id
+        limit = PURCHASE_LIMITS.get(item_key)
+        if limit is not None:
+            txs = await transactions.all()
+            count = sum(
+                1
+                for tx in txs
+                if tx.get("type") == "buy"
+                and tx.get("user_id") == user_id
+                and tx.get("item") == item_key
+            )
+            if count >= limit:
+                await interaction.response.send_message(
+                    f"Vous avez atteint la limite d'achat pour {item.get('name', item_key)} (max {limit}).",
+                    ephemeral=True,
+                )
+                return
+        price = int(item.get("price", 0))
         balance = xp_adapter.get_balance(user_id)
         if balance < price:
             await interaction.response.send_message(
@@ -291,8 +313,10 @@ class EconomyUICog(commands.Cog):
             if "vip" in key.lower() or "vip" in name.lower():
                 continue
             price = item.get("price")
+            limit = PURCHASE_LIMITS.get(key)
+            limit_txt = f" (max {limit})" if limit is not None else ""
             lines.append(
-                f"- **{name}** – {price}💰" if price else f"- **{name}**"
+                f"- **{name}** – {price}💰{limit_txt}" if price else f"- **{name}**{limit_txt}"
             )
         return "\n".join(lines)
 
