@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Callable
 
 from storage.economy import TICKETS_FILE, transactions
+from storage.roulette_store import RouletteStore
 from utils.storage import load_json
 from utils.persist import atomic_write_json
 
@@ -39,3 +40,21 @@ def consume_free_ticket(user_id: int) -> bool:
         )
     )
     return True
+
+
+def consume_any_ticket(
+    user_id: int,
+    store: RouletteStore | None = None,
+    consume: Callable[[int], bool] = consume_free_ticket,
+) -> bool:
+    """Consume a ticket from economy or the roulette store.
+
+    Attempts to consume an economy ticket via ``consume`` first. If none are
+    available and ``store`` is provided, a ticket from that store is used.
+    Returns ``True`` if a ticket was consumed.
+    """
+    if consume(user_id):
+        return True
+    if store and store.use_ticket(str(user_id)):
+        return True
+    return False
