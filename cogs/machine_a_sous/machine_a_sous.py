@@ -669,8 +669,10 @@ class MachineASousCog(commands.Cog):
 
     async def cog_unload(self):
         self.maintenance_loop.cancel()
+        self.bot.tree.remove_command(self.group.name)
 
 async def setup(bot: commands.Bot):
     cog = MachineASousCog(bot)
     await bot.add_cog(cog)
+    bot.tree.remove_command(cog.group.name)
     bot.tree.add_command(cog.group)
