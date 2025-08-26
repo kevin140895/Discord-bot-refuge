@@ -42,6 +42,12 @@ class _RenameManager:
     async def request(
         self, channel: discord.abc.GuildChannel, new_name: str
     ) -> None:
+        if self._worker is None or self._worker.done():
+            if self._worker is None:
+                logging.warning("[rename_manager] worker absent; starting")
+            else:
+                logging.warning("[rename_manager] worker stopped; restarting")
+            await self.start()
         if channel.name == new_name:
             logging.debug("[rename_manager] skip identical name for %s", channel.id)
             return
@@ -52,12 +58,6 @@ class _RenameManager:
             await self._queue.put(channel.id)
             logging.debug(
                 "[rename_manager] queued rename %s -> %r", channel.id, new_name
-            )
-        if self._worker is None or self._worker.done():
-            logging.warning(
-                "[rename_manager] worker inactive; rename for %s -> %r may not run",
-                channel.id,
-                new_name,
             )
 
     async def _run(self) -> None:
