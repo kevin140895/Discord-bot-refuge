@@ -9,9 +9,9 @@ def get_balance(user_id: int) -> int:
     """Return current XP balance for ``user_id``.
 
     The underlying :mod:`storage.xp_store` lazily loads its data and may not
-    be initialised when this function is called.  If the requested user is not
+    be initialised when this function is called. If the requested user is not
     present in the in-memory cache we fallback to reading the JSON file from
-    disk so that features like the bank can operate even before the XP store
+    disk so that features relying on the XP store can operate even before it
     is fully started.
     """
 
