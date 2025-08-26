@@ -346,7 +346,6 @@ class XPStore:
 
     async def get_top_users(self, limit: int = 10) -> List[Tuple[str, XPUserData]]:
         """Récupère le top des utilisateurs par XP."""
-        # Pour le leaderboard, on doit charger toutes les données
         all_data = read_json_safe(self.path)
         
         # Trier par XP

@@ -38,16 +38,11 @@ async def test_loss_streak_grants_machine_ticket(tmp_path, monkeypatch):
     async def _get_channel():
         return None
 
-    async def _ensure_leaderboard_message(channel):
-        return None
-
     async def _get_announce_channel():
         return None
 
     cog._get_channel = _get_channel
-    cog._ensure_leaderboard_message = _ensure_leaderboard_message
     cog._get_announce_channel = _get_announce_channel
-    cog._build_leaderboard_embed = lambda: None
     cog._draw_segment = lambda: "lose_0x"
 
     class DummyResponse:
