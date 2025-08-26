@@ -62,78 +62,88 @@ class _RenameManager:
 
     async def _run(self) -> None:
         while True:
-            cid = await self._queue.get()
-            channel, name = self._pending.pop(cid, (None, None))
-            if channel is None:
-                self._queue.task_done()
-                continue
+            cid: int | None = None
+            try:
+                cid = await self._queue.get()
+                channel, name = self._pending.pop(cid, (None, None))
+                if channel is None:
+                    self._queue.task_done()
+                    continue
 
-            if CHANNEL_RENAME_DEBOUNCE_SECONDS > 0:
-                await asyncio.sleep(CHANNEL_RENAME_DEBOUNCE_SECONDS)
+                if CHANNEL_RENAME_DEBOUNCE_SECONDS > 0:
+                    await asyncio.sleep(CHANNEL_RENAME_DEBOUNCE_SECONDS)
 
-            now = time.monotonic()
-            last = self._last_per_channel.get(cid, 0.0)
-            wait = CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL - (now - last)
-            if wait > 0:
-                await asyncio.sleep(wait)
+                now = time.monotonic()
+                last = self._last_per_channel.get(cid, 0.0)
+                wait = CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL - (now - last)
+                if wait > 0:
+                    await asyncio.sleep(wait)
 
-            now = time.monotonic()
-            gwait = CHANNEL_RENAME_MIN_INTERVAL_GLOBAL - (now - self._last_global)
-            if gwait > 0:
-                await asyncio.sleep(gwait)
+                now = time.monotonic()
+                gwait = CHANNEL_RENAME_MIN_INTERVAL_GLOBAL - (now - self._last_global)
+                if gwait > 0:
+                    await asyncio.sleep(gwait)
 
-            if channel.guild.get_channel(cid) is None:
-                logging.debug(
-                    "[rename_manager] channel %s deleted before rename; skipping", cid
-                )
-                self._queue.task_done()
-                continue
-
-            attempt = 0
-            while True:
-                start = time.monotonic()
-                try:
-                    await channel.edit(name=name)
-                except discord.NotFound:
-                    logging.warning("[rename_manager] channel %s not found", cid)
-                    break
-                except discord.HTTPException as exc:
-                    if exc.status == 429 and attempt < CHANNEL_RENAME_MAX_RETRIES:
-                        delay = CHANNEL_RENAME_BACKOFF_BASE ** attempt
-                        logging.warning(
-                            "[rename_manager] 429 on %s retry in %.1fs", cid, delay
-                        )
-                        await asyncio.sleep(delay)
-                        attempt += 1
-                        continue
-                    if exc.status == 403:
-                        logging.warning(
-                            "[rename_manager] permission insuffisante pour %s", cid
-                        )
-                    elif attempt:
-                        logging.warning(
-                            "[rename_manager] edit failed for %s after %d retries: %s",
-                            cid,
-                            attempt,
-                            exc,
-                        )
-                    else:
-                        logging.warning(
-                            "[rename_manager] edit failed for %s: %s", cid, exc
-                        )
-                    errors["rename_failed"] += 1
-                    break
-                else:
-                    latency = (time.monotonic() - start) * 1000
+                if channel.guild.get_channel(cid) is None:
                     logging.debug(
-                        "[rename_manager] renamed %s to %r in %.1fms", cid, name, latency
+                        "[rename_manager] channel %s deleted before rename; skipping",
+                        cid,
                     )
-                    now = time.monotonic()
-                    self._last_per_channel[cid] = now
-                    self._last_global = now
-                    break
+                    self._queue.task_done()
+                    continue
 
-            self._queue.task_done()
+                attempt = 0
+                while True:
+                    start = time.monotonic()
+                    try:
+                        await channel.edit(name=name)
+                    except discord.NotFound:
+                        logging.warning("[rename_manager] channel %s not found", cid)
+                        break
+                    except discord.HTTPException as exc:
+                        if exc.status == 429 and attempt < CHANNEL_RENAME_MAX_RETRIES:
+                            delay = CHANNEL_RENAME_BACKOFF_BASE ** attempt
+                            logging.warning(
+                                "[rename_manager] 429 on %s retry in %.1fs", cid, delay
+                            )
+                            await asyncio.sleep(delay)
+                            attempt += 1
+                            continue
+                        if exc.status == 403:
+                            logging.warning(
+                                "[rename_manager] permission insuffisante pour %s", cid
+                            )
+                        elif attempt:
+                            logging.warning(
+                                "[rename_manager] edit failed for %s after %d retries: %s",
+                                cid,
+                                attempt,
+                                exc,
+                            )
+                        else:
+                            logging.warning(
+                                "[rename_manager] edit failed for %s: %s", cid, exc
+                            )
+                        errors["rename_failed"] += 1
+                        break
+                    else:
+                        latency = (time.monotonic() - start) * 1000
+                        logging.debug(
+                            "[rename_manager] renamed %s to %r in %.1fms",
+                            cid,
+                            name,
+                            latency,
+                        )
+                        now = time.monotonic()
+                        self._last_per_channel[cid] = now
+                        self._last_global = now
+                        break
+
+                self._queue.task_done()
+            except Exception:
+                logging.exception("[rename_manager] worker encountered an error")
+                if cid is not None:
+                    self._queue.task_done()
 
 
 rename_manager = _RenameManager()
