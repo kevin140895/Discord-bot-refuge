@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import typing
 
 import discord
@@ -80,21 +79,49 @@ class ShopView(discord.ui.View):
         )
 
 
+class BeneficiarySelect(discord.ui.Select):
+    """Sélecteur de bénéficiaire pour un virement."""
+
+    def __init__(self, members: list[discord.Member]):
+        options = [
+            discord.SelectOption(label=m.display_name, value=str(m.id))
+            for m in members
+        ]
+        super().__init__(
+            placeholder="Choisissez un bénéficiaire",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        beneficiary_id = int(self.values[0])
+        await interaction.response.send_modal(BankTransferModal(beneficiary_id))
+
+
+class BankTransferView(discord.ui.View):
+    """Vue permettant de sélectionner un bénéficiaire pour un virement."""
+
+    def __init__(self, members: list[discord.Member]) -> None:
+        super().__init__(timeout=60)
+        self.add_item(BeneficiarySelect(members))
+
+
 class BankTransferModal(discord.ui.Modal):
-    """Modal de virement bancaire."""
+    """Modal demandant le montant d'un virement."""
 
     amount = discord.ui.TextInput(label="Montant")
-    beneficiary = discord.ui.TextInput(label="Bénéficiaire ID")
 
-    def __init__(self) -> None:
+    def __init__(self, beneficiary_id: int) -> None:
         super().__init__(title="Virement")
+        self.beneficiary_id = beneficiary_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         logger.info(
             "Validation modal virement par %s: montant=%s, beneficiaire=%s",
             interaction.user.id,
             self.amount.value,
-            self.beneficiary.value,
+            self.beneficiary_id,
         )
 
         # Parse amount
@@ -107,19 +134,7 @@ class BankTransferModal(discord.ui.Modal):
             )
             return
 
-        # Parse beneficiary ID (supports mention or raw ID)
-        try:
-            beneficiary_id = int(
-                re.sub(r"[^0-9]", "", self.beneficiary.value.strip())
-            )
-        except ValueError:
-            logger.warning(
-                "Beneficiaire invalide: %s", self.beneficiary.value
-            )
-            await interaction.response.send_message(
-                "Bénéficiaire invalide.", ephemeral=True
-            )
-            return
+        beneficiary_id = self.beneficiary_id
 
         if amount <= 0:
             logger.info("Montant non positif: %s", amount)
@@ -244,9 +259,16 @@ class BankView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         logger.info(
-            "Ouverture modal virement par %s", interaction.user.id
+            "Ouverture virement par %s", interaction.user.id
         )
-        await interaction.response.send_modal(BankTransferModal())
+        members: list[discord.Member] = []
+        if interaction.guild is not None:
+            members = [
+                m for m in interaction.guild.members if m.id != interaction.user.id
+            ]
+        await interaction.response.send_message(
+            view=BankTransferView(members), ephemeral=True
+        )
 
 
 class EconomyUICog(commands.Cog):
@@ -328,7 +350,9 @@ class EconomyUICog(commands.Cog):
             logger.warning("Lecture ui.json échouée: %s", e)
             ui_data = {}
         try:
-            channel = await self.bot.fetch_channel(CHANNEL_ID)
+            channel = getattr(self.bot, "get_channel", lambda _cid: None)(CHANNEL_ID)
+            if channel is None:
+                channel = await self.bot.fetch_channel(CHANNEL_ID)  # type: ignore[attr-defined]
         except discord.NotFound:
             logger.warning("Salon économie introuvable (%s)", CHANNEL_ID)
             return
