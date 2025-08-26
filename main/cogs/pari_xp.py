@@ -33,7 +33,6 @@ PARI_XP_DATA_DIR = Path(DATA_DIR) / "pari_xp"
 PARI_XP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_PATH = PARI_XP_DATA_DIR / "config.json"
 STATE_PATH = PARI_XP_DATA_DIR / "state.json"
-LB_PATH = PARI_XP_DATA_DIR / "leaderboard.json"
 TX_PATH = PARI_XP_DATA_DIR / "transactions.json"
 
 DEFAULT_CHANNEL_ID = 1408834276228730900
@@ -45,12 +44,10 @@ class RouletteRefugeCog(commands.Cog):
         self.config = storage.load_json(CONFIG_PATH, {})
         self.state = storage.load_json(STATE_PATH, {})
         self.scheduler_task.start()
-        self.leaderboard_task.start()
         self._cooldowns: dict[int, datetime] = {}
         self._bets_today: dict[int, int] = {}
         self._bets_today_date = self._now().date()
         self._last_autoheal_hub = None
-        self._last_autoheal_lb = None
         self._hub_lock = asyncio.Lock()
         self._autoheal_presence_task.start()
         self.roulette_store = RouletteStore(data_dir=DATA_DIR)
@@ -100,31 +97,6 @@ class RouletteRefugeCog(commands.Cog):
                     self.state["hub_message_id"] = msg.id
                     await storage.save_json(STATE_PATH, self.state)
                     return msg
-        return None
-
-    async def _find_leaderboard_message(
-        self, channel: discord.TextChannel
-    ) -> discord.Message | None:
-        """Search pinned messages and recent history for existing leaderboard."""
-        title_prefix = "📊 Roulette Refuge"
-        try:
-            pins = await channel.pins()
-        except Exception:
-            pins = []
-        for msg in pins:
-            if msg.author == self.bot.user:
-                for embed in msg.embeds:
-                    if embed.title and embed.title.startswith(title_prefix):
-                        self.state["leaderboard_message_id"] = msg.id
-                        await storage.save_json(STATE_PATH, self.state)
-                        return msg
-        async for msg in channel.history(limit=50):
-            if msg.author == self.bot.user:
-                for embed in msg.embeds:
-                    if embed.title and embed.title.startswith(title_prefix):
-                        self.state["leaderboard_message_id"] = msg.id
-                        await storage.save_json(STATE_PATH, self.state)
-                        return msg
         return None
 
     async def _ensure_hub_message(self, channel: discord.TextChannel) -> None:
@@ -197,126 +169,12 @@ class RouletteRefugeCog(commands.Cog):
 
         return HubView()
 
-    async def _ensure_leaderboard_message(self, channel: discord.TextChannel) -> None:
-        state = storage.load_json(STATE_PATH, self.state)
-        msg_id = state.get("leaderboard_message_id")
-        embed = self._build_leaderboard_embed()
-        message = None
-        if msg_id:
-            try:
-                message = await channel.fetch_message(int(msg_id))
-            except Exception:
-                message = None
-        if not message:
-            message = await self._find_leaderboard_message(channel)
-            state = self.state
-        if message:
-            await safe_message_edit(message, embed=embed)
-        else:
-            message = await channel.send(embed=embed)
-            state["leaderboard_message_id"] = message.id
-            await storage.save_json(STATE_PATH, state)
-            self.state = state
-
-    async def _refresh_leaderboard(self, channel: discord.TextChannel) -> None:
-        """Ensure leaderboard message exists and refresh its embed."""
-        try:
-            await self._ensure_leaderboard_message(channel)
-            state = storage.load_json(STATE_PATH, self.state)
-            msg_id = state.get("leaderboard_message_id") or self.state.get(
-                "leaderboard_message_id"
-            )
-            if not msg_id:
-                return
-            msg = await channel.fetch_message(int(msg_id))
-            await safe_message_edit(msg, embed=self._build_leaderboard_embed())
-            self.state = state if state else self.state
-        except Exception:
-            pass
-
-    def _build_leaderboard_embed(self) -> discord.Embed:
-        tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
-        now = datetime.now(tz)
-        transactions = storage.load_json(TX_PATH, [])
-        if not isinstance(transactions, list):
-            transactions = []
-        month_txs = []
-        for tx in transactions:
-            ts = tx.get("ts")
-            try:
-                dt = datetime.fromisoformat(ts)
-            except Exception:
-                continue
-            dt = dt.astimezone(tz)
-            if dt.year == now.year and dt.month == now.month:
-                month_txs.append(tx)
-        stats: dict[int, dict[str, int | str]] = {}
-        for tx in month_txs:
-            uid = tx.get("user_id")
-            username = tx.get("username", str(uid))
-            delta = int(tx.get("delta", 0))
-            user_stat = stats.setdefault(
-                uid, {"username": username, "won": 0, "lost": 0}
-            )
-            user_stat["username"] = username
-            if delta > 0:
-                user_stat["won"] = int(user_stat["won"]) + delta
-            elif delta < 0:
-                user_stat["lost"] = int(user_stat["lost"]) - delta
-        winners = sorted(
-            [v for v in stats.values() if int(v["won"]) > 0],
-            key=lambda x: int(x["won"]),
-            reverse=True,
-        )[:10]
-        losers = sorted(
-            [v for v in stats.values() if int(v["lost"]) > 0],
-            key=lambda x: int(x["lost"]),
-            reverse=True,
-        )[:10]
-        win_lines = [
-            f"{idx + 1}. {w['username']} (+{int(w['won'])} XP)"
-            for idx, w in enumerate(winners)
-        ]
-        loss_lines = [
-            f"{idx + 1}. {loser['username']} (-{int(loser['lost'])} XP)"
-            for idx, loser in enumerate(losers)
-        ]
-        biggest = None
-        for tx in month_txs:
-            if tx.get("delta", 0) > 0:
-                if not biggest or tx["delta"] > biggest["delta"]:
-                    biggest = tx
-        biggest_val = f"{biggest['username']} (+{biggest['delta']} XP)" if biggest else "N/A"
-        embed = discord.Embed(
-            title=f"📊 Roulette Refuge — Leaderboard ({now.strftime('%B %Y')})",
-            color=discord.Color.purple(),
-        )
-        embed.add_field(
-            name="🏆 Top 10 gagnants (mois)",
-            value="\n".join(win_lines) if win_lines else "N/A",
-            inline=False,
-        )
-        embed.add_field(
-            name="💸 Top 10 perdants (mois)",
-            value="\n".join(loss_lines) if loss_lines else "N/A",
-            inline=False,
-        )
-        embed.add_field(
-            name="💥 Plus gros gain unique (mois)",
-            value=biggest_val,
-            inline=False,
-        )
-        embed.add_field(name="🔁 Séries", value="(à venir)", inline=False)
-        return embed
-
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         self.state = storage.load_json(STATE_PATH, {})
         channel = await self._get_channel()
         if channel:
             await self._ensure_hub_message(channel)
-            # leaderboard sera géré aux étapes suivantes
-            await self._ensure_leaderboard_message(channel)
         try:
             self.bot.add_view(self._build_hub_view())
         except Exception:
@@ -483,10 +341,6 @@ class RouletteRefugeCog(commands.Cog):
 
         if now.day == 1 and now.hour == 0 and now.minute == 0:
             await storage.save_json(TX_PATH, [])
-            try:
-                await self._refresh_leaderboard(channel)
-            except Exception:
-                pass
 
         # --- Gestion ouverture/fermeture + "dernier appel" ---
         is_open_now = self._is_open_hours(now)
@@ -533,16 +387,6 @@ class RouletteRefugeCog(commands.Cog):
     async def _wait_ready_scheduler(self) -> None:
         await self.bot.wait_until_ready()
 
-    @tasks.loop(minutes=3.0)
-    async def leaderboard_task(self) -> None:
-        channel = await self._get_channel()
-        if channel:
-            await self._refresh_leaderboard(channel)
-
-    @leaderboard_task.before_loop
-    async def _wait_ready_lb(self) -> None:
-        await self.bot.wait_until_ready()
-
     @tasks.loop(minutes=10.0)
     async def _autoheal_presence_task(self):
         ch = await self._get_channel()
@@ -573,27 +417,6 @@ class RouletteRefugeCog(commands.Cog):
                 except Exception:
                     pass
 
-        # --- LEADERBOARD (si méthode dispo) ---
-        if hasattr(self, "_ensure_leaderboard_message"):
-            lb_id = state.get("leaderboard_message_id")
-            need_heal_lb = False
-            _msg_lb = None
-            if lb_id:
-                try:
-                    _msg_lb = await ch.fetch_message(int(lb_id))
-                except Exception:
-                    need_heal_lb = True
-            else:
-                need_heal_lb = True
-
-            if need_heal_lb:
-                if not self._last_autoheal_lb or (now - self._last_autoheal_lb) > timedelta(hours=1):
-                    try:
-                        await self._ensure_leaderboard_message(ch)
-                        state = self.state
-                        self._last_autoheal_lb = now
-                    except Exception:
-                        pass
 
     @_autoheal_presence_task.before_loop
     async def _wait_ready_autoheal(self):
@@ -844,13 +667,6 @@ class RouletteRefugeCog(commands.Cog):
             else:
                 self._loss_streak[user_id] = 0
 
-            # Refresh leaderboard after each bet so the ranking stays up to date
-            try:
-                channel = await self._get_channel()
-                if channel:
-                    await self._refresh_leaderboard(channel)
-            except Exception:
-                pass
             lines = [
                 f"Mise : {amount} XP",
                 f"Segment : {segment}",
@@ -969,13 +785,6 @@ class RouletteRefugeCog(commands.Cog):
             and "user.mention" in src
         )
         report["announces"] = "PASS" if announces_ok else "FAIL"
-
-        lb_ok = all(hasattr(self, name) for name in ["_ensure_leaderboard_message", "_build_leaderboard_embed"])
-        lb_ok &= inspect.getsource(type(self).__init__).count("leaderboard_task.start") > 0
-        lb_ok &= getattr(self.leaderboard_task, "seconds", None) == 180 or getattr(
-            self.leaderboard_task, "minutes", None
-        ) == 3.0
-        report["leaderboard"] = "PASS" if lb_ok else "FAIL"
 
         summary_src = inspect.getsource(self._post_daily_summary)
         summary_ok = all(

@@ -17,7 +17,6 @@
   "daily_cap": 20,
   "min_account_age_days": 2,
   "min_balance_guard": 10,
-  "leaderboard_refresh_minutes": 7,
   "announce_super_jackpot_ping_here": true,
   "announce_big_win_mult_threshold": 5,
   "announce_big_loss_xp_threshold": 100,
