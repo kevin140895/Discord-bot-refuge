@@ -266,6 +266,12 @@ class BankView(discord.ui.View):
             members = [
                 m for m in interaction.guild.members if m.id != interaction.user.id
             ]
+        if not members:
+            await interaction.response.send_message(
+                "Aucun membre disponible pour le virement.", ephemeral=True
+            )
+            return
+
         await interaction.response.send_message(
             view=BankTransferView(members), ephemeral=True
         )

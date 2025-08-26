@@ -49,3 +49,22 @@ async def test_bank_transfer_sends_dm(tmp_path, monkeypatch):
     assert txs[1]["type"] == "receive"
     response.send_message.assert_awaited_once()
     recipient.send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_open_transfer_no_members():
+    view = economy_ui.BankView()
+    response = SimpleNamespace(send_message=AsyncMock())
+    guild = SimpleNamespace(members=[SimpleNamespace(id=1)])
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=1),
+        guild=guild,
+        response=response,
+    )
+
+    await view.open_transfer.callback(interaction)
+
+    response.send_message.assert_awaited_once()
+    args, kwargs = response.send_message.await_args_list[0]
+    assert kwargs.get("ephemeral") is True
+    assert "Aucun membre" in args[0]
