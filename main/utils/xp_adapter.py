@@ -32,26 +32,8 @@ def add_user_xp(user_id: int, amount: int, guild_id: int, source: str = "pari_xp
     the update so callers don't have to await it. ``source`` is recorded with
     the level change event.
 
-    If ``user_id`` has an active double-XP buff, ``amount`` is doubled.  Buffs
-    that have expired are cleaned up lazily.
+    Any active double-XP buff is handled internally by ``xp_store``.
     """
-
-    if amount > 0:
-        uid = str(user_id)
-        user = xp_store.data.get(uid)
-        expires = user.get("double_xp_until") if user else None
-        if isinstance(expires, str):
-            try:
-                exp_dt = datetime.fromisoformat(expires)
-            except ValueError:
-                exp_dt = None
-            now = datetime.utcnow()
-            if exp_dt and exp_dt > now:
-                amount *= 2
-            else:
-                if user and "double_xp_until" in user:
-                    user.pop("double_xp_until")
-                    asyncio.create_task(xp_store.flush())
 
     asyncio.create_task(
         xp_store.add_xp(user_id, amount, guild_id=guild_id, source=source)

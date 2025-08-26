@@ -206,7 +206,7 @@ class XPStore:
         *,
         guild_id: Optional[int] = None,
         source: str = "manual",
-        batch: bool = True  # Nouveau: permet le traitement par lot
+        batch: bool = False  # Traitement immédiat par défaut
     ) -> Tuple[int, int, int, int]:
         """
         Ajoute de l'XP à un utilisateur.
@@ -232,17 +232,25 @@ class XPStore:
         if batch and amount != 0:
             # Ajouter au batch pour traitement ultérieur
             await self._batch_updates.add(uid, amount)
-            
-            # Retourner les valeurs actuelles (pas encore mises à jour)
+
+            # Récupérer l'état actuel
             async with self.lock:
                 user = self.data.get(uid, {"xp": 0, "level": 0})
-                current_level = user.get("level", 0)
-                current_xp = user.get("xp", 0)
-                # Estimer les nouvelles valeurs
-                estimated_xp = max(0, current_xp + amount)
-                estimated_level = self._calc_level(estimated_xp)
-                
-            return current_level, estimated_level, current_xp, estimated_xp
+                base_xp = int(user.get("xp", 0))
+
+            # Tenir compte des mises à jour en attente pour estimer correctement
+            async with self._batch_updates.lock:
+                pending_total = self._batch_updates.pending.get(uid, 0)
+
+            # XP avant cette transaction (y compris les updates précédentes)
+            old_xp = max(0, base_xp + pending_total - amount)
+            old_level = self._calc_level(old_xp)
+
+            # XP estimée après cette transaction
+            estimated_xp = max(0, base_xp + pending_total)
+            estimated_level = self._calc_level(estimated_xp)
+
+            return old_level, estimated_level, old_xp, estimated_xp
         
         # Traitement immédiat (non-batch)
         async with self.lock:
