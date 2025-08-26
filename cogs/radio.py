@@ -85,7 +85,7 @@ class RadioCog(commands.Cog):
 
         def is_radio_message(msg: discord.Message) -> bool:
             return any(
-                isinstance(comp, discord.ui.Button) and comp.custom_id == "radio_hiphop"
+                getattr(comp, "custom_id", "") == "radio_hiphop"
                 for row in getattr(msg, "components", [])
                 for comp in getattr(row, "children", [])
             )
