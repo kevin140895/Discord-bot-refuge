@@ -20,6 +20,7 @@ from config import (
     MACHINE_A_SOUS_CHANNEL_ID as CHANNEL_ID,
     DATA_DIR,
     MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES,
+    XP_VIEWER_ROLE_ID,
 )
 from utils.discord_utils import safe_message_edit
 from utils.economy_tickets import consume_any_ticket, consume_free_ticket
@@ -643,7 +644,7 @@ class MachineASousCog(commands.Cog):
         description="Accorder un ticket de machine à sous",
     )
     @app_commands.describe(member="Membre à créditer")
-    @app_commands.checks.has_role(1403510368340410550)
+    @app_commands.checks.has_role(XP_VIEWER_ROLE_ID)
     async def ticket(
         self, interaction: discord.Interaction, member: discord.Member
     ) -> None:

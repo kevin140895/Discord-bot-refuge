@@ -13,8 +13,9 @@ os.environ.setdefault("DISCORD_TOKEN", "dummy")
 from cogs.machine_a_sous.machine_a_sous import MachineASousCog
 from storage.roulette_store import RouletteStore
 from discord.app_commands import errors
+from config import XP_VIEWER_ROLE_ID
 
-ROLE_ID = 1403510368340410550
+ROLE_ID = XP_VIEWER_ROLE_ID
 
 
 def _member_with_roles(role_ids):
