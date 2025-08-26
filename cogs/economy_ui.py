@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import typing
-import asyncio
 
 import discord
 from discord.ext import commands, tasks
@@ -72,217 +71,14 @@ class ShopView(discord.ui.View):
         )
 
 
-class BeneficiarySelect(discord.ui.Select):
-    """Sélecteur de bénéficiaire pour un virement."""
-
-    def __init__(self, members: list[discord.Member]):
-        options = [
-            discord.SelectOption(label=m.display_name, value=str(m.id))
-            for m in members
-        ]
-        super().__init__(
-            placeholder="Choisissez un bénéficiaire",
-            min_values=1,
-            max_values=1,
-            options=options,
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        beneficiary_id = int(self.values[0])
-        await interaction.response.send_message(
-            "Quel montant souhaitez-vous transférer ?", ephemeral=True
-        )
-
-        def check(message: discord.Message) -> bool:
-            return (
-                message.author.id == interaction.user.id
-                and message.channel == interaction.channel
-            )
-
-        try:
-            msg = await interaction.client.wait_for(
-                "message", check=check, timeout=30
-            )
-        except asyncio.TimeoutError:
-            await interaction.followup.send(
-                "Temps écoulé, virement annulé.", ephemeral=True
-            )
-            return
-
-        await _process_transfer(interaction, beneficiary_id, msg.content)
-
-
-class BankTransferView(discord.ui.View):
-    """Vue permettant de sélectionner un bénéficiaire pour un virement."""
-
-    def __init__(self, members: list[discord.Member]) -> None:
-        super().__init__(timeout=60)
-        self.add_item(BeneficiarySelect(members))
-
-
-async def _process_transfer(
-    interaction: discord.Interaction, beneficiary_id: int, amount_input: str
-) -> None:
-    logger.info(
-        "Validation virement par %s: montant=%s, beneficiaire=%s",
-        interaction.user.id,
-        amount_input,
-        beneficiary_id,
-    )
-
-    send = (
-        interaction.followup.send
-        if getattr(interaction.response, "is_done", lambda: False)()
-        else interaction.response.send_message
-    )
-
-    try:
-        amount = int(amount_input)
-    except (TypeError, ValueError):
-        logger.warning("Montant invalide: %s", amount_input)
-        await send("Montant invalide.", ephemeral=True)
-        return
-
-    if amount <= 0:
-        logger.info("Montant non positif: %s", amount)
-        await send("Le montant doit être supérieur à 0.", ephemeral=True)
-        return
-
-    if beneficiary_id == interaction.user.id:
-        logger.info("Transfert vers soi-même refusé (%s)", beneficiary_id)
-        await send("Vous ne pouvez pas vous envoyer des XP.", ephemeral=True)
-        return
-
-    balance = xp_adapter.get_balance(interaction.user.id)
-    if balance < amount:
-        logger.info(
-            "Solde insuffisant pour %s: %s < %s",
-            interaction.user.id,
-            balance,
-            amount,
-        )
-        await send("Solde insuffisant.", ephemeral=True)
-        return
-
-    logger.info(
-        "Début virement: %s -> %s (%s XP)",
-        interaction.user.id,
-        beneficiary_id,
-        amount,
-    )
-
-    await xp_adapter.add_xp(
-        interaction.user.id,
-        amount=-amount,
-        guild_id=interaction.guild_id or 0,
-        source="bank_transfer",
-    )
-    await xp_adapter.add_xp(
-        beneficiary_id,
-        amount=amount,
-        guild_id=interaction.guild_id or 0,
-        source="bank_transfer",
-    )
-
-    timestamp = datetime.now(timezone.utc).isoformat()
-    await transactions.add(
-        {
-            "type": "gift",
-            "user_id": interaction.user.id,
-            "to": beneficiary_id,
-            "amount": amount,
-            "timestamp": timestamp,
-        }
-    )
-    await transactions.add(
-        {
-            "type": "receive",
-            "user_id": beneficiary_id,
-            "from": interaction.user.id,
-            "amount": amount,
-            "timestamp": timestamp,
-        }
-    )
-
-    await send("🏦 Virement envoyé !", ephemeral=True)
-    logger.info("Virement effectué")
-
-    # Try to DM the beneficiary
-    recipient: typing.Optional[discord.abc.User] = None
-    if interaction.guild:
-        recipient = interaction.guild.get_member(beneficiary_id)
-    if recipient is None:
-        recipient = interaction.client.get_user(beneficiary_id)
-    if recipient is None:
-        try:  # pragma: no cover - network
-            recipient = await interaction.client.fetch_user(beneficiary_id)
-        except Exception:  # pragma: no cover - best effort
-            pass
-
-    if recipient is not None:
-        try:
-            await recipient.send(
-                f"🏦 Vous venez de recevoir {amount} XP de la part de {interaction.user.mention}."
-            )
-            logger.info("DM envoyé à %s", beneficiary_id)
-        except Exception:  # pragma: no cover - best effort
-            logger.warning(
-                "Échec de l'envoi du DM à %s", beneficiary_id, exc_info=True
-            )
-            await interaction.followup.send(
-                f"Impossible d'envoyer un DM à <@{beneficiary_id}>.",
-                ephemeral=True,
-            )
-    else:  # pragma: no cover - best effort
-        logger.warning(
-            "Bénéficiaire %s introuvable pour DM", beneficiary_id
-        )
-        await interaction.followup.send(
-            f"Impossible de contacter <@{beneficiary_id}>.",
-            ephemeral=True,
-        )
-
-
-class BankView(discord.ui.View):
-    """Vue persistante pour la banque."""
-
-    def __init__(self) -> None:
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="Faire un virement",
-        style=discord.ButtonStyle.primary,
-        custom_id="bank_transfer_open",
-    )
-    async def open_transfer(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        logger.info(
-            "Ouverture virement par %s", interaction.user.id
-        )
-        members: list[discord.Member] = []
-        if interaction.guild is not None:
-            members = [
-                m for m in interaction.guild.members if m.id != interaction.user.id
-            ]
-        if not members:
-            await interaction.response.send_message(
-                "Aucun membre disponible pour le virement.", ephemeral=True
-            )
-            return
-
-        await interaction.response.send_message(
-            view=BankTransferView(members), ephemeral=True
-        )
 
 
 class EconomyUICog(commands.Cog):
-    """Gère les vues persistance de l'économie (boutique et banque)."""
+    """Gère les vues persistantes de l'économie (boutique)."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.shop_view = ShopView()
-        self.bank_view = BankView()
 
     @tasks.loop(minutes=5)
     async def boosts_cleanup(self) -> None:
@@ -318,8 +114,6 @@ class EconomyUICog(commands.Cog):
                 if until <= now:
                     changed = True
                     role_id = int(entry.get("role_id", 0))
-                    if entry.get("type") == "vip" and not role_id:
-                        role_id = getattr(config, "VIP_24H_ROLE_ID", 0)
                     if role_id and guild:
                         member = guild.get_member(int(uid))
                         role = guild.get_role(role_id)
@@ -371,7 +165,6 @@ class EconomyUICog(commands.Cog):
             return
 
         self.bot.add_view(self.shop_view)
-        self.bot.add_view(self.bank_view)
 
         shop_id = await self._ensure_message(
             channel,
@@ -382,16 +175,6 @@ class EconomyUICog(commands.Cog):
         )
         if shop_id:
             ui_data["shop_message_id"] = shop_id
-
-        bank_id = await self._ensure_message(
-            channel,
-            ui_data.get("bank_message_id"),
-            self._bank_text(),
-            self.bank_view,
-            "Banque",
-        )
-        if bank_id:
-            ui_data["bank_message_id"] = bank_id
 
         try:
             await save_ui(ui_data)
@@ -421,7 +204,9 @@ class EconomyUICog(commands.Cog):
             )
             return
         item = shop.get(item_key)
-        if not item:
+        if not item or "vip" in item_key.lower() or "vip" in str(
+            item.get("name", "")
+        ).lower():
             await interaction.response.send_message("Article inconnu.", ephemeral=True)
             return
         price = int(item.get("price", 0))
@@ -503,15 +288,13 @@ class EconomyUICog(commands.Cog):
         lines = ["🛒 **Boutique du Refuge**"]
         for key, item in data.items():
             name = item.get("name", key)
+            if "vip" in key.lower() or "vip" in name.lower():
+                continue
             price = item.get("price")
-            lines.append(f"- **{name}** – {price}💰" if price else f"- **{name}**")
+            lines.append(
+                f"- **{name}** – {price}💰" if price else f"- **{name}**"
+            )
         return "\n".join(lines)
-
-    def _bank_text(self) -> str:
-        return (
-            "🏦 **Banque du Refuge**\n"
-            "Utilise le bouton ci-dessous pour transférer tes crédits."
-        )
 
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - requires discord
