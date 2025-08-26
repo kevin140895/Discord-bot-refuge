@@ -20,9 +20,8 @@ async def test_bank_transfer_sends_dm(tmp_path, monkeypatch):
     add_xp_mock = AsyncMock()
     monkeypatch.setattr(economy_ui.xp_adapter, "add_xp", add_xp_mock)
 
-    modal = BankTransferModal()
+    modal = BankTransferModal(beneficiary_id=2)
     modal.amount = SimpleNamespace(value="200")
-    modal.beneficiary = SimpleNamespace(value="2")
 
     recipient = SimpleNamespace(id=2, send=AsyncMock())
     client = SimpleNamespace(get_user=lambda _id: recipient)
