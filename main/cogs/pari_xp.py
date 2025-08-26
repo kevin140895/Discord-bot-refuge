@@ -36,6 +36,8 @@ STATE_PATH = PARI_XP_DATA_DIR / "state.json"
 LB_PATH = PARI_XP_DATA_DIR / "leaderboard.json"
 TX_PATH = PARI_XP_DATA_DIR / "transactions.json"
 
+DEFAULT_CHANNEL_ID = 1408834276228730900
+
 
 class RouletteRefugeCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
@@ -595,9 +597,10 @@ class RouletteRefugeCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _bet_button_callback(self, interaction: discord.Interaction) -> None:
-        if interaction.channel_id != int(self.config.get("channel_id", 0)):
+        channel_id = int(self.config.get("channel_id", DEFAULT_CHANNEL_ID))
+        if interaction.channel_id != channel_id:
             await interaction.response.send_message(
-                "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
+                f"🚪 Utilise la 🤑 Roulette Refuge dans <#{channel_id}>.",
                 ephemeral=True,
             )
             return
@@ -691,9 +694,10 @@ class RouletteRefugeCog(commands.Cog):
         self,
         interaction: discord.Interaction,
     ) -> None:
-        if interaction.channel_id != int(self.config.get("channel_id", 0)):
+        channel_id = int(self.config.get("channel_id", DEFAULT_CHANNEL_ID))
+        if interaction.channel_id != channel_id:
             await interaction.response.send_message(
-                "🚪 Utilise la 🤑 Roulette Refuge dans <#1408834276228730900>.",
+                f"🚪 Utilise la 🤑 Roulette Refuge dans <#{channel_id}>.",
                 ephemeral=True,
             )
             return
