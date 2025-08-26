@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import typing
+import asyncio
 
 import discord
 from discord.ext import commands, tasks
@@ -88,7 +89,27 @@ class BeneficiarySelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         beneficiary_id = int(self.values[0])
-        await interaction.response.send_modal(BankTransferModal(beneficiary_id))
+        await interaction.response.send_message(
+            "Quel montant souhaitez-vous transférer ?", ephemeral=True
+        )
+
+        def check(message: discord.Message) -> bool:
+            return (
+                message.author.id == interaction.user.id
+                and message.channel == interaction.channel
+            )
+
+        try:
+            msg = await interaction.client.wait_for(
+                "message", check=check, timeout=30
+            )
+        except asyncio.TimeoutError:
+            await interaction.followup.send(
+                "Temps écoulé, virement annulé.", ephemeral=True
+            )
+            return
+
+        await _process_transfer(interaction, beneficiary_id, msg.content)
 
 
 class BankTransferView(discord.ui.View):
@@ -99,141 +120,127 @@ class BankTransferView(discord.ui.View):
         self.add_item(BeneficiarySelect(members))
 
 
-class BankTransferModal(discord.ui.Modal):
-    """Modal demandant le montant d'un virement."""
+async def _process_transfer(
+    interaction: discord.Interaction, beneficiary_id: int, amount_input: str
+) -> None:
+    logger.info(
+        "Validation virement par %s: montant=%s, beneficiaire=%s",
+        interaction.user.id,
+        amount_input,
+        beneficiary_id,
+    )
 
-    amount = discord.ui.TextInput(label="Montant")
+    send = (
+        interaction.followup.send
+        if getattr(interaction.response, "is_done", lambda: False)()
+        else interaction.response.send_message
+    )
 
-    def __init__(self, beneficiary_id: int) -> None:
-        super().__init__(title="Virement")
-        self.beneficiary_id = beneficiary_id
+    try:
+        amount = int(amount_input)
+    except (TypeError, ValueError):
+        logger.warning("Montant invalide: %s", amount_input)
+        await send("Montant invalide.", ephemeral=True)
+        return
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
+    if amount <= 0:
+        logger.info("Montant non positif: %s", amount)
+        await send("Le montant doit être supérieur à 0.", ephemeral=True)
+        return
+
+    if beneficiary_id == interaction.user.id:
+        logger.info("Transfert vers soi-même refusé (%s)", beneficiary_id)
+        await send("Vous ne pouvez pas vous envoyer des XP.", ephemeral=True)
+        return
+
+    balance = xp_adapter.get_balance(interaction.user.id)
+    if balance < amount:
         logger.info(
-            "Validation modal virement par %s: montant=%s, beneficiaire=%s",
+            "Solde insuffisant pour %s: %s < %s",
             interaction.user.id,
-            self.amount.value,
-            self.beneficiary_id,
-        )
-
-        # Parse amount
-        try:
-            amount = int(self.amount.value)
-        except (TypeError, ValueError):
-            logger.warning("Montant invalide: %s", self.amount.value)
-            await interaction.response.send_message(
-                "Montant invalide.", ephemeral=True
-            )
-            return
-
-        beneficiary_id = self.beneficiary_id
-
-        if amount <= 0:
-            logger.info("Montant non positif: %s", amount)
-            await interaction.response.send_message(
-                "Le montant doit être supérieur à 0.", ephemeral=True
-            )
-            return
-
-        if beneficiary_id == interaction.user.id:
-            logger.info("Transfert vers soi-même refusé (%s)", beneficiary_id)
-            await interaction.response.send_message(
-                "Vous ne pouvez pas vous envoyer des XP.", ephemeral=True
-            )
-            return
-
-        balance = xp_adapter.get_balance(interaction.user.id)
-        if balance < amount:
-            logger.info(
-                "Solde insuffisant pour %s: %s < %s",
-                interaction.user.id,
-                balance,
-                amount,
-            )
-            await interaction.response.send_message(
-                "Solde insuffisant.", ephemeral=True
-            )
-            return
-
-        logger.info(
-            "Début virement: %s -> %s (%s XP)",
-            interaction.user.id,
-            beneficiary_id,
+            balance,
             amount,
         )
+        await send("Solde insuffisant.", ephemeral=True)
+        return
 
-        await xp_adapter.add_xp(
-            interaction.user.id,
-            amount=-amount,
-            guild_id=interaction.guild_id or 0,
-            source="bank_transfer",
-        )
-        await xp_adapter.add_xp(
-            beneficiary_id,
-            amount=amount,
-            guild_id=interaction.guild_id or 0,
-            source="bank_transfer",
-        )
+    logger.info(
+        "Début virement: %s -> %s (%s XP)",
+        interaction.user.id,
+        beneficiary_id,
+        amount,
+    )
 
-        timestamp = datetime.now(timezone.utc).isoformat()
-        await transactions.add(
-            {
-                "type": "gift",
-                "user_id": interaction.user.id,
-                "to": beneficiary_id,
-                "amount": amount,
-                "timestamp": timestamp,
-            }
-        )
-        await transactions.add(
-            {
-                "type": "receive",
-                "user_id": beneficiary_id,
-                "from": interaction.user.id,
-                "amount": amount,
-                "timestamp": timestamp,
-            }
-        )
+    await xp_adapter.add_xp(
+        interaction.user.id,
+        amount=-amount,
+        guild_id=interaction.guild_id or 0,
+        source="bank_transfer",
+    )
+    await xp_adapter.add_xp(
+        beneficiary_id,
+        amount=amount,
+        guild_id=interaction.guild_id or 0,
+        source="bank_transfer",
+    )
 
-        await interaction.response.send_message(
-            "🏦 Virement envoyé !", ephemeral=True
-        )
-        logger.info("Virement effectué")
+    timestamp = datetime.now(timezone.utc).isoformat()
+    await transactions.add(
+        {
+            "type": "gift",
+            "user_id": interaction.user.id,
+            "to": beneficiary_id,
+            "amount": amount,
+            "timestamp": timestamp,
+        }
+    )
+    await transactions.add(
+        {
+            "type": "receive",
+            "user_id": beneficiary_id,
+            "from": interaction.user.id,
+            "amount": amount,
+            "timestamp": timestamp,
+        }
+    )
 
-        # Try to DM the beneficiary
-        recipient: typing.Optional[discord.abc.User] = None
-        if interaction.guild:
-            recipient = interaction.guild.get_member(beneficiary_id)
-        if recipient is None:
-            recipient = interaction.client.get_user(beneficiary_id)
-        if recipient is None:
-            try:  # pragma: no cover - network
-                recipient = await interaction.client.fetch_user(beneficiary_id)
-            except Exception:  # pragma: no cover - best effort
-                pass
+    await send("🏦 Virement envoyé !", ephemeral=True)
+    logger.info("Virement effectué")
 
-        if recipient is not None:
-            try:
-                await recipient.send(
-                    f"🏦 Vous venez de recevoir {amount} XP de la part de {interaction.user.mention}."
-                )
-                logger.info("DM envoyé à %s", beneficiary_id)
-            except Exception:  # pragma: no cover - best effort
-                logger.warning(
-                    "Échec de l'envoi du DM à %s", beneficiary_id, exc_info=True
-                )
-                await interaction.followup.send(
-                    f"Impossible d'envoyer un DM à <@{beneficiary_id}>.",
-                    ephemeral=True,
-                )
-        else:  # pragma: no cover - best effort
+    # Try to DM the beneficiary
+    recipient: typing.Optional[discord.abc.User] = None
+    if interaction.guild:
+        recipient = interaction.guild.get_member(beneficiary_id)
+    if recipient is None:
+        recipient = interaction.client.get_user(beneficiary_id)
+    if recipient is None:
+        try:  # pragma: no cover - network
+            recipient = await interaction.client.fetch_user(beneficiary_id)
+        except Exception:  # pragma: no cover - best effort
+            pass
+
+    if recipient is not None:
+        try:
+            await recipient.send(
+                f"🏦 Vous venez de recevoir {amount} XP de la part de {interaction.user.mention}."
+            )
+            logger.info("DM envoyé à %s", beneficiary_id)
+        except Exception:  # pragma: no cover - best effort
             logger.warning(
-                "Bénéficiaire %s introuvable pour DM", beneficiary_id
+                "Échec de l'envoi du DM à %s", beneficiary_id, exc_info=True
             )
             await interaction.followup.send(
-                f"Impossible de contacter <@{beneficiary_id}>.",
+                f"Impossible d'envoyer un DM à <@{beneficiary_id}>.",
                 ephemeral=True,
             )
+    else:  # pragma: no cover - best effort
+        logger.warning(
+            "Bénéficiaire %s introuvable pour DM", beneficiary_id
+        )
+        await interaction.followup.send(
+            f"Impossible de contacter <@{beneficiary_id}>.",
+            ephemeral=True,
+        )
 
 
 class BankView(discord.ui.View):
