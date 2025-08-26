@@ -21,16 +21,16 @@ async def test_cleanup_boosts(tmp_path, monkeypatch):
         json.dumps(
             {
                 "1": [
-                    {"type": "double_xp", "until": expired},
-                    {"type": "vip", "until": expired},
+                    {"type": "double_xp", "until": expired, "role_id": 42}
                 ],
-                "2": [{"type": "vip", "until": future}],
+                "2": [
+                    {"type": "double_xp", "until": future, "role_id": 42}
+                ],
             }
         ),
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(config, "VIP_24H_ROLE_ID", 42)
     monkeypatch.setattr(config, "GUILD_ID", 321)
 
     role = SimpleNamespace(id=42)

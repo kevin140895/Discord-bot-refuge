@@ -114,8 +114,6 @@ class EconomyUICog(commands.Cog):
                 if until <= now:
                     changed = True
                     role_id = int(entry.get("role_id", 0))
-                    if entry.get("type") == "vip" and not role_id:
-                        role_id = getattr(config, "VIP_24H_ROLE_ID", 0)
                     if role_id and guild:
                         member = guild.get_member(int(uid))
                         role = guild.get_role(role_id)
@@ -206,7 +204,9 @@ class EconomyUICog(commands.Cog):
             )
             return
         item = shop.get(item_key)
-        if not item:
+        if not item or "vip" in item_key.lower() or "vip" in str(
+            item.get("name", "")
+        ).lower():
             await interaction.response.send_message("Article inconnu.", ephemeral=True)
             return
         price = int(item.get("price", 0))
@@ -288,8 +288,12 @@ class EconomyUICog(commands.Cog):
         lines = ["🛒 **Boutique du Refuge**"]
         for key, item in data.items():
             name = item.get("name", key)
+            if "vip" in key.lower() or "vip" in name.lower():
+                continue
             price = item.get("price")
-            lines.append(f"- **{name}** – {price}💰" if price else f"- **{name}**")
+            lines.append(
+                f"- **{name}** – {price}💰" if price else f"- **{name}**"
+            )
         return "\n".join(lines)
 
 
