@@ -1034,4 +1034,5 @@ class RouletteRefugeCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(RouletteRefugeCog(bot))
+    if bot.get_cog("RouletteRefugeCog") is None:
+        await bot.add_cog(RouletteRefugeCog(bot))
