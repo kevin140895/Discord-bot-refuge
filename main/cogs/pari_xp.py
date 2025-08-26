@@ -222,12 +222,15 @@ class RouletteRefugeCog(commands.Cog):
         """Ensure leaderboard message exists and refresh its embed."""
         try:
             await self._ensure_leaderboard_message(channel)
-            state = storage.load_json(STATE_PATH, {})
-            msg_id = state.get("leaderboard_message_id")
+            state = storage.load_json(STATE_PATH, self.state)
+            msg_id = state.get("leaderboard_message_id") or self.state.get(
+                "leaderboard_message_id"
+            )
             if not msg_id:
                 return
             msg = await channel.fetch_message(int(msg_id))
             await safe_message_edit(msg, embed=self._build_leaderboard_embed())
+            self.state = state if state else self.state
         except Exception:
             pass
 
