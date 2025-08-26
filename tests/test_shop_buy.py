@@ -124,3 +124,96 @@ async def test_shop_buy_ticket(tmp_path, monkeypatch):
     assert txs[0]["item"] == "ticket_royal"
     send_mock.assert_awaited()
     assert send_mock.call_args.kwargs["ephemeral"] is True
+
+
+def test_shop_text_includes_limits(tmp_path, monkeypatch):
+    shop_file = _setup_paths(tmp_path, monkeypatch)
+    shop_file.write_text(
+        json.dumps(
+            {
+                "ticket_royal": {"name": "Ticket", "price": 100},
+                "double_xp_1h": {"name": "Double XP", "price": 200},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cog = EconomyUICog.__new__(EconomyUICog)
+    text = EconomyUICog._build_shop_text(cog)
+    assert "max 3" in text.lower()
+    assert "max 2" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_shop_buy_ticket_limit(tmp_path, monkeypatch):
+    shop_file = _setup_paths(tmp_path, monkeypatch)
+    shop_file.write_text(
+        json.dumps({"ticket_royal": {"name": "Ticket", "price": 100}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(economy_ui.xp_adapter, "get_balance", lambda _uid: 1000)
+    add_xp_mock = AsyncMock()
+    monkeypatch.setattr(economy_ui.xp_adapter, "add_xp", add_xp_mock)
+
+    cog = EconomyUICog(object())
+
+    async def buy():
+        send_mock = AsyncMock()
+        interaction = SimpleNamespace(
+            data={"custom_id": "shop_buy:ticket_royal"},
+            user=SimpleNamespace(id=1, add_roles=AsyncMock()),
+            guild=None,
+            guild_id=123,
+            response=SimpleNamespace(send_message=send_mock),
+        )
+        await cog.on_interaction(interaction)
+        return send_mock
+
+    for _ in range(3):
+        mock = await buy()
+        assert "effectu" in mock.call_args.args[0].lower()
+    mock = await buy()
+    assert "limite" in mock.call_args.args[0].lower()
+    tickets = economy.load_tickets()
+    assert tickets["1"] == 3
+    txs = await economy.transactions.all()
+    assert sum(1 for tx in txs if tx["item"] == "ticket_royal") == 3
+
+
+@pytest.mark.asyncio
+async def test_shop_buy_double_xp_limit(tmp_path, monkeypatch):
+    shop_file = _setup_paths(tmp_path, monkeypatch)
+    shop_file.write_text(
+        json.dumps({"double_xp_1h": {"name": "Double XP", "price": 200}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(economy_ui.xp_adapter, "get_balance", lambda _uid: 1000)
+    add_xp_mock = AsyncMock()
+    monkeypatch.setattr(economy_ui.xp_adapter, "add_xp", add_xp_mock)
+
+    cog = EconomyUICog(object())
+
+    async def buy():
+        send_mock = AsyncMock()
+        interaction = SimpleNamespace(
+            data={"custom_id": "shop_buy:double_xp_1h"},
+            user=SimpleNamespace(id=1, add_roles=AsyncMock()),
+            guild=None,
+            guild_id=123,
+            response=SimpleNamespace(send_message=send_mock),
+        )
+        await cog.on_interaction(interaction)
+        return send_mock
+
+    for _ in range(2):
+        mock = await buy()
+        assert "effectu" in mock.call_args.args[0].lower()
+    mock = await buy()
+    assert "limite" in mock.call_args.args[0].lower()
+    boosts = economy.load_boosts()
+    assert len(boosts["1"]) == 2
+    txs = await economy.transactions.all()
+    assert sum(1 for tx in txs if tx["item"] == "double_xp_1h") == 2
+    assert add_xp_mock.await_count == 2
