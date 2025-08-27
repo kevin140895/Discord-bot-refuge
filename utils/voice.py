@@ -1,5 +1,6 @@
 import logging
-from typing import Optional, Callable
+import shutil
+from typing import Callable, Optional
 
 import discord
 
@@ -77,6 +78,9 @@ def play_stream(
 ) -> None:
     """Lance la lecture du flux ``stream_url`` si rien n'est joué."""
     if voice and not voice.is_playing():
+        if shutil.which("ffmpeg") is None:
+            logger.warning("FFmpeg introuvable: impossible de lire le flux %s", stream_url)
+            return
         source = discord.FFmpegPCMAudio(
             stream_url, before_options=FFMPEG_BEFORE, options=FFMPEG_OPTIONS
         )
