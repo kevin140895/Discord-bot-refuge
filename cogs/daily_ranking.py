@@ -16,7 +16,7 @@ from discord.ext import commands
 
 from config import DATA_DIR
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
-from .xp import DAILY_STATS, DAILY_LOCK, save_daily_stats_to_disk
+import cogs.xp as xp
 logger = logging.getLogger(__name__)
 
 try:
@@ -93,24 +93,24 @@ class DailyRankingAndRoles(commands.Cog):
     async def _startup_check(self) -> None:
         await self.bot.wait_until_ready()
         today = datetime.now(PARIS_TZ).date()
-        async with DAILY_LOCK:
+        async with xp.DAILY_LOCK:
             pending = [
                 day
-                for day in DAILY_STATS.keys()
+                for day in xp.DAILY_STATS.keys()
                 if datetime.fromisoformat(day).date() < today
             ]
         for day in sorted(pending):
             logger.info("[daily_ranking] Traitement au démarrage pour %s", day)
-            async with DAILY_LOCK:
-                stats = DAILY_STATS.pop(day, {})
+            async with xp.DAILY_LOCK:
+                stats = xp.DAILY_STATS.pop(day, {})
             if not stats:
                 logger.info("[daily_ranking] Aucune statistique pour %s", day)
-                await save_daily_stats_to_disk()
+                await xp.save_daily_stats_to_disk()
                 continue
             ranking = self._compute_ranking(stats)
             ranking["date"] = day
             self._write_persistence(ranking)
-            await save_daily_stats_to_disk()
+            await xp.save_daily_stats_to_disk()
             logger.info("[daily_ranking] Classement %s sauvegardé", day)
 
     async def _scheduler(self) -> None:
@@ -130,16 +130,16 @@ class DailyRankingAndRoles(commands.Cog):
         now = datetime.now(PARIS_TZ)
         day = (now - timedelta(days=1)).date().isoformat()
         logger.info("[daily_ranking] Calcul du classement pour %s", day)
-        async with DAILY_LOCK:
-            stats = DAILY_STATS.pop(day, {})
+        async with xp.DAILY_LOCK:
+            stats = xp.DAILY_STATS.pop(day, {})
         if not stats:
             logger.info("[daily_ranking] Aucune statistique pour %s", day)
-            await save_daily_stats_to_disk()
+            await xp.save_daily_stats_to_disk()
             return
         ranking = self._compute_ranking(stats)
         ranking["date"] = day
         self._write_persistence(ranking)
-        await save_daily_stats_to_disk()
+        await xp.save_daily_stats_to_disk()
         logger.info("[daily_ranking] Classement %s sauvegardé", day)
 
 
