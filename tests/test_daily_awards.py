@@ -58,7 +58,7 @@ async def test_roles_reassigned():
     )
 
     cog = DailyAwards.__new__(DailyAwards)
-    cog.bot = SimpleNamespace(guilds=[guild])
+    cog.bot = SimpleNamespace(get_guild=lambda _id: guild)
 
     winners = {"mvp": winner_mvp.id, "msg": winner_msg.id, "vc": winner_vc.id}
     await DailyAwards._reset_and_assign(cog, winners)
