@@ -23,7 +23,7 @@ async def test_startup_recovers_and_awards(tmp_path):
     bot = SimpleNamespace(wait_until_ready=AsyncMock())
     cog = DailyRankingAndRoles.__new__(DailyRankingAndRoles)
     cog.bot = bot
-    with patch("cogs.daily_ranking.save_daily_stats_to_disk", new_callable=AsyncMock):
+    with patch("cogs.xp.save_daily_stats_to_disk", new_callable=AsyncMock):
         await DailyRankingAndRoles._startup_check(cog)
 
     data = daily_ranking.read_json_safe(str(rank_file))
