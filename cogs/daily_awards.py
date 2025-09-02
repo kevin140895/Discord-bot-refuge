@@ -13,6 +13,7 @@ from discord.ext import commands
 
 from config import (
     AWARD_ANNOUNCE_CHANNEL_ID,
+    GUILD_ID,
     MVP_ROLE_ID,
     WRITER_ROLE_ID,
     VOICE_ROLE_ID,
@@ -67,8 +68,9 @@ class DailyAwards(commands.Cog):
 
     # ── Role management ─────────────────────────────────────
     async def _reset_and_assign(self, winners: Dict[str, int | None]) -> None:
-        guild = self.bot.guilds[0] if self.bot.guilds else None
+        guild = self.bot.get_guild(GUILD_ID)
         if not guild:
+            logger.warning("[daily_awards] Guilde %s introuvable", GUILD_ID)
             return
         roles = {
             "mvp": guild.get_role(MVP_ROLE_ID),
@@ -111,8 +113,11 @@ class DailyAwards(commands.Cog):
                 logger.exception("[daily_awards] Erreur inattendue lors de l'attribution: %s", e)
 
     async def _mention_or_name(self, uid: int) -> str:
-        guild = self.bot.guilds[0] if self.bot.guilds else None
-        member = guild.get_member(uid) if guild else None
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            logger.warning("[daily_awards] Guilde %s introuvable", GUILD_ID)
+            return str(uid)
+        member = guild.get_member(uid)
         if member:
             return member.mention
         user = self.bot.get_user(uid)
