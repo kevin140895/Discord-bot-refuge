@@ -140,6 +140,8 @@ class _RenameManager:
                         break
 
                 self._queue.task_done()
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 logging.exception("[rename_manager] worker encountered an error")
                 if cid is not None:
