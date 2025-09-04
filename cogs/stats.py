@@ -64,6 +64,7 @@ class StatsCog(commands.Cog):
             logger.exception("Erreur inattendue lors du démarrage de StatsCog")
 
     async def _apply_cache(self) -> None:
+        await _ensure_rename_manager_started()
         for guild in self.bot.guilds:
             gid = str(getattr(guild, "id", 0))
             data = self.cache.get(gid)
