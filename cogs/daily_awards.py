@@ -227,8 +227,18 @@ class DailyAwards(commands.Cog):
 
     async def _startup_check(self) -> None:
         await self.bot.wait_until_ready()
-        data = read_json_safe(DAILY_RANK_FILE)
-        await self._maybe_award(data)
+        # Au démarrage, ``daily_ranking`` peut encore être en train de
+        # calculer le classement précédent.  Pour éviter de rater
+        # l'attribution des rôles, on patiente quelques instants et on
+        # réessaie tant que le fichier de classement ne contient pas les
+        # gagnants attendus.
+        for _ in range(5):
+            data = read_json_safe(DAILY_RANK_FILE)
+            if data.get("winners"):
+                await self._maybe_award(data)
+                return
+            await asyncio.sleep(2)
+        logger.warning("[daily_awards] Classement introuvable au démarrage")
 
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - integration
