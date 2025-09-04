@@ -27,7 +27,7 @@ class _RenameManager:
         self._worker: asyncio.Task | None = None
 
     async def start(self) -> None:
-        if self._worker is None:
+        if self._worker is None or self._worker.done():
             self._worker = asyncio.create_task(self._run())
 
     async def aclose(self) -> None:
