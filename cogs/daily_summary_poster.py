@@ -111,6 +111,7 @@ class DailySummaryPoster(commands.Cog):
     # ── Core logic ───────────────────────────────────────────
     async def _maybe_post(self, data: Dict[str, Any]) -> None:
         if not data:
+            logger.warning("[daily_summary] Données de classement absentes")
             return
         summary = self._read_summary()
         channel = self.bot.get_channel(ACTIVITY_SUMMARY_CH)
