@@ -23,6 +23,7 @@ class _RenameManager:
         self._queue: asyncio.Queue[int] = asyncio.Queue()
         self._pending: Dict[int, Tuple[discord.abc.GuildChannel, str]] = {}
         self._last_per_channel: Dict[int, float] = {}
+        # TODO: consider periodic cleanup for IDs that are never reused
         self._last_global: float = 0.0
         self._worker: asyncio.Task | None = None
 
@@ -89,6 +90,7 @@ class _RenameManager:
                         "[rename_manager] channel %s deleted before rename; skipping",
                         cid,
                     )
+                    self._last_per_channel.pop(cid, None)
                     self._queue.task_done()
                     continue
 
