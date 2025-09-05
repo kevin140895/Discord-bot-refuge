@@ -30,6 +30,8 @@ async def test_skip_when_channel_deleted(monkeypatch, caplog):
     guild = SimpleNamespace(get_channel=lambda cid: None)
     channel = SimpleNamespace(id=123, name="old", guild=guild, edit=edit)
 
+    rm._last_per_channel[channel.id] = 0.0
+
     caplog.set_level(logging.DEBUG)
 
     await rm.request(channel, "new")
@@ -37,6 +39,7 @@ async def test_skip_when_channel_deleted(monkeypatch, caplog):
     await rm.aclose()
 
     assert called is False
+    assert channel.id not in rm._last_per_channel
     assert any(
         "deleted before rename" in record.getMessage() for record in caplog.records
     )
