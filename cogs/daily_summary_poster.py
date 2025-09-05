@@ -34,6 +34,8 @@ DAILY_RANK_FILE = os.path.join(DATA_DIR, "daily_ranking.json")
 DAILY_SUMMARY_FILE = os.path.join(DATA_DIR, "daily_summary.json")
 ensure_dir(DATA_DIR)
 
+RETRY_INTERVAL_SECONDS = 5 * 60
+
 
 def _format_hm(minutes: int) -> str:
     """Format ``minutes`` as ``HhMM``."""
@@ -153,11 +155,26 @@ class DailySummaryPoster(commands.Cog):
             if now >= target:
                 target += timedelta(days=1)
             await asyncio.sleep((target - now).total_seconds())
-            data = read_json_safe(DAILY_RANK_FILE)
-            try:
-                await self._maybe_post(data)
-            except Exception:
-                logger.exception("[daily_summary] Échec de _maybe_post")
+            target_day = (datetime.now(PARIS_TZ) - timedelta(days=1)).date().isoformat()
+            while not self.bot.is_closed():
+                data = read_json_safe(DAILY_RANK_FILE)
+                if data.get("date") == target_day:
+                    try:
+                        await self._maybe_post(data)
+                    except Exception:
+                        logger.exception("[daily_summary] Échec de _maybe_post")
+                    break
+                logger.info(
+                    "[daily_summary] Données %s absentes, nouvel essai dans %s s",
+                    target_day,
+                    RETRY_INTERVAL_SECONDS,
+                )
+                await asyncio.sleep(RETRY_INTERVAL_SECONDS)
+                new_target = (
+                    datetime.now(PARIS_TZ) - timedelta(days=1)
+                ).date().isoformat()
+                if new_target != target_day:
+                    break
 
     async def _startup_check(self) -> None:
         await self.bot.wait_until_ready()
