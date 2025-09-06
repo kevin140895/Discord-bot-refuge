@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
-from typing import Dict, Callable
+from typing import Awaitable, Callable, Dict
 
 from storage.economy import TICKETS_FILE, transactions
 from storage.roulette_store import RouletteStore
 from utils.storage import load_json
-from utils.persist import atomic_write_json
+from utils.persistence import atomic_write_json_async
 
 
-def consume_free_ticket(user_id: int) -> bool:
+async def consume_free_ticket(user_id: int) -> bool:
     """Consume one free ticket for ``user_id`` if available.
 
     Returns ``True`` if a ticket was consumed.
@@ -28,24 +27,22 @@ def consume_free_ticket(user_id: int) -> bool:
         tickets[key] = count
     else:
         tickets.pop(key, None)
-    atomic_write_json(TICKETS_FILE, tickets)
+    await atomic_write_json_async(TICKETS_FILE, tickets)
 
-    asyncio.create_task(
-        transactions.add(
-            {
-                "type": "ticket_usage",
-                "user_id": user_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+    await transactions.add(
+        {
+            "type": "ticket_usage",
+            "user_id": user_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
     )
     return True
 
 
-def consume_any_ticket(
+async def consume_any_ticket(
     user_id: int,
     store: RouletteStore | None = None,
-    consume: Callable[[int], bool] = consume_free_ticket,
+    consume: Callable[[int], Awaitable[bool]] = consume_free_ticket,
 ) -> bool:
     """Consume a ticket from economy or the roulette store.
 
@@ -53,7 +50,7 @@ def consume_any_ticket(
     available and ``store`` is provided, a ticket from that store is used.
     Returns ``True`` if a ticket was consumed.
     """
-    if consume(user_id):
+    if await consume(user_id):
         return True
     if store and store.use_ticket(str(user_id)):
         return True

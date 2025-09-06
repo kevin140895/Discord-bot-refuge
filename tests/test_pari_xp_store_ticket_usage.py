@@ -1,7 +1,7 @@
 import asyncio
 import importlib
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -12,7 +12,7 @@ async def test_pari_xp_consumes_store_ticket(tmp_path, monkeypatch):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     pari_xp = importlib.import_module("main.cogs.pari_xp")
 
-    consume_mock = MagicMock(return_value=False)
+    consume_mock = AsyncMock(return_value=False)
     monkeypatch.setattr(pari_xp, "consume_free_ticket", consume_mock)
 
     balance = {123: 100}

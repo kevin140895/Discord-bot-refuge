@@ -304,7 +304,7 @@ class MachineASousView(discord.ui.View):
         # Utilise d'abord un ticket disponible, même si l'utilisateur n'a pas
         # encore effectué son tirage quotidien. Cela permet d'utiliser un
         # ticket « en réserve » sans consommer l'essai journalier.
-        if consume_any_ticket(int(uid), cog.store, consume_free_ticket):
+        if await consume_any_ticket(int(uid), cog.store, consume_free_ticket):
             await interaction.response.defer(ephemeral=True)
             await self._single_spin(interaction, cog, free=True)
             return

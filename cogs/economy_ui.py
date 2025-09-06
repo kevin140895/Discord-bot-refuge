@@ -59,22 +59,29 @@ def _load_shop() -> typing.Optional[dict[str, typing.Any]]:
 class ShopView(discord.ui.View):
     """Vue persistante pour la boutique."""
 
-    def __init__(self) -> None:
+    def __init__(self, cog: "EconomyUICog") -> None:
         super().__init__(timeout=None)
-        self.add_item(
-            discord.ui.Button(
-                label="Ticket Royal",
-                style=discord.ButtonStyle.green,
-                custom_id="shop_buy:ticket_royal",
-            )
-        )
-        self.add_item(
-            discord.ui.Button(
-                label="Double XP 1h",
-                style=discord.ButtonStyle.green,
-                custom_id="shop_buy:double_xp_1h",
-            )
-        )
+        self.cog = cog
+
+    @discord.ui.button(
+        label="Ticket Royal",
+        style=discord.ButtonStyle.green,
+        custom_id="shop_buy:ticket_royal",
+    )
+    async def ticket_royal(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self.cog._handle_shop_purchase(interaction, "ticket_royal")
+
+    @discord.ui.button(
+        label="Double XP 1h",
+        style=discord.ButtonStyle.green,
+        custom_id="shop_buy:double_xp_1h",
+    )
+    async def double_xp_1h(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self.cog._handle_shop_purchase(interaction, "double_xp_1h")
 
 
 
@@ -84,7 +91,7 @@ class EconomyUICog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.shop_view = ShopView()
+        self.shop_view = ShopView(self)
 
     @tasks.loop(minutes=5)
     async def boosts_cleanup(self) -> None:
@@ -192,10 +199,12 @@ class EconomyUICog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction) -> None:
-        custom_id = getattr(getattr(interaction, "data", {}), "get", lambda _key: None)(
-            "custom_id"
-        )
+        data = interaction.data if isinstance(getattr(interaction, "data", None), dict) else {}
+        custom_id = data.get("custom_id")
         if not isinstance(custom_id, str) or not custom_id.startswith("shop_buy:"):
+            return
+        response = getattr(interaction, "response", None)
+        if callable(getattr(response, "is_done", None)) and response.is_done():
             return
         item_key = custom_id.split(":", 1)[1]
         await self._handle_shop_purchase(interaction, item_key)
