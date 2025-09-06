@@ -170,7 +170,7 @@ class TempVCCog(commands.Cog):
             return None
         base = self._base_name_from_members(channel.members)
 
-        # Priorité : activité > "Endormie" > "Chat"
+        # NOUVELLE PRIORITÉ : activité > "AFK" (si mute) > "Chat"
         activity_counts: Dict[str, int] = {}
         for m in channel.members:
             act_name = self._get_primary_activity(m)
@@ -178,13 +178,17 @@ class TempVCCog(commands.Cog):
                 activity_counts[act_name] = activity_counts.get(act_name, 0) + 1
 
         if activity_counts:
+            # Il y a une activité détectée - priorité maximale
             activity_name = max(activity_counts, key=activity_counts.get)
             max_status_len = 100 - len(base) - 3
             status = activity_name[:max_status_len]
         elif any(m.voice and m.voice.self_mute for m in channel.members):
-            status = "Endormie"
+            # Quelqu'un est mute - "AFK"
+            status = "AFK"
         else:
+            # Aucune activité détectée et personne mute - "Chat"
             status = "Chat"
+
         name = f"{base} • {status}"
         return name[:100]
 
