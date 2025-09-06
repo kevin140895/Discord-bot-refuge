@@ -1,5 +1,3 @@
-import asyncio
-
 from utils.economy_tickets import consume_free_ticket
 import utils.economy_tickets as et
 from storage.transaction_store import TransactionStore
@@ -15,10 +13,8 @@ async def test_consume_free_ticket(tmp_path):
     et.TICKETS_FILE = ticket_path
     et.transactions = TransactionStore(tx_path)
 
-    assert consume_free_ticket(123) is True
-    assert consume_free_ticket(123) is False
-    # Allow async logging task to complete
-    await asyncio.sleep(0)
+    assert await consume_free_ticket(123) is True
+    assert await consume_free_ticket(123) is False
     assert load_json(ticket_path, {}) == {}
     txs = await et.transactions.all()
     assert txs and txs[0]["type"] == "ticket_usage"

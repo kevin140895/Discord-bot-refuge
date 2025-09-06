@@ -632,7 +632,7 @@ class RouletteRefugeCog(commands.Cog):
                 result = self._compute_result(amount, segment)
 
             payout = int(cast(int, result["payout"]))
-            ticket_used = consume_any_ticket(
+            ticket_used = await consume_any_ticket(
                 user_id, self.roulette_store, consume_free_ticket
             )
             delta = payout if ticket_used else int(cast(int, result["delta"]))
