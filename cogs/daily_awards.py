@@ -131,54 +131,91 @@ class DailyAwards(commands.Cog):
 
     async def _build_message(self, data: Dict[str, Any]) -> str:
         top3 = data.get("top3", {})
-        mvp = top3.get("mvp", [])
-        writer = top3.get("msg", [])
-        voice = top3.get("vc", [])
+        mvp = top3.get("mvp") or []
+        writer = top3.get("msg") or []
+        voice = top3.get("vc") or []
 
-        if not (mvp and writer and voice):
-            return ""
+        lines = ["📢 **Annonce des gagnants — classement de 00h00**", ""]
 
-        mvp_entry = mvp[0]
-        writer_entry = writer[0]
-        voice_entry = voice[0]
+        if mvp:
+            mvp_entry = mvp[0]
+            mvp_mention = await self._mention_or_name(mvp_entry["id"])
+            mvp_points = mvp_entry["score"]
+            mvp_msgs = mvp_entry["messages"]
+            mvp_voice = _format_hm(mvp_entry["voice"])
+            lines.extend(
+                [
+                    f"👑 **MVP du Refuge** — {mvp_mention}",
+                    f"Rôle attribué : <@&{MVP_ROLE_ID}>",
+                    f"• Points combinés : {mvp_points}  (messages : {mvp_msgs} · vocal : {mvp_voice})",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "👑 **MVP du Refuge** — Aucun gagnant aujourd’hui",
+                    f"Rôle non attribué : <@&{MVP_ROLE_ID}>",
+                    "",
+                ]
+            )
 
-        mvp_mention = await self._mention_or_name(mvp_entry["id"])
-        writer_mention = await self._mention_or_name(writer_entry["id"])
-        voice_mention = await self._mention_or_name(voice_entry["id"])
+        if writer:
+            writer_entry = writer[0]
+            writer_mention = await self._mention_or_name(writer_entry["id"])
+            writer_msgs = writer_entry["count"]
+            lines.extend(
+                [
+                    f"📜 **Écrivain du Refuge** — {writer_mention}",
+                    f"Rôle attribué : <@&{WRITER_ROLE_ID}>",
+                    f"• Messages envoyés : {writer_msgs}",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "📜 **Écrivain du Refuge** — Aucun gagnant aujourd’hui",
+                    f"Rôle non attribué : <@&{WRITER_ROLE_ID}>",
+                    "",
+                ]
+            )
 
-        mvp_points = mvp_entry["score"]
-        mvp_msgs = mvp_entry["messages"]
-        mvp_voice = _format_hm(mvp_entry["voice"])
-        writer_msgs = writer_entry["count"]
-        voice_time = _format_hm(voice_entry["minutes"])
+        if voice:
+            voice_entry = voice[0]
+            voice_mention = await self._mention_or_name(voice_entry["id"])
+            voice_time = _format_hm(voice_entry["minutes"])
+            lines.extend(
+                [
+                    f"🎤 **Voix du Refuge** — {voice_mention}",
+                    f"Rôle attribué : <@&{VOICE_ROLE_ID}>",
+                    f"• Temps en vocal : {voice_time}",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "🎤 **Voix du Refuge** — Aucun gagnant aujourd’hui",
+                    f"Rôle non attribué : <@&{VOICE_ROLE_ID}>",
+                    "",
+                ]
+            )
 
-        lines = [
-            "📢 **Annonce des gagnants — classement de 00h00**",
-            "",
-            f"👑 **MVP du Refuge** — {mvp_mention}",
-            f"Rôle attribué : <@&{MVP_ROLE_ID}>",
-            f"• Points combinés : {mvp_points}  (messages : {mvp_msgs} · vocal : {mvp_voice})",
-            "",
-            f"📜 **Écrivain du Refuge** — {writer_mention}",
-            f"Rôle attribué : <@&{WRITER_ROLE_ID}>",
-            f"• Messages envoyés : {writer_msgs}",
-            "",
-            f"🎤 **Voix du Refuge** — {voice_mention}",
-            f"Rôle attribué : <@&{VOICE_ROLE_ID}>",
-            f"• Temps en vocal : {voice_time}",
-            "",
-            "⏳ **Durée des rôles** : aujourd’hui 00:00 ➜ 23:59",
-            "Félicitations aux gagnants ! Continuez à participer pour tenter le titre demain 🎉",
-        ]
+        lines.extend(
+            [
+                "⏳ **Durée des rôles** : aujourd’hui 00:00 ➜ 23:59",
+                "Félicitations aux gagnants ! Continuez à participer pour tenter le titre demain 🎉",
+            ]
+        )
         return "\n".join(lines)
 
     async def _maybe_award(self, data: Dict[str, Any]) -> None:
         if not data:
             return
         winners = data.get("winners") or {}
-        if not any(winners.values()):
+        if not winners:
             logger.warning("[daily_awards] Pas de données gagnants pour %s", data.get("date"))
-            return
         channel = self.bot.get_channel(AWARD_ANNOUNCE_CHANNEL_ID)
         if channel is None:
             try:

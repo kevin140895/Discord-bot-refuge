@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from unittest.mock import AsyncMock
 
 from cogs.daily_awards import DailyAwards
 from config import MVP_ROLE_ID, WRITER_ROLE_ID, VOICE_ROLE_ID
@@ -70,5 +71,45 @@ async def test_roles_reassigned():
     assert mvp not in other.roles
     assert msg not in other.roles
     assert vc not in other.roles
+
+
+@pytest.mark.asyncio
+async def test_build_message_partial():
+    cog = DailyAwards.__new__(DailyAwards)
+    cog.bot = SimpleNamespace()
+    cog._mention_or_name = AsyncMock(side_effect=lambda uid: f"u{uid}")
+    data = {
+        "top3": {
+            "mvp": [{"id": 1, "score": 10, "messages": 5, "voice": 30}]
+        }
+    }
+
+    message = await DailyAwards._build_message(cog, data)
+    assert "MVP du Refuge" in message
+    assert "Écrivain du Refuge" in message and "Aucun gagnant" in message
+    assert "Voix du Refuge" in message and message.count("Aucun gagnant") >= 2
+
+
+@pytest.mark.asyncio
+async def test_maybe_award_partial_publishes_and_assigns():
+    channel = SimpleNamespace(send=AsyncMock())
+    bot = SimpleNamespace(get_channel=lambda _id: channel)
+
+    cog = DailyAwards.__new__(DailyAwards)
+    cog.bot = bot
+    cog._read_state = lambda: {}
+    cog._write_state = lambda state: None
+    cog._reset_and_assign = AsyncMock()
+    cog._build_message = AsyncMock(return_value="msg")
+
+    data = {
+        "date": "2024-01-01",
+        "winners": {"mvp": 1, "msg": None, "vc": None},
+    }
+
+    await DailyAwards._maybe_award(cog, data)
+
+    cog._reset_and_assign.assert_awaited_once_with(data["winners"])
+    channel.send.assert_awaited_once_with("msg")
 
 
