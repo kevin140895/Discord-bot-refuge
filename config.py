@@ -123,6 +123,13 @@ MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
 )
 """Intervalle en minutes entre deux vérifications de l'état de la machine à sous."""
 
+# ── Pari XP ─────────────────────────────────────────────────
+PARI_XP_CHANNEL_ID: int = 1408834276228730900
+"""Salon dédié à la roulette XP."""
+
+PARI_XP_ROLE_ID: int = int(os.getenv("PARI_XP_ROLE_ID", "0"))
+"""Rôle optionnel attribué au dernier gagnant de la roulette XP."""
+
 # ── Persistance et I/O ───────────────────────────────────────
 DATA_DIR: str = _resolve_data_dir()
 """Répertoire de stockage persistant."""
