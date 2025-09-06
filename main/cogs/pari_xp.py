@@ -607,7 +607,6 @@ class RouletteRefugeCog(commands.Cog):
                 outcome_color = random.choice(["rouge", "noir"])
                 segment = f"color_{outcome_color}"
                 payout = amount * 2 if color_choice == outcome_color else 0
-                segment = f"color_{outcome_color}"
                 result = {
                     "payout": payout,
                     "delta": payout - amount,
