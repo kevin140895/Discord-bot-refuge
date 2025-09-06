@@ -39,6 +39,7 @@ def main() -> None:
         reactions=True,
         voice_states=True,
         message_content=True,
+        presences=True,
     )
     token = os.getenv("DISCORD_TOKEN")
     if not token:
