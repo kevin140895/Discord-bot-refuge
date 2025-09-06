@@ -15,7 +15,13 @@ from config import (
     RENAME_DELAY,
     TEMP_VC_CHECK_INTERVAL_SECONDS,
 )
-from storage.temp_vc_store import load_temp_vc_ids, save_temp_vc_ids
+from storage.temp_vc_store import (
+    load_temp_vc_ids,
+    load_last_names_cache,
+    save_last_names_cache,
+    save_temp_vc_ids,
+    save_temp_vc_ids_async,
+)
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
 from utils.rename_manager import rename_manager
 logger = logging.getLogger(__name__)
@@ -50,21 +56,24 @@ class TempVCCog(commands.Cog):
                         self._last_names[ch.id] = ch.name
                 if TEMP_VC_IDS:
                     save_temp_vc_ids(TEMP_VC_IDS.copy())
+                    loop = getattr(bot, "loop", None)
+                    if loop:
+                        loop.create_task(self._save_last_names_cache())
 
         self.cleanup.start()
+        self.monitor_rename_worker.start()
+        self.health_check.start()
 
-        if rename_manager._worker is None or rename_manager._worker.done():
-            loop = getattr(self.bot, "loop", None)
-            if loop is None:
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = None
-            if loop:
-                loop.create_task(self._ensure_rename_worker())
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Démarrage garanti du rename_manager et chargement du cache."""
+        await self._ensure_rename_worker()
+        await self._load_last_names_cache()
 
     def cog_unload(self) -> None:
         self.cleanup.cancel()
+        self.monitor_rename_worker.cancel()
+        self.health_check.cancel()
         for task in self._rename_tasks.values():
             task.cancel()
         self._rename_tasks.clear()
@@ -84,6 +93,23 @@ class TempVCCog(commands.Cog):
             else:
                 logger.info("[temp_vc] rename_manager worker démarré")
         return True
+
+    async def _save_last_names_cache(self) -> None:
+        """Persiste le cache des derniers noms."""
+        try:
+            await save_last_names_cache(self._last_names.copy())
+        except Exception:
+            logger.exception("[temp_vc] échec de sauvegarde du cache des noms")
+
+    async def _load_last_names_cache(self) -> None:
+        """Charge le cache des derniers noms au démarrage."""
+        try:
+            data = load_last_names_cache()
+        except Exception:
+            logger.exception("[temp_vc] échec de lecture du cache des noms")
+        else:
+            if data:
+                self._last_names.update(data)
 
     # ---------- outils internes ----------
 
@@ -107,36 +133,59 @@ class TempVCCog(commands.Cog):
             return "Crossplay"
         return "Chat"
 
+    def _get_primary_activity(self, member: discord.Member) -> str | None:
+        """Détecte l'activité principale d'un membre."""
+        acts = list(member.activities)
+        for act in acts:
+            if isinstance(act, discord.Game) or (
+                isinstance(act, discord.Activity)
+                and act.type is discord.ActivityType.playing
+            ):
+                return act.name
+        for act in acts:
+            if isinstance(act, discord.Streaming) or (
+                isinstance(act, discord.Activity)
+                and act.type is discord.ActivityType.streaming
+            ):
+                return act.name
+        for act in acts:
+            if isinstance(act, discord.Spotify):
+                return act.title
+            if isinstance(act, discord.Activity) and act.type is discord.ActivityType.listening:
+                return act.name
+        for act in acts:
+            if isinstance(act, discord.CustomActivity) or (
+                isinstance(act, discord.Activity)
+                and act.type is discord.ActivityType.custom
+            ):
+                if getattr(act, "name", None):
+                    return act.name
+                if getattr(act, "state", None):
+                    return act.state
+        return None
+
     def _compute_channel_name(self, channel: discord.VoiceChannel) -> str | None:
         """Calcule le nom attendu pour le salon selon les membres."""
         if not channel.members:
             return None
         base = self._base_name_from_members(channel.members)
 
-        # Priorité : nom du jeu > "Endormie" > "Chat"
-        game_counts: Dict[str, int] = {}
+        # Priorité : activité > "Endormie" > "Chat"
+        activity_counts: Dict[str, int] = {}
         for m in channel.members:
-            for act in m.activities:
-                if isinstance(act, discord.Game) or (
-                    isinstance(act, discord.Activity)
-                    and act.type is discord.ActivityType.playing
-                ):
-                    game_counts[act.name] = game_counts.get(act.name, 0) + 1
-                    break
+            act_name = self._get_primary_activity(m)
+            if act_name:
+                activity_counts[act_name] = activity_counts.get(act_name, 0) + 1
 
-        if game_counts:
-            # Choisit le jeu le plus représenté dans le salon
-            game_name = max(game_counts, key=game_counts.get)
-            # Discord limite les noms de salon à 100 caractères ; on réserve
-            # l'espace pour la base et le séparateur «  • ».
+        if activity_counts:
+            activity_name = max(activity_counts, key=activity_counts.get)
             max_status_len = 100 - len(base) - 3
-            status = game_name[:max_status_len]
+            status = activity_name[:max_status_len]
         elif any(m.voice and m.voice.self_mute for m in channel.members):
             status = "Endormie"
         else:
             status = "Chat"
         name = f"{base} • {status}"
-        # Discord limite les noms de salon à 100 caractères
         return name[:100]
 
     async def _rename_channel(self, channel: discord.VoiceChannel) -> None:
@@ -155,6 +204,7 @@ class TempVCCog(commands.Cog):
                 if await self._ensure_rename_worker():
                     await rename_manager.request(channel, new)
                     self._last_names[channel.id] = new
+                    await self._save_last_names_cache()
         except asyncio.CancelledError:
             pass
         finally:
@@ -163,6 +213,11 @@ class TempVCCog(commands.Cog):
 
     async def _update_channel_name(self, channel: discord.VoiceChannel) -> None:
         """Programme ou reprogramme le renommage du salon après un délai."""
+        if not channel.guild or channel.guild.get_channel(channel.id) is None:
+            return
+        if channel.id not in TEMP_VC_IDS:
+            return
+
         new = self._compute_channel_name(channel)
         cached = self._last_names.get(channel.id)
         if new is None:
@@ -174,6 +229,8 @@ class TempVCCog(commands.Cog):
         if task:
             task.cancel()
         if not await self._ensure_rename_worker():
+            return
+        if channel.guild.get_channel(channel.id) is None:
             return
         new_task = asyncio.create_task(self._rename_channel(channel))
         self._rename_tasks[channel.id] = new_task
@@ -190,7 +247,8 @@ class TempVCCog(commands.Cog):
 
         TEMP_VC_IDS.add(channel.id)
         self._last_names[channel.id] = channel.name
-        save_temp_vc_ids(TEMP_VC_IDS.copy())
+        await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+        await self._save_last_names_cache()
         return channel
 
     # ----------- événements Discord -----------
@@ -232,7 +290,8 @@ class TempVCCog(commands.Cog):
                 await new_vc.delete(reason="Échec du déplacement du membre")
                 TEMP_VC_IDS.discard(new_vc.id)
                 self._last_names.pop(new_vc.id, None)
-                save_temp_vc_ids(TEMP_VC_IDS.copy())
+                await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                await self._save_last_names_cache()
                 return
             await self._update_channel_name(new_vc)
             return
@@ -261,7 +320,8 @@ class TempVCCog(commands.Cog):
                     )
                     TEMP_VC_IDS.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
-                    save_temp_vc_ids(TEMP_VC_IDS.copy())
+                    await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                    await self._save_last_names_cache()
 
         # 3) Renommage sur changement d'état vocal
         if after.channel and after.channel.id in TEMP_VC_IDS:
@@ -289,6 +349,53 @@ class TempVCCog(commands.Cog):
         if after.voice and after.voice.channel and after.voice.channel.id in TEMP_VC_IDS:
             await self._update_channel_name(after.voice.channel)
 
+    # ---------- surveillance ----------
+
+    @tasks.loop(minutes=5)
+    async def monitor_rename_worker(self) -> None:
+        if rename_manager._worker is None or rename_manager._worker.done():
+            logger.warning("[temp_vc] worker rename_manager inactif; redémarrage")
+            await self._ensure_rename_worker()
+
+    @monitor_rename_worker.before_loop
+    async def before_monitor_rename_worker(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=2)
+    async def health_check(self) -> None:
+        try:
+            if rename_manager._worker is None or rename_manager._worker.done():
+                logger.warning("[temp_vc] worker inactif détecté par health_check")
+                await self._ensure_rename_worker()
+
+            removed = False
+            for cid in list(TEMP_VC_IDS):
+                if self.bot.get_channel(cid) is None:
+                    TEMP_VC_IDS.discard(cid)
+                    self._last_names.pop(cid, None)
+                    removed = True
+            if removed:
+                await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                await self._save_last_names_cache()
+
+            stale = False
+            for cid in list(self._last_names):
+                if cid not in TEMP_VC_IDS:
+                    self._last_names.pop(cid, None)
+                    stale = True
+            if stale:
+                await self._save_last_names_cache()
+
+            for cid, task in list(self._rename_tasks.items()):
+                if task.done():
+                    self._rename_tasks.pop(cid, None)
+        except Exception:
+            logger.exception("[temp_vc] échec de health_check")
+
+    @health_check.before_loop
+    async def before_health_check(self) -> None:
+        await self.bot.wait_until_ready()
+
     # ---------- tâche de nettoyage ----------
 
     @tasks.loop(seconds=TEMP_VC_CHECK_INTERVAL_SECONDS)
@@ -301,7 +408,8 @@ class TempVCCog(commands.Cog):
             await delete_untracked_temp_vcs(
                 self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS.copy()
             )
-            save_temp_vc_ids(TEMP_VC_IDS.copy())
+            await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+            await self._save_last_names_cache()
         except Exception:
             logger.exception("Erreur dans cleanup")
 
