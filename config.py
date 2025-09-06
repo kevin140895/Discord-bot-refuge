@@ -33,7 +33,7 @@ except AttributeError:
 
 # ── Salons statistiques ───────────────────────────────────────
 STATS_MEMBERS_CHANNEL_ID = 1406435185813098537
-STATS_ONLINE_CHANNEL_ID = 1406435187520307350
+STATS_ONLINE_CHANNEL_ID = 1413712632711745648
 STATS_VOICE_CHANNEL_ID = 1406435190607184085
 
 # ── Rôles plateformes et notifications ───────────────────────
