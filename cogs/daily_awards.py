@@ -227,7 +227,6 @@ class DailyAwards(commands.Cog):
                     except Exception:
                         logger.exception("[daily_awards] Échec de _maybe_award")
                     break
-                await asyncio.sleep(30)
 
     async def _startup_check(self) -> None:
         await self.bot.wait_until_ready()
