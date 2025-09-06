@@ -123,3 +123,47 @@ def test_scheduler_reannounces_if_last_open_stale():
 
     assert announced and cog.state.get("is_open")
 
+
+def test_scheduler_waits_until_top_of_minute():
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    pari_xp = importlib.import_module("main.cogs.pari_xp")
+
+    cog = _setup_cog(pari_xp)
+    _stub_dependencies(cog)
+
+    class DummyBot:
+        async def wait_until_ready(self):
+            return
+
+    cog.bot = DummyBot()
+
+    orig_dt = pari_xp.datetime
+    tz = pari_xp.ZoneInfo("Europe/Paris")
+
+    class FakeDateTime(orig_dt):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return orig_dt(2023, 1, 1, 8, 0, 30, tzinfo=tz)
+
+    called_target = None
+
+    async def fake_sleep_until(target):
+        nonlocal called_target
+        called_target = target
+
+    pari_xp.datetime = FakeDateTime
+    orig_sleep_until = pari_xp.discord.utils.sleep_until
+    pari_xp.discord.utils.sleep_until = fake_sleep_until
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(pari_xp.RouletteRefugeCog._wait_ready_scheduler(cog))
+    finally:
+        pari_xp.datetime = orig_dt
+        pari_xp.discord.utils.sleep_until = orig_sleep_until
+        asyncio.set_event_loop(None)
+        loop.close()
+
+    assert called_target == orig_dt(2023, 1, 1, 8, 1, tzinfo=tz)
+
