@@ -382,7 +382,20 @@ class RouletteRefugeCog(commands.Cog):
 
     @scheduler_task.before_loop
     async def _wait_ready_scheduler(self) -> None:
+        """Align the scheduler start to the next minute.
+
+        The task loop runs every minute, but without extra care it would
+        start whenever the bot launches.  By waiting for the next minute mark
+        before letting the loop proceed we ensure executions always happen at
+        the *top* of each minute, minimizing drift.
+        """
+
         await self.bot.wait_until_ready()
+
+        tz = getattr(timezones, "TZ_PARIS", ZoneInfo("Europe/Paris"))
+        now = datetime.now(tz)
+        next_minute = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        await discord.utils.sleep_until(next_minute)
 
     @tasks.loop(minutes=10.0)
     async def _autoheal_presence_task(self):
