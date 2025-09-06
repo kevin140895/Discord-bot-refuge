@@ -217,6 +217,10 @@ class DailyAwards(commands.Cog):
         if not winners:
             logger.warning("[daily_awards] Pas de données gagnants pour %s", data.get("date"))
         channel = self.bot.get_channel(AWARD_ANNOUNCE_CHANNEL_ID)
+        winners = data.get("winners") or {}
+        if not winners:
+            logger.warning("[daily_awards] Pas de données gagnants pour %s", data.get("date"))
+        channel = self.bot.get_channel(AWARD_ANNOUNCE_CHANNEL_ID)
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(AWARD_ANNOUNCE_CHANNEL_ID)
