@@ -17,7 +17,15 @@ async def test_temp_channel_deleted_on_move_failure(monkeypatch):
 
     # avoid starting real rename manager worker and file I/O
     monkeypatch.setattr(temp_vc.rename_manager, "start", AsyncMock())
-    monkeypatch.setattr(temp_vc, "save_temp_vc_ids", lambda ids: None)
+
+    async def no_save_ids(ids, max_retries=3):
+        return None
+
+    async def no_save_cache(cache, max_retries=3):
+        return None
+
+    monkeypatch.setattr(temp_vc, "save_temp_vc_ids_async", no_save_ids)
+    monkeypatch.setattr(temp_vc, "save_last_names_cache", no_save_cache)
 
     with patch.object(temp_vc.tasks.Loop, "start", lambda self, *a, **k: None):
         cog = temp_vc.TempVCCog(bot)
@@ -28,7 +36,7 @@ async def test_temp_channel_deleted_on_move_failure(monkeypatch):
 
     async def fake_create_temp_vc(_member):
         temp_vc.TEMP_VC_IDS.add(channel.id)
-        temp_vc.save_temp_vc_ids(temp_vc.TEMP_VC_IDS)
+        await temp_vc.save_temp_vc_ids_async(temp_vc.TEMP_VC_IDS)
         cog._last_names[channel.id] = channel.name
         return channel
 

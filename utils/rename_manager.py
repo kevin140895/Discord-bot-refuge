@@ -29,7 +29,8 @@ class _RenameManager:
 
     async def start(self) -> None:
         if self._worker is None or self._worker.done():
-            self._worker = asyncio.create_task(self._run())
+            self._worker = asyncio.create_task(self._run(), name="rename-manager")
+            self._worker.add_done_callback(self._on_worker_done)
 
     async def aclose(self) -> None:
         if self._worker is not None:
@@ -148,6 +149,16 @@ class _RenameManager:
                 logging.exception("[rename_manager] worker encountered an error")
                 if cid is not None:
                     self._queue.task_done()
+
+    def _on_worker_done(self, task: asyncio.Task) -> None:
+        """Log when the worker stops unexpectedly."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logging.error("[rename_manager] worker crashed: %s", exc)
+        else:
+            logging.warning("[rename_manager] worker exited unexpectedly")
 
 
 rename_manager = _RenameManager()

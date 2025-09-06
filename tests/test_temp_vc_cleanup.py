@@ -44,10 +44,14 @@ async def test_repopulate_ids_when_missing(monkeypatch):
     def fake_save(ids):
         saved.append(set(ids))
 
+    async def fake_save_cache(_cache, max_retries=3):
+        pass
+
     with patch.object(temp_vc.tasks.Loop, "start", lambda self, *a, **k: None):
         with patch("cogs.temp_vc.save_temp_vc_ids", fake_save):
-            with patch("cogs.temp_vc.discord.CategoryChannel", DummyCategory):
-                temp_vc.TempVCCog(bot)
+            with patch("cogs.temp_vc.save_last_names_cache", fake_save_cache):
+                with patch("cogs.temp_vc.discord.CategoryChannel", DummyCategory):
+                    temp_vc.TempVCCog(bot)
 
     assert ch1.id in temp_vc.TEMP_VC_IDS
     assert ch2.id not in temp_vc.TEMP_VC_IDS
@@ -64,7 +68,15 @@ async def test_rename_task_cancelled_on_channel_delete(monkeypatch):
 
     # Avoid starting real tasks and I/O
     monkeypatch.setattr(temp_vc.rename_manager, "start", AsyncMock())
-    monkeypatch.setattr(temp_vc, "save_temp_vc_ids", lambda ids: None)
+
+    async def no_save_ids(ids, max_retries=3):
+        return None
+
+    async def no_save_cache(cache, max_retries=3):
+        return None
+
+    monkeypatch.setattr(temp_vc, "save_temp_vc_ids_async", no_save_ids)
+    monkeypatch.setattr(temp_vc, "save_last_names_cache", no_save_cache)
 
     with patch.object(temp_vc.tasks.Loop, "start", lambda self, *a, **k: None):
         cog = temp_vc.TempVCCog(bot)
