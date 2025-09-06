@@ -65,7 +65,12 @@ class RefugeBot(commands.Bot):
             loaded_names.add(module.name)
 
         # Ensure required cogs are loaded even if not discovered
-        for required in ("economy_ui", "machine_a_sous", "temp_vc"):
+        for required in (
+            "economy_ui",
+            "machine_a_sous",
+            "temp_vc",
+            "daily_leaderboard",
+        ):
             if required not in loaded_names:
                 await self.load_extension(f"cogs.{required}")
 
