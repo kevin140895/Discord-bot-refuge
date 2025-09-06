@@ -379,9 +379,6 @@ class RouletteRefugeCog(commands.Cog):
             await self._announce_close(channel)
             await self._update_hub_state(False)
             await self._post_daily_summary(channel)
-            await self._announce_close(channel)
-            await self._update_hub_state(False)
-            await self._post_daily_summary(channel)
 
     @scheduler_task.before_loop
     async def _wait_ready_scheduler(self) -> None:
