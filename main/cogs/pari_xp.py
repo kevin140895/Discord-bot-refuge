@@ -315,12 +315,15 @@ class RouletteRefugeCog(commands.Cog):
             mtime = TX_PATH.stat().st_mtime
         except OSError:
             pass
+        cached_month = getattr(self, "_monthly_stats_month", None)
+        cached_stats = getattr(self, "_monthly_stats_cache", {})
+        cached_mtime = getattr(self, "_monthly_stats_mtime", None)
         if (
-            self._monthly_stats_month == month_key
-            and self._monthly_stats_cache
-            and mtime == self._monthly_stats_mtime
+            cached_month == month_key
+            and cached_stats
+            and mtime == cached_mtime
         ):
-            return self._monthly_stats_cache
+            return cached_stats
         transactions = storage.load_json(TX_PATH, [])
         if not isinstance(transactions, list):
             transactions = []
@@ -413,7 +416,7 @@ class RouletteRefugeCog(commands.Cog):
                 message = None
         if message:
             await safe_message_edit(message, embed=embed, view=view)
-        else:
+        elif hasattr(channel, "send"):
             message = await channel.send(embed=embed, view=view)
             self.state["monthly_leaderboard_msg_id"] = message.id
             await storage.save_json(STATE_PATH, self.state)
