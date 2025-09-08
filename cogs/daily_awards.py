@@ -35,6 +35,22 @@ DAILY_AWARD_FILE = os.path.join(DATA_DIR, "daily_awards.json")
 ensure_dir(DATA_DIR)
 
 
+def today_str_eu_paris() -> str:
+    """Retourne la date du jour au format YYYY-MM-DD en Europe/Paris."""
+    return datetime.now(PARIS_TZ).date().isoformat()
+
+
+def load_last_award_date() -> tuple[str | None, int | None]:
+    """Charge la dernière attribution enregistrée."""
+    state = read_json_safe(DAILY_AWARD_FILE)
+    return state.get("date"), state.get("message_id")
+
+
+def save_last_award_date(date: str | None, message_id: int | None) -> None:
+    """Enregistre la date d'attribution et l'identifiant du message."""
+    atomic_write_json(DAILY_AWARD_FILE, {"date": date, "message_id": message_id})
+
+
 def _format_hm(minutes: int) -> str:
     h, m = divmod(int(minutes), 60)
     parts = []
@@ -61,10 +77,16 @@ class DailyAwards(commands.Cog):
 
     # ── Persistence helpers ──────────────────────────────────
     def _read_state(self) -> Dict[str, Any]:
-        return read_json_safe(DAILY_AWARD_FILE)
+        date, message_id = load_last_award_date()
+        data: Dict[str, Any] = {}
+        if date:
+            data["date"] = date
+        if message_id is not None:
+            data["message_id"] = message_id
+        return data
 
     def _write_state(self, data: Dict[str, Any]) -> None:
-        atomic_write_json(DAILY_AWARD_FILE, data)
+        save_last_award_date(data.get("date"), data.get("message_id"))
 
     # ── Role management ─────────────────────────────────────
     async def _reset_and_assign(self, winners: Dict[str, int | None]) -> None:
@@ -89,10 +111,10 @@ class DailyAwards(commands.Cog):
                     logger.warning("[daily_awards] Permissions insuffisantes pour retirer un rôle")
                 except discord.NotFound:
                     logger.warning("[daily_awards] Rôle ou membre introuvable lors du retrait")
-                except discord.HTTPException as e:
-                    logger.error("[daily_awards] Erreur HTTP lors du retrait d'un rôle: %s", e)
-                except Exception as e:  # pragma: no cover - just log
-                    logger.exception("[daily_awards] Erreur inattendue lors du retrait: %s", e)
+                except discord.HTTPException:
+                    logger.exception("[daily_awards] Erreur HTTP lors du retrait d'un rôle")
+                except Exception:  # pragma: no cover - just log
+                    logger.exception("[daily_awards] Erreur inattendue lors du retrait")
         for key, uid in winners.items():
             role = roles.get(key)
             if not role or not uid:
@@ -107,10 +129,10 @@ class DailyAwards(commands.Cog):
                 logger.warning("[daily_awards] Permissions insuffisantes pour attribuer un rôle")
             except discord.NotFound:
                 logger.warning("[daily_awards] Rôle ou membre introuvable lors de l'attribution")
-            except discord.HTTPException as e:
-                logger.error("[daily_awards] Erreur HTTP lors de l'attribution du rôle: %s", e)
-            except Exception as e:  # pragma: no cover
-                logger.exception("[daily_awards] Erreur inattendue lors de l'attribution: %s", e)
+            except discord.HTTPException:
+                logger.exception("[daily_awards] Erreur HTTP lors de l'attribution du rôle")
+            except Exception:  # pragma: no cover
+                logger.exception("[daily_awards] Erreur inattendue lors de l'attribution")
 
     async def _mention_or_name(self, uid: int) -> str:
         guild = self.bot.get_guild(GUILD_ID)
@@ -128,6 +150,59 @@ class DailyAwards(commands.Cog):
             return user.name
         except discord.HTTPException:
             return str(uid)
+
+    async def _get_announce_channel(self) -> discord.abc.Messageable | None:
+        """Récupère le salon d'annonce en vérifiant les permissions."""
+        channel = self.bot.get_channel(AWARD_ANNOUNCE_CHANNEL_ID)
+        guild = self.bot.get_guild(GUILD_ID) if hasattr(self.bot, "get_guild") else None
+        if channel is None and guild:
+            try:
+                channel = await guild.fetch_channel(AWARD_ANNOUNCE_CHANNEL_ID)
+            except discord.Forbidden:
+                logger.warning(
+                    "[daily_awards] Accès refusé au salon %s", AWARD_ANNOUNCE_CHANNEL_ID
+                )
+            except discord.NotFound:
+                logger.warning(
+                    "[daily_awards] Salon %s introuvable", AWARD_ANNOUNCE_CHANNEL_ID
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "[daily_awards] Erreur HTTP lors de la récupération du salon %s",
+                    AWARD_ANNOUNCE_CHANNEL_ID,
+                )
+        if channel and hasattr(channel, "send"):
+            me = None
+            if guild:
+                me = getattr(guild, "me", None)
+            elif hasattr(channel, "guild"):
+                me = getattr(channel.guild, "me", None)
+            if me and hasattr(channel, "permissions_for"):
+                perms = channel.permissions_for(me)
+                if not perms.send_messages:
+                    logger.warning(
+                        "[daily_awards] Pas la permission d'envoyer dans %s",
+                        getattr(channel, "id", "inconnu"),
+                    )
+                    channel = None
+            if channel:
+                return channel
+        if guild:
+            fallback = next(
+                (
+                    c
+                    for c in getattr(guild, "text_channels", [])
+                    if c.permissions_for(guild.me).send_messages
+                ),
+                None,
+            )
+            if fallback:
+                logger.warning(
+                    "[daily_awards] Utilisation du salon de secours %s", fallback.id
+                )
+                return fallback
+        logger.error("[daily_awards] Aucun salon texte disponible pour l'annonce")
+        return None
 
     async def _build_message(self, data: Dict[str, Any]) -> str:
         top3 = data.get("top3", {})
@@ -213,41 +288,40 @@ class DailyAwards(commands.Cog):
     async def _maybe_award(self, data: Dict[str, Any]) -> None:
         if not data:
             return
-        winners = data.get("winners") or {}
-        if not winners:
-            logger.warning("[daily_awards] Pas de données gagnants pour %s", data.get("date"))
-        channel = self.bot.get_channel(AWARD_ANNOUNCE_CHANNEL_ID)
-        winners = data.get("winners") or {}
-        if not winners:
-            logger.warning("[daily_awards] Pas de données gagnants pour %s", data.get("date"))
-        channel = self.bot.get_channel(AWARD_ANNOUNCE_CHANNEL_ID)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(AWARD_ANNOUNCE_CHANNEL_ID)
-            except Exception:
-                logger.error(
-                    "[daily_awards] Salon %s introuvable", AWARD_ANNOUNCE_CHANNEL_ID
-                )
-                return
+        today = today_str_eu_paris()
+        logger.info("[daily_awards] Début attribution du %s", today)
+
         state = self._read_state()
-        date = data.get("date")
-        if state.get("date") == date and state.get("message_id"):
-            try:
-                await channel.fetch_message(state["message_id"])
-                return
-            except discord.NotFound:
-                logger.warning(
-                    "[daily_awards] Message %s introuvable, nouvelle publication",
-                    state["message_id"],
-                )
+        if state.get("date") == today:
+            logger.info("[daily_awards] Déjà attribué pour aujourd'hui")
+            return
+
+        winners = data.get("winners") or {}
+        channel = await self._get_announce_channel()
+        if channel is None:
+            return
+
         await self._reset_and_assign(winners)
+
         message = await self._build_message(data)
         if not message:
-            logger.warning("[daily_awards] Message vide pour %s", date)
+            logger.warning("[daily_awards] Message vide pour %s", today)
             return
-        msg = await channel.send(message)
-        self._write_state({"date": date, "message_id": msg.id})
-        logger.info("[daily_awards] Annonce %s publiée", date)
+
+        try:
+            msg = await channel.send(message)
+        except discord.Forbidden:
+            logger.warning("[daily_awards] Permissions insuffisantes pour envoyer l'annonce")
+            return
+        except discord.NotFound:
+            logger.warning("[daily_awards] Salon introuvable lors de l'envoi de l'annonce")
+            return
+        except discord.HTTPException:
+            logger.exception("[daily_awards] Erreur HTTP lors de l'envoi de l'annonce")
+            return
+
+        self._write_state({"date": today, "message_id": getattr(msg, "id", None)})
+        logger.info("[daily_awards] Annonce %s publiée", today)
 
     # ── Tasks ────────────────────────────────────────────────
     async def _scheduler(self) -> None:
