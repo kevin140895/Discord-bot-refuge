@@ -21,19 +21,23 @@ class WelcomeCog(commands.Cog):
         channel = member.guild.get_channel(CHANNEL_WELCOME) if member.guild else None
         if channel:
             try:
-                await channel.send(
-                    "🎉 Bienvenue au Refuge !\n"
-                    f"{member.mention}, installe-toi bien !\n"
-                    f"🕹️ Choisis ton rôle dans le salon <#{CHANNEL_ROLES}> pour accéder à toutes les sections.\n"
-                    "Ravi de t’avoir parmi nous ! 🎮"
+                embed = discord.Embed(
+                    title="🎉 Bienvenue au Refuge !",
+                    description=(
+                        f"{member.mention}, installe-toi bien !\n"
+                        f"🕹️ Choisis ton rôle dans le salon <#{CHANNEL_ROLES}> pour accéder à toutes les sections.\n"
+                        "Ravi de t’avoir parmi nous ! 🎮"
+                    ),
                 )
+                embed.set_image(url=member.display_avatar.url)
+                await channel.send(embed=embed)
             except discord.Forbidden:
                 logger.warning(
-                    "[welcome] Permissions insuffisantes pour envoyer le message de bienvenue"
+                    "[welcome] Permissions insuffisantes pour envoyer le message de bienvenue",
                 )
             except discord.NotFound:
                 logger.warning(
-                    "[welcome] Salon de bienvenue introuvable pour l'envoi du message"
+                    "[welcome] Salon de bienvenue introuvable pour l'envoi du message",
                 )
             except discord.HTTPException as e:
                 logger.error(
@@ -42,7 +46,7 @@ class WelcomeCog(commands.Cog):
                 )
             except Exception:
                 logger.exception(
-                    "[welcome] Échec d'envoi du message de bienvenue pour %s", member.id
+                    "[welcome] Échec d'envoi du message de bienvenue pour %s", member.id,
                 )
 
 
