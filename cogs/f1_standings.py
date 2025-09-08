@@ -231,13 +231,12 @@ class F1Standings(commands.Cog):
         for p in sorted(positions, key=lambda r: r.get("position", 0))[:20]:
             driver_num = p.get("driver_number")
             info = await self._get_driver_info(driver_num)
-            time_str = (
-                p.get("time")
-                or p.get("gap_to_leader")
-                or p.get("interval")
-                or p.get("best_lap_time")
-                or "No Time"
-            )
+            time_str = "No Time"
+            for key in ("time", "gap_to_leader", "interval", "best_lap_time"):
+                val = p.get(key)
+                if val is not None and val != "":
+                    time_str = str(val)
+                    break
             parsed.append(
                 {
                     "driver": info.get("name", f"#{driver_num}"),
