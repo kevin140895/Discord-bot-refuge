@@ -1,6 +1,6 @@
 """Surveillance automatique des sessions F1.
 
-Cette cog interroge l'API Ergast afin de détecter les résultats des
+Cette cog interroge l'API `openf1` afin de détecter les résultats des
 sessions de Formule 1 et met à jour un message unique par type de
 session dans un salon Discord dédié.
 """
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 F1_CHANNEL_ID: int = 1413708410330939485
-ERGAST_API = "https://ergast.com/api/f1"
+OPENF1_API = "https://api.openf1.org/v1"
 F1_DATA_DIR = os.path.join(DATA_DIR, "f1")
 F1_STATE_FILE = os.path.join(F1_DATA_DIR, "f1_state.json")
 ensure_dir(F1_DATA_DIR)
@@ -48,6 +48,7 @@ class F1Standings(commands.Cog):
         self.session: Optional[aiohttp.ClientSession] = None
         self._task: Optional[asyncio.Task] = None
         self._current_year = datetime.now().year
+        self._driver_cache: Dict[int, Dict[str, str]] = {}
         # Démarrer la surveillance
         self._task = asyncio.create_task(self._f1_monitor())
 
@@ -170,95 +171,110 @@ class F1Standings(commands.Cog):
         embed.set_footer(text="Dernière mise à jour")
         return embed
 
-    # ── API Ergast ───────────────────────────────────────────
+    # ── API OpenF1 ───────────────────────────────────────────
     async def _get_session_results(self, session_type: str) -> Optional[List[Dict]]:
-        """Récupère les résultats d'une session via l'API Ergast."""
+        """Récupère les résultats d'une session via l'API OpenF1."""
         if not self.session:
             self.session = aiohttp.ClientSession()
 
+        params = {"year": str(self._current_year)}
+
         if session_type == "race":
-            url = f"{ERGAST_API}/{self._current_year}/last/results.json"
+            params["session_type"] = "Race"
         elif session_type == "qualifying":
-            url = f"{ERGAST_API}/{self._current_year}/last/qualifying.json"
+            params["session_type"] = "Qualifying"
         elif session_type == "sprint":
-            url = f"{ERGAST_API}/{self._current_year}/last/sprint.json"
-        elif session_type in ["fp1", "fp2", "fp3"]:
-            session_num = session_type[-1]
-            url = f"{ERGAST_API}/{self._current_year}/last/practice/{session_num}.json"
+            params["session_type"] = "Sprint"
+        elif session_type in ("fp1", "fp2", "fp3"):
+            params["session_type"] = "Practice"
+            params["session_name"] = f"Practice {session_type[-1]}"
         else:
             return None
 
+        # Construire l'URL de sessions
+        query = "&".join(f"{k}={v}" for k, v in params.items())
+        url = f"{OPENF1_API}/sessions?{query}"
+
         try:
             async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return self._parse_ergast_results(data, session_type)
+                if response.status != 200:
+                    return None
+                sessions = await response.json()
         except Exception as e:  # pragma: no cover - network dependent
-            logger.error("Erreur API Ergast %s: %s", session_type, e)
-        return None
+            logger.error("Erreur API OpenF1 sessions %s: %s", session_type, e)
+            return None
 
-    def _parse_ergast_results(self, data: Dict, session_type: str) -> List[Dict]:
-        """Parse les données Ergast en format standard."""
-        races = data.get("MRData", {}).get("RaceTable", {}).get("Races", [])
-        if not races:
-            return []
-        race = races[0]
+        if not sessions:
+            return None
+
+        # Prendre la session la plus récente
+        latest = sorted(sessions, key=lambda s: s.get("session_key", 0))[-1]
+        session_key = latest.get("session_key")
+        if not session_key:
+            return None
+
+        try:
+            pos_url = f"{OPENF1_API}/position?session_key={session_key}"
+            async with self.session.get(pos_url, timeout=10) as resp:
+                if resp.status != 200:
+                    return None
+                positions = await resp.json()
+        except Exception as e:  # pragma: no cover - network dependent
+            logger.error("Erreur API OpenF1 positions %s: %s", session_type, e)
+            return None
+
+        return await self._parse_openf1_positions(positions)
+
+    async def _parse_openf1_positions(self, positions: List[Dict]) -> List[Dict]:
+        """Convertit les données de position OpenF1 dans un format commun."""
         parsed: List[Dict[str, str]] = []
-
-        if session_type == "qualifying":
-            results = race.get("QualifyingResults", [])
-            for r in results:
-                driver = r.get("Driver", {})
-                constructor = r.get("Constructor", {})
-                time = r.get("Q3") or r.get("Q2") or r.get("Q1") or "No Time"
-                parsed.append(
-                    {
-                        "driver": f"{driver.get('givenName', '')} {driver.get('familyName', '')}",
-                        "constructor": constructor.get("name", ""),
-                        "time": time,
-                    }
-                )
-        elif session_type == "race":
-            results = race.get("Results", [])
-            for r in results:
-                driver = r.get("Driver", {})
-                constructor = r.get("Constructor", {})
-                time = r.get("Time", {}).get("time") or r.get("status", "")
-                parsed.append(
-                    {
-                        "driver": f"{driver.get('givenName', '')} {driver.get('familyName', '')}",
-                        "constructor": constructor.get("name", ""),
-                        "time": time,
-                    }
-                )
-        elif session_type == "sprint":
-            results = race.get("SprintResults", [])
-            for r in results:
-                driver = r.get("Driver", {})
-                constructor = r.get("Constructor", {})
-                time = r.get("Time", {}).get("time") or r.get("status", "")
-                parsed.append(
-                    {
-                        "driver": f"{driver.get('givenName', '')} {driver.get('familyName', '')}",
-                        "constructor": constructor.get("name", ""),
-                        "time": time,
-                    }
-                )
-        else:  # FP1/FP2/FP3
-            results = race.get("Results", [])
-            for r in results:
-                driver = r.get("Driver", {})
-                constructor = r.get("Constructor", {})
-                time = r.get("Time", {}).get("time") or "No Time"
-                parsed.append(
-                    {
-                        "driver": f"{driver.get('givenName', '')} {driver.get('familyName', '')}",
-                        "constructor": constructor.get("name", ""),
-                        "time": time,
-                    }
-                )
-
+        for p in sorted(positions, key=lambda r: r.get("position", 0))[:20]:
+            driver_num = p.get("driver_number")
+            info = await self._get_driver_info(driver_num)
+            time_str = (
+                p.get("time")
+                or p.get("gap_to_leader")
+                or p.get("interval")
+                or p.get("best_lap_time")
+                or "No Time"
+            )
+            parsed.append(
+                {
+                    "driver": info.get("name", f"#{driver_num}"),
+                    "constructor": info.get("team", "Unknown"),
+                    "time": time_str,
+                }
+            )
         return parsed
+
+    async def _get_driver_info(self, driver_number: int) -> Dict[str, str]:
+        """Récupère les informations d'un pilote via OpenF1."""
+        if driver_number in self._driver_cache:
+            return self._driver_cache[driver_number]
+
+        url = f"{OPENF1_API}/drivers?driver_number={driver_number}"
+        try:
+            async with self.session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return {}
+                data = await resp.json()
+        except Exception as e:  # pragma: no cover - network dependent
+            logger.error("Erreur API OpenF1 driver %s: %s", driver_number, e)
+            return {}
+
+        if not data:
+            return {}
+
+        driver = data[0]
+        name = (
+            driver.get("full_name")
+            or driver.get("name")
+            or f"{driver.get('first_name', '')} {driver.get('last_name', '')}".strip()
+        )
+        team = driver.get("team_name") or driver.get("team") or driver.get("constructor")
+        info = {"name": name, "team": team}
+        self._driver_cache[driver_number] = info
+        return info
 
     # ── Détection week-end F1 ────────────────────────────────
     async def _is_f1_weekend(self) -> bool:
@@ -266,32 +282,32 @@ class F1Standings(commands.Cog):
         if not self.session:
             self.session = aiohttp.ClientSession()
 
-        url = f"{ERGAST_API}/{self._current_year}.json"
+        url = f"{OPENF1_API}/sessions?session_type=Race&year={self._current_year}"
         try:
             async with self.session.get(url, timeout=10) as resp:
                 if resp.status != 200:
                     return False
-                data = await resp.json()
+                races = await resp.json()
         except Exception as e:  # pragma: no cover - network dependent
             logger.error("Erreur API calendrier F1: %s", e)
             return False
 
-        races = data.get("MRData", {}).get("RaceTable", {}).get("Races", [])
         now = datetime.now(timezone.utc)
         for race in races:
-            date_str = race.get("date")
-            time_str = race.get("time", "00:00:00Z")
-            if not date_str:
+            start = (
+                race.get("date_start")
+                or race.get("session_start")
+                or race.get("start_time")
+                or race.get("date")
+            )
+            if not start:
                 continue
             try:
-                race_dt = datetime.fromisoformat(f"{date_str}T{time_str.replace('Z', '+00:00')}")
+                race_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
             except Exception:
-                try:
-                    race_dt = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-                except Exception:
-                    continue
+                continue
             if abs((race_dt - now).days) <= 3:
-                gp_name = race.get("raceName", "")
+                gp_name = race.get("meeting_name") or race.get("country_name") or ""
                 state = self._read_state()
                 state["current_gp"] = gp_name
                 self._write_state(state)
