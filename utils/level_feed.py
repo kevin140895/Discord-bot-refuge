@@ -71,6 +71,9 @@ class LevelFeedRouter:
             return
         user = self.bot.get_user(event.user_id)
         mention = user.mention if user else f"<@{event.user_id}>"
+        avatar_url = None
+        if user is not None:
+            avatar_url = getattr(getattr(user, "display_avatar", None), "url", None)
         xp_delta = event.new_xp - event.old_xp
         direction = "up" if event.new_level > event.old_level else "down"
 
@@ -98,6 +101,8 @@ class LevelFeedRouter:
                 )
                 embed.set_footer(text="Ça arrive… retente ta chance !")
 
+            if avatar_url:
+                embed.set_thumbnail(url=avatar_url)
             embed.timestamp = discord.utils.utcnow()
             key = (event.user_id, direction)
             last_msg = self._pari_xp_messages.get(key)
@@ -127,7 +132,17 @@ class LevelFeedRouter:
             xp_delta=f"{xp_delta:+d}",
         )
         try:
-            await channel.send(msg)
+            if avatar_url:
+                color = (
+                    discord.Color.green()
+                    if direction == "up"
+                    else discord.Color.red()
+                )
+                embed = discord.Embed(description=msg, color=color)
+                embed.set_thumbnail(url=avatar_url)
+                await channel.send(embed=embed)
+            else:
+                await channel.send(msg)
             self.metrics[f"level_feed.sent.{event.source}"] += 1
         except discord.Forbidden:
             self.metrics["level_feed.skipped_no_channel"] += 1
