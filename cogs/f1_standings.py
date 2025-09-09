@@ -49,6 +49,7 @@ class F1Standings(commands.Cog):
         self._task: Optional[asyncio.Task] = None
         self._current_year = datetime.now().year
         self._driver_cache: Dict[int, Dict[str, str]] = {}
+        self._state_lock = asyncio.Lock()
         # Démarrer la surveillance
         self._task = asyncio.create_task(self._f1_monitor())
 
@@ -96,31 +97,35 @@ class F1Standings(commands.Cog):
         if not channel:
             return
 
-        state = self._read_state()
-        messages = state.get("messages", {})
+        async with self._state_lock:
+            state = self._read_state()
+            messages = state.get("messages", {})
+            msg_id = messages.get(session_type, {}).get("message_id")
 
         # Créer l'embed
         embed = await self._create_session_embed(session_type, results)
 
-        # Si message existe, le modifier
-        if session_type in messages and messages[session_type].get("message_id"):
+        if msg_id:
             try:
-                message = await channel.fetch_message(messages[session_type]["message_id"])
+                message = await channel.fetch_message(msg_id)
                 await message.edit(embed=embed)
                 logger.info("Message %s modifié", session_type)
+                new_id = msg_id
             except discord.NotFound:
-                # Message supprimé, en créer un nouveau
                 message = await channel.send(embed=embed)
-                messages[session_type] = {"message_id": message.id}
+                new_id = message.id
         else:
-            # Créer nouveau message
             message = await channel.send(embed=embed)
-            messages.setdefault(session_type, {})["message_id"] = message.id
+            new_id = message.id
 
-        # Sauvegarder l'état
-        messages[session_type]["last_update"] = datetime.now().isoformat()
-        state["messages"] = messages
-        self._write_state(state)
+        async with self._state_lock:
+            state = self._read_state()
+            messages = state.get("messages", {})
+            entry = messages.setdefault(session_type, {})
+            entry["message_id"] = new_id
+            entry["last_update"] = datetime.now().isoformat()
+            state["messages"] = messages
+            self._write_state(state)
 
     async def _create_session_embed(self, session_type: str, results: List[Dict]) -> discord.Embed:
         """Crée l'embed pour une session."""

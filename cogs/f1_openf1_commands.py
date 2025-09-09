@@ -27,6 +27,7 @@ class F1OpenF1Auto(commands.Cog):
         self.bot = bot
         self.session: Optional[aiohttp.ClientSession] = None
         self._task = asyncio.create_task(self._scheduler())
+        self._state_lock = asyncio.Lock()
 
     def cog_unload(self) -> None:
         # Stoppe le scheduler et ferme proprement la session HTTP
@@ -80,8 +81,9 @@ class F1OpenF1Auto(commands.Cog):
             except Exception:
                 return
 
-        state = self._read_state()
-        msg_id = state.get(key)
+        async with self._state_lock:
+            state = self._read_state()
+            msg_id = state.get(key)
 
         if msg_id:
             try:
@@ -89,18 +91,19 @@ class F1OpenF1Auto(commands.Cog):
                 await message.edit(embed=embed)
                 return
             except discord.NotFound:
-                # Le message a été supprimé : on renverra un nouveau message plus bas
-                pass
+                pass  # Le message a été supprimé : on renverra un nouveau message plus bas
             except Exception:
-                # Si autre erreur (permissions, etc.), on tentera d'envoyer un nouveau message
-                pass
+                pass  # Si autre erreur (permissions, etc.), on tentera d'envoyer un nouveau message
 
         try:
             message = await channel.send(embed=embed)  # type: ignore[attr-defined]
         except Exception:
             return
-        state[key] = message.id
-        self._write_state(state)
+
+        async with self._state_lock:
+            state = self._read_state()
+            state[key] = message.id
+            self._write_state(state)
 
     # ── Data gathering & embeds ────────────────────────────
     @staticmethod
@@ -271,8 +274,13 @@ class F1OpenF1Auto(commands.Cog):
             return
 
         standings = read_json_safe(F1_STANDINGS_FILE)
-        if not isinstance(standings, dict):
-            standings = {}
+        if not isinstance(standings, dict) or standings.get("year") != year:
+            standings = {
+                "year": year,
+                "drivers": {},
+                "constructors": {},
+                "processed_sessions": [],
+            }
         drivers = standings.get("drivers", {})
         constructors = standings.get("constructors", {})
         processed = set(standings.get("processed_sessions", []))
@@ -320,6 +328,7 @@ class F1OpenF1Auto(commands.Cog):
         standings["drivers"] = drivers
         standings["constructors"] = constructors
         standings["processed_sessions"] = list(processed)
+        standings["year"] = year
         atomic_write_json(F1_STANDINGS_FILE, standings)
 
         driver_lines: List[str] = []
