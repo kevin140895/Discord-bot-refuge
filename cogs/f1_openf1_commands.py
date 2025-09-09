@@ -16,6 +16,7 @@ OPENF1_API = "https://api.openf1.org/v1"
 F1_CHANNEL_ID: int = 1413708410330939485
 F1_DATA_DIR = os.path.join(DATA_DIR, "f1")
 F1_STATE_FILE = os.path.join(F1_DATA_DIR, "openf1_auto.json")
+F1_STANDINGS_FILE = os.path.join(F1_DATA_DIR, "f1_standings.json")
 ensure_dir(F1_DATA_DIR)
 
 
@@ -263,46 +264,63 @@ class F1OpenF1Auto(commands.Cog):
 
     async def _update_standings(self) -> None:
         year = datetime.utcnow().year
-        url = f"{OPENF1_API}/session_result?year={year}&session_name=Race"
+        sessions_url = f"{OPENF1_API}/sessions?year={year}&session_name=Race"
         try:
-            results = await self._fetch_url(url)
+            sessions = await self._fetch_url(sessions_url)
         except aiohttp.ClientError:
             return
 
-        if not results:
-            embed = discord.Embed(
-                title=f"🏆 Championnat Pilotes {year}",
-                description="Aucun résultat disponible pour cette année.",
-                color=0xFF1801,
-                timestamp=self._utcnow(),
-            )
-            embed.set_footer(text="Classement calculé d’après les résultats OpenF1")
-            await self._post_or_edit("standings", embed)
-            return
+        standings = read_json_safe(F1_STANDINGS_FILE)
+        if not isinstance(standings, dict):
+            standings = {}
+        drivers = standings.get("drivers", {})
+        constructors = standings.get("constructors", {})
+        processed = set(standings.get("processed_sessions", []))
 
-        drivers: Dict[int, Dict[str, Optional[str] | float]] = {}
-        constructors: Dict[str, float] = {}
-
-        def _as_float(v) -> float:
+        def _date_key(sess: Dict) -> datetime:
+            ds = sess.get("date_start")
+            if not ds:
+                return datetime.min
             try:
-                return float(v)
-            except (TypeError, ValueError):
-                return 0.0
+                return datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            except ValueError:
+                return datetime.min
 
-        for r in results:
-            num = r.get("driver_number")
+        for sess in sorted(sessions, key=_date_key):
+            skey = sess.get("session_key")
+            if not skey or skey in processed:
+                continue
+            results_url = f"{OPENF1_API}/session_result?session_key={skey}"
             try:
-                num = int(num)
-            except (TypeError, ValueError):
+                results = await self._fetch_url(results_url)
+            except aiohttp.ClientError:
                 continue
 
-            name = r.get("full_name") or r.get("broadcast_name") or f"#{num}"
-            team = r.get("team_name", "") or "—"
-            pts = _as_float(r.get("points", 0))
+            for r in results:
+                num = r.get("driver_number")
+                try:
+                    num = int(num)
+                except (TypeError, ValueError):
+                    continue
+                name = r.get("full_name") or r.get("broadcast_name") or f"#{num}"
+                team = r.get("team_name", "") or "—"
+                try:
+                    pts = float(r.get("points", 0))
+                except (TypeError, ValueError):
+                    pts = 0.0
 
-            d = drivers.setdefault(num, {"name": name, "team": team, "points": 0.0})
-            d["points"] = float(d.get("points", 0.0)) + pts
-            constructors[team] = constructors.get(team, 0.0) + pts
+                d = drivers.setdefault(str(num), {"name": name, "team": team, "points": 0.0})
+                d["name"] = name
+                d["team"] = team
+                d["points"] = float(d.get("points", 0.0)) + pts
+                constructors[team] = float(constructors.get(team, 0.0)) + pts
+
+            processed.add(skey)
+
+        standings["drivers"] = drivers
+        standings["constructors"] = constructors
+        standings["processed_sessions"] = list(processed)
+        atomic_write_json(F1_STANDINGS_FILE, standings)
 
         driver_lines: List[str] = []
         top_drivers = sorted(
@@ -315,7 +333,7 @@ class F1OpenF1Auto(commands.Cog):
 
         constructor_lines: List[str] = []
         top_teams = sorted(
-            constructors.items(), key=lambda x: x[1], reverse=True
+            constructors.items(), key=lambda x: float(x[1]), reverse=True
         )[:10]
         for i, (team, pts) in enumerate(top_teams, start=1):
             pts_fmt = int(pts) if float(pts).is_integer() else round(float(pts), 1)
