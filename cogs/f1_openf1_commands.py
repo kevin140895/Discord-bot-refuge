@@ -19,6 +19,20 @@ F1_STATE_FILE = os.path.join(F1_DATA_DIR, "openf1_auto.json")
 F1_STANDINGS_FILE = os.path.join(F1_DATA_DIR, "f1_standings.json")
 ensure_dir(F1_DATA_DIR)
 
+# Approximate color/flag emojis for a few constructors
+TEAM_EMOJIS: Dict[str, str] = {
+    "Red Bull Racing": "🔵",
+    "Ferrari": "🔴",
+    "Mercedes": "⚪",
+    "McLaren": "🟠",
+    "Aston Martin": "🟢",
+    "Alpine": "🔷",
+    "Williams": "🔵",
+    "RB": "🔵",
+    "Haas F1 Team": "⚪",
+    "Stake F1 Team": "🟢",
+}
+
 
 class F1OpenF1Auto(commands.Cog):
     """Publication automatique d'infos F1 depuis OpenF1."""
@@ -195,7 +209,7 @@ class F1OpenF1Auto(commands.Cog):
         if not skey:
             return
 
-        results_url = f"{OPENF1_API}/session_result?session_key={skey}&position<=10"
+        results_url = f"{OPENF1_API}/results?session_key={skey}&position<=10"
         drivers_url = f"{OPENF1_API}/drivers?session_key={skey}"
 
         try:
@@ -237,20 +251,17 @@ class F1OpenF1Auto(commands.Cog):
         for res in sorted(results, key=lambda r: _safe_int(r.get("position"), 99)):
             pos = _safe_int(res.get("position"), 0)
             num = _safe_int(res.get("driver_number"), 0)
-            points = res.get("points", 0)
             info = driver_map.get(num, {"name": f"#{num}", "team": "—"})
             name = info.get("name", f"#{num}")
             team = info.get("team", "—")
-            emoji = {1: "🥇", 2: "🥈", 3: "🥉"}.get(pos, f"{pos}.")
-            race_time = res.get("race_time")
-            gap = res.get("gap_to_leader")
-            time_info = ""
-            if race_time and pos == 1:
-                time_info = f" — {race_time}"
-            elif gap:
-                time_info = f" — +{gap}"
-
-            lines.append(f"{emoji} **{name}** ({team}) — {points} pts{time_info}")
+            team_emoji = TEAM_EMOJIS.get(team, "")
+            status = str(res.get("status", "")).strip()
+            emoji = {1: "🏆", 2: "🥈", 3: "🥉"}.get(pos, f"{pos}.")
+            time_info = res.get("time") or "—"
+            if status and status.lower() not in {"finished", "classified"}:
+                emoji = "❌"
+                time_info = f"Abandon ({status})"
+            lines.append(f"{emoji} {team_emoji} {name} ({team}) – {time_info}")
 
         embed = discord.Embed(
             title="🏁 Résultats — Dernier Grand Prix",
@@ -298,11 +309,25 @@ class F1OpenF1Auto(commands.Cog):
             skey = sess.get("session_key")
             if not skey or skey in processed:
                 continue
-            results_url = f"{OPENF1_API}/session_result?session_key={skey}"
+            results_url = f"{OPENF1_API}/results?session_key={skey}"
+            drivers_url = f"{OPENF1_API}/drivers?session_key={skey}"
             try:
-                results = await self._fetch_url(results_url)
+                results, drivers_info = await asyncio.gather(
+                    self._fetch_url(results_url),
+                    self._fetch_url(drivers_url),
+                )
             except aiohttp.ClientError:
                 continue
+
+            driver_map: Dict[int, Dict[str, str]] = {
+                int(d.get("driver_number", 0)): {
+                    "name": d.get("full_name")
+                    or d.get("broadcast_name")
+                    or f"#{d.get('driver_number')}",
+                    "team": d.get("team_name", "") or "—",
+                }
+                for d in drivers_info
+            }
 
             for r in results:
                 num = r.get("driver_number")
@@ -310,18 +335,21 @@ class F1OpenF1Auto(commands.Cog):
                     num = int(num)
                 except (TypeError, ValueError):
                     continue
-                name = r.get("full_name") or r.get("broadcast_name") or f"#{num}"
-                team = r.get("team_name", "") or "—"
+                info = driver_map.get(num, {"name": f"#{num}", "team": "—"})
+                name = info.get("name", f"#{num}")
+                team = info.get("team", "—")
                 try:
                     pts = float(r.get("points", 0))
                 except (TypeError, ValueError):
                     pts = 0.0
 
-                d = drivers.setdefault(str(num), {"name": name, "team": team, "points": 0.0})
+                dkey = f"{year}:{num}"
+                d = drivers.setdefault(dkey, {"name": name, "team": team, "points": 0.0})
                 d["name"] = name
                 d["team"] = team
                 d["points"] = float(d.get("points", 0.0)) + pts
-                constructors[team] = float(constructors.get(team, 0.0)) + pts
+                ckey = f"{year}:{team}"
+                constructors[ckey] = float(constructors.get(ckey, 0.0)) + pts
 
             processed.add(skey)
 
@@ -332,21 +360,33 @@ class F1OpenF1Auto(commands.Cog):
         atomic_write_json(F1_STANDINGS_FILE, standings)
 
         driver_lines: List[str] = []
-        top_drivers = sorted(
-            drivers.values(), key=lambda x: float(x["points"]), reverse=True
-        )[:10]
+        top_drivers = [
+            d for k, d in drivers.items() if k.startswith(f"{year}:")
+        ]
+        top_drivers.sort(key=lambda x: float(x["points"]), reverse=True)
+        top_drivers = top_drivers[:10]
         for i, d in enumerate(top_drivers, start=1):
             pts_val = float(d["points"])
             pts = int(pts_val) if pts_val.is_integer() else round(pts_val, 1)
-            driver_lines.append(f"{i}. **{d['name']}** ({d['team']}) — **{pts}**")
+            team_emoji = TEAM_EMOJIS.get(d["team"], "")
+            driver_lines.append(
+                f"{i}. {team_emoji} **{d['name']}** ({d['team']}) — **{pts}**"
+            )
 
         constructor_lines: List[str] = []
-        top_teams = sorted(
-            constructors.items(), key=lambda x: float(x[1]), reverse=True
-        )[:10]
+        top_teams = [
+            (team_key.split(":", 1)[1], pts)
+            for team_key, pts in constructors.items()
+            if team_key.startswith(f"{year}:")
+        ]
+        top_teams.sort(key=lambda x: float(x[1]), reverse=True)
+        top_teams = top_teams[:10]
         for i, (team, pts) in enumerate(top_teams, start=1):
             pts_fmt = int(pts) if float(pts).is_integer() else round(float(pts), 1)
-            constructor_lines.append(f"{i}. **{team}** — **{pts_fmt}**")
+            team_emoji = TEAM_EMOJIS.get(team, "")
+            constructor_lines.append(
+                f"{i}. {team_emoji} **{team}** — **{pts_fmt}**"
+            )
 
         embed = discord.Embed(
             color=0xFF1801,
