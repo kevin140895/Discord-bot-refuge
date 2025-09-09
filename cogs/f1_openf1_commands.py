@@ -62,7 +62,7 @@ class F1OpenF1Auto(commands.Cog):
                 )
             except Exception:
                 pass
-            await asyncio.sleep(6 * 3600)  # mise à jour toutes les 6h
+            await asyncio.sleep(3600)  # mise à jour toutes les heures
 
     async def _post_or_edit(self, key: str, embed: discord.Embed) -> None:
         channel = self.bot.get_channel(F1_CHANNEL_ID)
