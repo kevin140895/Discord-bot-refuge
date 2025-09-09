@@ -14,9 +14,6 @@ from discord.ext import commands
 from config import (
     AWARD_ANNOUNCE_CHANNEL_ID,
     GUILD_ID,
-    MVP_ROLE_ID,
-    WRITER_ROLE_ID,
-    VOICE_ROLE_ID,
     DATA_DIR,
     ENABLE_DAILY_AWARDS,
 )
@@ -41,13 +38,13 @@ def today_str_eu_paris() -> str:
 
 
 def load_last_award_date() -> tuple[str | None, int | None]:
-    """Charge la dernière attribution enregistrée."""
+    """Charge la dernière annonce enregistrée."""
     state = read_json_safe(DAILY_AWARD_FILE)
     return state.get("date"), state.get("message_id")
 
 
 def save_last_award_date(date: str | None, message_id: int | None) -> None:
-    """Enregistre la date d'attribution et l'identifiant du message."""
+    """Enregistre la date d'annonce et l'identifiant du message."""
     atomic_write_json(DAILY_AWARD_FILE, {"date": date, "message_id": message_id})
 
 
@@ -62,7 +59,7 @@ def _format_hm(minutes: int) -> str:
 
 
 class DailyAwards(commands.Cog):
-    """Publie l'annonce des gagnants et attribue les rôles."""
+    """Publie l'annonce des gagnants."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -88,51 +85,6 @@ class DailyAwards(commands.Cog):
     def _write_state(self, data: Dict[str, Any]) -> None:
         save_last_award_date(data.get("date"), data.get("message_id"))
 
-    # ── Role management ─────────────────────────────────────
-    async def _reset_and_assign(self, winners: Dict[str, int | None]) -> None:
-        guild = self.bot.get_guild(GUILD_ID)
-        if not guild:
-            logger.warning("[daily_awards] Guilde %s introuvable", GUILD_ID)
-            return
-        roles = {
-            "mvp": guild.get_role(MVP_ROLE_ID),
-            "msg": guild.get_role(WRITER_ROLE_ID),
-            "vc": guild.get_role(VOICE_ROLE_ID),
-        }
-        for member in guild.members:
-            to_remove = [r for r in roles.values() if r and r in member.roles]
-            if to_remove:
-                try:
-                    await member.remove_roles(
-                        *to_remove,
-                        reason="Réinitialisation des rôles journaliers",
-                    )
-                except discord.Forbidden:
-                    logger.warning("[daily_awards] Permissions insuffisantes pour retirer un rôle")
-                except discord.NotFound:
-                    logger.warning("[daily_awards] Rôle ou membre introuvable lors du retrait")
-                except discord.HTTPException:
-                    logger.exception("[daily_awards] Erreur HTTP lors du retrait d'un rôle")
-                except Exception:  # pragma: no cover - just log
-                    logger.exception("[daily_awards] Erreur inattendue lors du retrait")
-        for key, uid in winners.items():
-            role = roles.get(key)
-            if not role or not uid:
-                continue
-            member = guild.get_member(int(uid))
-            if not member:
-                continue
-            try:
-                await member.add_roles(role, reason="Attribution classement quotidien")
-                logger.info("[daily_awards] Rôle %s attribué à %s", role.id, uid)
-            except discord.Forbidden:
-                logger.warning("[daily_awards] Permissions insuffisantes pour attribuer un rôle")
-            except discord.NotFound:
-                logger.warning("[daily_awards] Rôle ou membre introuvable lors de l'attribution")
-            except discord.HTTPException:
-                logger.exception("[daily_awards] Erreur HTTP lors de l'attribution du rôle")
-            except Exception:  # pragma: no cover
-                logger.exception("[daily_awards] Erreur inattendue lors de l'attribution")
 
     async def _mention_or_name(self, uid: int) -> str:
         guild = self.bot.get_guild(GUILD_ID)
@@ -221,67 +173,48 @@ class DailyAwards(commands.Cog):
             lines.extend(
                 [
                     f"👑 **MVP du Refuge** — {mvp_mention}",
-                    f"Rôle attribué : <@&{MVP_ROLE_ID}>",
                     f"• Points combinés : {mvp_points}  (messages : {mvp_msgs} · vocal : {mvp_voice})",
                     "",
                 ]
             )
         else:
-            lines.extend(
-                [
-                    "👑 **MVP du Refuge** — Aucun gagnant aujourd’hui",
-                    f"Rôle non attribué : <@&{MVP_ROLE_ID}>",
-                    "",
-                ]
-            )
+            lines.extend([
+                "👑 **MVP du Refuge** — Aucun gagnant aujourd’hui",
+                "",
+            ])
 
         if writer:
             writer_entry = writer[0]
             writer_mention = await self._mention_or_name(writer_entry["id"])
             writer_msgs = writer_entry["count"]
-            lines.extend(
-                [
-                    f"📜 **Écrivain du Refuge** — {writer_mention}",
-                    f"Rôle attribué : <@&{WRITER_ROLE_ID}>",
-                    f"• Messages envoyés : {writer_msgs}",
-                    "",
-                ]
-            )
+            lines.extend([
+                f"📜 **Écrivain du Refuge** — {writer_mention}",
+                f"• Messages envoyés : {writer_msgs}",
+                "",
+            ])
         else:
-            lines.extend(
-                [
-                    "📜 **Écrivain du Refuge** — Aucun gagnant aujourd’hui",
-                    f"Rôle non attribué : <@&{WRITER_ROLE_ID}>",
-                    "",
-                ]
-            )
+            lines.extend([
+                "📜 **Écrivain du Refuge** — Aucun gagnant aujourd’hui",
+                "",
+            ])
 
         if voice:
             voice_entry = voice[0]
             voice_mention = await self._mention_or_name(voice_entry["id"])
             voice_time = _format_hm(voice_entry["minutes"])
-            lines.extend(
-                [
-                    f"🎤 **Voix du Refuge** — {voice_mention}",
-                    f"Rôle attribué : <@&{VOICE_ROLE_ID}>",
-                    f"• Temps en vocal : {voice_time}",
-                    "",
-                ]
-            )
+            lines.extend([
+                f"🎤 **Voix du Refuge** — {voice_mention}",
+                f"• Temps en vocal : {voice_time}",
+                "",
+            ])
         else:
-            lines.extend(
-                [
-                    "🎤 **Voix du Refuge** — Aucun gagnant aujourd’hui",
-                    f"Rôle non attribué : <@&{VOICE_ROLE_ID}>",
-                    "",
-                ]
-            )
+            lines.extend([
+                "🎤 **Voix du Refuge** — Aucun gagnant aujourd’hui",
+                "",
+            ])
 
-        lines.extend(
-            [
-                "⏳ **Durée des rôles** : aujourd’hui 00:00 ➜ 23:59",
-                "Félicitations aux gagnants ! Continuez à participer pour tenter le titre demain 🎉",
-            ]
+        lines.append(
+            "Félicitations aux gagnants ! Continuez à participer pour tenter le titre demain 🎉"
         )
         return "\n".join(lines)
 
@@ -289,19 +222,16 @@ class DailyAwards(commands.Cog):
         if not data:
             return
         today = today_str_eu_paris()
-        logger.info("[daily_awards] Début attribution du %s", today)
+        logger.info("[daily_awards] Début annonce du %s", today)
 
         state = self._read_state()
         if state.get("date") == today:
-            logger.info("[daily_awards] Déjà attribué pour aujourd'hui")
+            logger.info("[daily_awards] Déjà annoncé pour aujourd'hui")
             return
 
-        winners = data.get("winners") or {}
         channel = await self._get_announce_channel()
         if channel is None:
             return
-
-        await self._reset_and_assign(winners)
 
         message = await self._build_message(data)
         if not message:
@@ -346,10 +276,9 @@ class DailyAwards(commands.Cog):
     async def _startup_check(self) -> None:
         await self.bot.wait_until_ready()
         # Au démarrage, ``daily_ranking`` peut encore être en train de
-        # calculer le classement précédent.  Pour éviter de rater
-        # l'attribution des rôles, on patiente quelques instants et on
-        # réessaie tant que le fichier de classement ne contient pas les
-        # gagnants attendus.
+        # calculer le classement précédent. Pour éviter de rater
+        # l'annonce, on patiente quelques instants et on réessaie tant que
+        # le fichier de classement ne contient pas les gagnants attendus.
         for _ in range(5):
             data = read_json_safe(DAILY_RANK_FILE)
             if data.get("winners"):

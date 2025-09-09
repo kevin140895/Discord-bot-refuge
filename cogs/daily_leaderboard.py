@@ -1,4 +1,4 @@
-"""Classement quotidien : attribution de rôles et annonce des gagnants."""
+"""Classement quotidien : annonce des gagnants."""
 
 from __future__ import annotations
 
@@ -16,10 +16,6 @@ from config import (
     ANNOUNCE_CHANNEL_ID,
     DATA_DIR,
     ENABLE_DAILY_AWARDS,
-    GUILD_ID,
-    MVP_ROLE_ID,
-    TOP_MSG_ROLE_ID,
-    TOP_VC_ROLE_ID,
 )
 from utils.timezones import PARIS_TZ
 from utils.persistence import read_json_safe, atomic_write_json_async, ensure_dir
@@ -73,9 +69,6 @@ class DailyLeaderboard(commands.Cog):
             return
         await self._save_winners(day, data)
         if ENABLE_DAILY_AWARDS:
-            guild = self.bot.get_guild(GUILD_ID) if GUILD_ID else (self.bot.guilds[0] if self.bot.guilds else None)
-            if guild:
-                await self._update_daily_roles(guild, data["winners"])
             await self._announce_winners(data)
 
     @daily_reset.before_loop
@@ -131,39 +124,6 @@ class DailyLeaderboard(commands.Cog):
         }
         return {"top3": {"msg": top_msg, "vc": top_vc, "mvp": top_mvp}, "winners": winners}
 
-    async def _update_daily_roles(self, guild: discord.Guild, winners: Dict[str, int | None]) -> None:
-        """Réinitialise et attribue les rôles quotidiens."""
-        roles = {
-            "msg": guild.get_role(TOP_MSG_ROLE_ID),
-            "vc": guild.get_role(TOP_VC_ROLE_ID),
-            "mvp": guild.get_role(MVP_ROLE_ID),
-        }
-        for member in guild.members:
-            to_remove = [r for r in roles.values() if r and r in member.roles]
-            if to_remove:
-                try:
-                    await member.remove_roles(*to_remove, reason="Réinitialisation des rôles journaliers")
-                except discord.Forbidden:
-                    logger.warning("[daily_leaderboard] Permissions insuffisantes pour retirer un rôle")
-                except discord.HTTPException as e:
-                    logger.error("[daily_leaderboard] Erreur HTTP lors du retrait d'un rôle: %s", e)
-                except Exception:
-                    logger.exception("[daily_leaderboard] Erreur inattendue lors du retrait d'un rôle")
-        for key, uid in winners.items():
-            role = roles.get(key)
-            if not role or not uid:
-                continue
-            member = guild.get_member(int(uid))
-            if not member:
-                continue
-            try:
-                await member.add_roles(role, reason="Attribution classement quotidien")
-            except discord.Forbidden:
-                logger.warning("[daily_leaderboard] Permissions insuffisantes pour attribuer un rôle")
-            except discord.HTTPException as e:
-                logger.error("[daily_leaderboard] Erreur HTTP lors de l'attribution: %s", e)
-            except Exception:
-                logger.exception("[daily_leaderboard] Erreur inattendue lors de l'attribution du rôle")
 
     async def _announce_winners(self, data: Dict[str, Any]) -> None:
         channel = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
