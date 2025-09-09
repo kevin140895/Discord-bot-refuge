@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 import discord
+from types import SimpleNamespace
 
 import config
 from storage.xp_store import xp_store
@@ -54,6 +55,7 @@ class DummyBot:
             def __init__(self, uid: int) -> None:
                 self.id = uid
                 self.mention = f"<@{uid}>"
+                self.display_avatar = SimpleNamespace(url="avatar-url")
 
         return U(uid)
 
@@ -89,6 +91,7 @@ async def test_level_up_pari_xp(setup_router):
     await asyncio.sleep(0)
     assert chan.sent and chan.sent[0].embed
     assert chan.sent[0].embed.title == "🆙 Niveau augmenté !"
+    assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
 @pytest.mark.asyncio
@@ -101,6 +104,7 @@ async def test_level_down_pari_xp(setup_router):
     await asyncio.sleep(0)
     assert chan.sent and chan.sent[0].embed
     assert chan.sent[0].embed.title == "⬇️ Niveau diminué"
+    assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
 @pytest.mark.asyncio
@@ -111,7 +115,9 @@ async def test_level_up_machine_a_sous(setup_router):
     await xp_store.add_xp(uid, 2500, guild_id=1, source="machine_a_sous")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert chan.sent and "🎰" in chan.sent[0].content
+    assert chan.sent and chan.sent[0].embed
+    assert "🎰" in chan.sent[0].embed.description
+    assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
 @pytest.mark.asyncio
