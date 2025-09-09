@@ -71,20 +71,23 @@ class DailySummaryPoster(commands.Cog):
         def fmt_msg(idx: int) -> str:
             if idx < len(top3.get("msg", [])):
                 entry = top3["msg"][idx]
-                return f"{medals[idx]} <@{entry['id']}> — {entry['count']} msgs"
+                name = entry.get("name", f"<@{entry['id']}>")
+                return f"{medals[idx]} {name} — {entry['count']} msgs"
             return f"{medals[idx]} —"
 
         def fmt_vc(idx: int) -> str:
             if idx < len(top3.get("vc", [])):
                 entry = top3["vc"][idx]
                 hm = _format_hm(entry["minutes"])
-                return f"{medals[idx]} <@{entry['id']}> — {hm}"
+                name = entry.get("name", f"<@{entry['id']}>")
+                return f"{medals[idx]} {name} — {hm}"
             return f"{medals[idx]} —"
 
         def fmt_mvp(idx: int) -> str:
             if idx < len(top3.get("mvp", [])):
                 entry = top3["mvp"][idx]
-                return f"{medals[idx]} <@{entry['id']}> — score {entry['score']}"
+                name = entry.get("name", f"<@{entry['id']}>")
+                return f"{medals[idx]} {name} — score {entry['score']}"
             return f"{medals[idx]} —"
 
         lines = [
@@ -138,6 +141,25 @@ class DailySummaryPoster(commands.Cog):
                 logger.warning(
                     "[daily_summary] Message %s introuvable, re-publication", message_id
                 )
+
+        # Resolve user names so the message displays the winners explicitly
+        top3 = data.get("top3", {})
+        uids = {entry["id"] for entries in top3.values() for entry in entries}
+        names: Dict[int, str] = {}
+        for uid in uids:
+            user = self.bot.get_user(uid)
+            if user is None:
+                try:
+                    user = await self.bot.fetch_user(uid)
+                except Exception:
+                    user = None
+            if user is not None:
+                names[uid] = user.display_name or user.name
+            else:
+                names[uid] = str(uid)
+        for entries in top3.values():
+            for entry in entries:
+                entry["name"] = names.get(entry["id"], str(entry["id"]))
 
         message = self._build_message(data)
         msg = await channel.send(message)
