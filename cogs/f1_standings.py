@@ -227,12 +227,36 @@ class F1Standings(commands.Cog):
 
     async def _parse_openf1_positions(self, positions: List[Dict]) -> List[Dict]:
         """Convertit les données de position OpenF1 dans un format commun."""
+        # L'API renvoie plusieurs lignes par pilote au fil de la session.
+        # On ne conserve que la dernière mise à jour pour chaque numéro.
+        latest: Dict[int, Dict] = {}
+
+        def _time_key(entry: Dict) -> float:
+            """Retourne un ordre approximatif pour déterminer la plus récente."""
+            date = entry.get("date") or entry.get("session_time")
+            if isinstance(date, str):
+                try:
+                    return datetime.fromisoformat(date.replace("Z", "+00:00")).timestamp()
+                except Exception:  # pragma: no cover - format inattendu
+                    return 0.0
+            try:
+                return float(date)
+            except (TypeError, ValueError):
+                return 0.0
+
+        for p in sorted(positions, key=_time_key):
+            try:
+                num = int(p.get("driver_number"))
+            except (TypeError, ValueError):
+                continue
+            latest[num] = p  # la dernière entrée (triée) reste
+
         parsed: List[Dict[str, str]] = []
-        for p in sorted(positions, key=lambda r: r.get("position", 0))[:20]:
+        for p in sorted(latest.values(), key=lambda r: r.get("position", 0))[:20]:
             driver_num = p.get("driver_number")
             info = await self._get_driver_info(driver_num)
             time_str = "No Time"
-            for key in ("time", "gap_to_leader", "interval", "best_lap_time"):
+            for key in ("best_lap_time", "time", "interval", "gap_to_leader"):
                 val = p.get(key)
                 if val is not None and val != "":
                     time_str = str(val)
