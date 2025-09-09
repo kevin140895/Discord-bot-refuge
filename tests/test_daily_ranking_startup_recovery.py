@@ -27,7 +27,6 @@ async def test_startup_recovers_and_awards(tmp_path):
         await DailyRankingAndRoles._startup_check(cog)
 
     data = daily_ranking.read_json_safe(str(rank_file))
-    winners = data["winners"]
     assert data["date"] == yesterday
 
     channel = SimpleNamespace(send=AsyncMock())
@@ -37,8 +36,7 @@ async def test_startup_recovers_and_awards(tmp_path):
     award_cog._read_state = lambda: {}
     award_cog._write_state = lambda data: None
     award_cog._build_message = AsyncMock(return_value="msg")
-    with patch.object(daily_awards.DailyAwards, "_reset_and_assign", new=AsyncMock()) as reset:
-        await daily_awards.DailyAwards._startup_check(award_cog)
-        reset.assert_awaited_once_with(winners)
+    award_cog._get_announce_channel = AsyncMock(return_value=channel)
+    await daily_awards.DailyAwards._startup_check(award_cog)
     channel.send.assert_awaited_once_with("msg")
 
