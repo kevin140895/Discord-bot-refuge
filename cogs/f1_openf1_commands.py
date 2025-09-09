@@ -1,24 +1,48 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import aiohttp
 import discord
-from discord import app_commands
 from discord.ext import commands
 
+from config import DATA_DIR
+from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
+
 OPENF1_API = "https://api.openf1.org/v1"
+F1_CHANNEL_ID: int = 1413708410330939485
+F1_DATA_DIR = os.path.join(DATA_DIR, "f1")
+F1_STATE_FILE = os.path.join(F1_DATA_DIR, "openf1_auto.json")
+ensure_dir(F1_DATA_DIR)
 
 
-class F1OpenF1Commands(commands.Cog):
-    """Commandes slash F1 basées sur l'API OpenF1."""
+class F1OpenF1Auto(commands.Cog):
+    """Publication automatique d'infos F1 depuis OpenF1."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.session: Optional[aiohttp.ClientSession] = None
+        self._task = asyncio.create_task(self._scheduler())
 
+    def cog_unload(self) -> None:
+        self._task.cancel()
+        if self.session and not self.session.closed:
+            try:
+                asyncio.create_task(self.session.close())
+            except RuntimeError:
+                pass
+
+    # ── Persistence helpers ────────────────────────────────
+    def _read_state(self) -> Dict[str, int]:
+        return read_json_safe(F1_STATE_FILE)
+
+    def _write_state(self, data: Dict[str, int]) -> None:
+        atomic_write_json(F1_STATE_FILE, data)
+
+    # ── HTTP helper ────────────────────────────────────────
     async def _fetch_url(self, url: str) -> List[Dict]:
         if not self.session or self.session.closed:
             self.session = aiohttp.ClientSession()
@@ -26,32 +50,50 @@ class F1OpenF1Commands(commands.Cog):
             resp.raise_for_status()
             return await resp.json()
 
-    def cog_unload(self) -> None:
-        if self.session and not self.session.closed:
+    # ── Scheduler ──────────────────────────────────────────
+    async def _scheduler(self) -> None:
+        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
             try:
-                asyncio.create_task(self.session.close())
-            except RuntimeError:
+                await asyncio.gather(
+                    self._update_next(),
+                    self._update_last(),
+                    self._update_standings(),
+                )
+            except Exception:
                 pass
-        self.bot.tree.remove_command(self.group.name)
+            await asyncio.sleep(6 * 3600)  # mise à jour toutes les 6h
 
-    group = app_commands.Group(name="f1", description="Infos Formule 1 via OpenF1")
+    async def _post_or_edit(self, key: str, embed: discord.Embed) -> None:
+        channel = self.bot.get_channel(F1_CHANNEL_ID)
+        if not channel:
+            try:
+                channel = await self.bot.fetch_channel(F1_CHANNEL_ID)
+            except Exception:
+                return
+        state = self._read_state()
+        msg_id = state.get(key)
+        if msg_id:
+            try:
+                message = await channel.fetch_message(msg_id)
+                await message.edit(embed=embed)
+                return
+            except discord.NotFound:
+                pass
+        message = await channel.send(embed=embed)
+        state[key] = message.id
+        self._write_state(state)
 
-    @group.command(name="next", description="Prochaine course F1")
-    @app_commands.describe(year="Année souhaitée (écart par défaut : année courante)")
-    async def next(self, interaction: discord.Interaction, year: Optional[int] = None) -> None:
-        await interaction.response.defer()
-        year = year or datetime.utcnow().year
+    # ── Data gathering & embeds ────────────────────────────
+    async def _update_next(self) -> None:
+        year = datetime.utcnow().year
         now = datetime.utcnow()
         url = f"{OPENF1_API}/sessions?year={year}&session_name=Race"
         try:
             sessions = await self._fetch_url(url)
         except aiohttp.ClientError:
-            await interaction.followup.send(
-                "⛔ OpenF1 indisponible pour le moment. Réessaie plus tard.",
-                ephemeral=True,
-            )
             return
-        upcoming: List[Tuple[datetime, Dict]] = []
+        upcoming = []
         for sess in sessions:
             date_str = sess.get("date_start")
             if not date_str:
@@ -63,48 +105,55 @@ class F1OpenF1Commands(commands.Cog):
             if start > now:
                 upcoming.append((start, sess))
         if not upcoming:
-            await interaction.followup.send("Aucune course à venir.", ephemeral=True)
-            return
-        start, sess = min(upcoming, key=lambda x: x[0])
-        ts = int(start.timestamp())
-        circuit = sess.get("circuit_short_name", "Inconnu")
-        meeting = sess.get("meeting_name", "")
-        embed = discord.Embed(
-            title=f"🏎️ Prochain Grand Prix — {circuit}",
-            description=(
-                f"🗓️ Départ : <t:{ts}:F>\n"
-                f"🌍 {meeting}\n\n"
-                "Préparez vos casques, la tension monte dans les stands !"
-            ),
-            color=0xFF1801,
-            timestamp=datetime.utcnow(),
-        )
+            embed = discord.Embed(
+                title="🏎️ Prochain Grand Prix",
+                description="Aucune course à venir",
+                color=0xFF1801,
+                timestamp=datetime.utcnow(),
+            )
+        else:
+            start, sess = min(upcoming, key=lambda x: x[0])
+            ts = int(start.timestamp())
+            circuit = sess.get("circuit_short_name", "Inconnu")
+            meeting = sess.get("meeting_name", "")
+            embed = discord.Embed(
+                title=f"🏎️ Prochain Grand Prix — {circuit}",
+                description=(
+                    f"🗓️ Départ : <t:{ts}:F>\n"
+                    f"🌍 {meeting}\n\n"
+                    "Préparez vos casques, la tension monte dans les stands !"
+                ),
+                color=0xFF1801,
+                timestamp=datetime.utcnow(),
+            )
         embed.set_footer(text="Données OpenF1")
-        await interaction.followup.send(embed=embed)
+        await self._post_or_edit("next", embed)
 
-    @group.command(name="last", description="Résultats du dernier Grand Prix")
-    async def last(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+    async def _update_last(self) -> None:
         results_url = f"{OPENF1_API}/session_result?session_key=LATEST&position<=10"
         drivers_url = f"{OPENF1_API}/drivers?session_key=LATEST"
         try:
-            results = await self._fetch_url(results_url)
-            drivers = await self._fetch_url(drivers_url)
-        except aiohttp.ClientError:
-            await interaction.followup.send(
-                "⛔ OpenF1 indisponible pour le moment. Réessaie plus tard.",
-                ephemeral=True,
+            results, drivers = await asyncio.gather(
+                self._fetch_url(results_url),
+                self._fetch_url(drivers_url),
             )
+        except aiohttp.ClientError:
             return
         if not results:
-            await interaction.followup.send(
-                "Course en cours ou pas encore publiée.",
-                ephemeral=True,
+            embed = discord.Embed(
+                title="🏁 Résultats — Dernier Grand Prix",
+                description="Course en cours ou pas encore publiée.",
+                color=0xFF1801,
+                timestamp=datetime.utcnow(),
             )
+            embed.set_footer(text="Dernière mise à jour • Données OpenF1")
+            await self._post_or_edit("last", embed)
             return
         driver_map = {
             int(d.get("driver_number", 0)): {
-                "name": d.get("full_name") or d.get("broadcast_name") or f"#{d.get('driver_number')}",
+                "name": d.get("full_name")
+                or d.get("broadcast_name")
+                or f"#{d.get('driver_number')}",
                 "team": d.get("team_name", ""),
             }
             for d in drivers
@@ -130,35 +179,24 @@ class F1OpenF1Commands(commands.Cog):
             inline=False,
         )
         embed.set_footer(text="Dernière mise à jour • Données OpenF1")
-        await interaction.followup.send(embed=embed)
+        await self._post_or_edit("last", embed)
 
-    @group.command(name="standings", description="Classements pilotes et constructeurs")
-    @app_commands.describe(
-        year="Année du championnat (défaut : année courante)",
-        limit="Nombre de lignes à afficher (1-20)",
-    )
-    async def standings(
-        self,
-        interaction: discord.Interaction,
-        year: Optional[int] = None,
-        limit: app_commands.Range[int, 1, 20] = 10,
-    ) -> None:
-        await interaction.response.defer()
-        year = year or datetime.utcnow().year
+    async def _update_standings(self) -> None:
+        year = datetime.utcnow().year
         url = f"{OPENF1_API}/session_result?year={year}&session_name=Race"
         try:
             results = await self._fetch_url(url)
         except aiohttp.ClientError:
-            await interaction.followup.send(
-                "⛔ OpenF1 indisponible pour le moment. Réessaie plus tard.",
-                ephemeral=True,
-            )
             return
         if not results:
-            await interaction.followup.send(
-                "Aucun résultat disponible pour cette année.",
-                ephemeral=True,
+            embed = discord.Embed(
+                title=f"🏆 Championnat Pilotes {year}",
+                description="Aucun résultat disponible pour cette année.",
+                color=0xFF1801,
+                timestamp=datetime.utcnow(),
             )
+            embed.set_footer(text="Classement calculé d’après les résultats OpenF1")
+            await self._post_or_edit("standings", embed)
             return
         drivers: Dict[int, Dict[str, Optional[str]]] = {}
         constructors: Dict[str, float] = {}
@@ -172,14 +210,14 @@ class F1OpenF1Commands(commands.Cog):
             constructors[team] = constructors.get(team, 0.0) + pts
         driver_lines = []
         for i, d in enumerate(
-            sorted(drivers.values(), key=lambda x: x["points"], reverse=True)[: limit],
+            sorted(drivers.values(), key=lambda x: x["points"], reverse=True)[:10],
             start=1,
         ):
             pts = int(d["points"]) if d["points"].is_integer() else round(d["points"], 1)
             driver_lines.append(f"{i}. **{d['name']}** ({d['team']}) — **{pts}**")
         constructor_lines = []
         for i, (team, pts) in enumerate(
-            sorted(constructors.items(), key=lambda x: x[1], reverse=True)[: limit],
+            sorted(constructors.items(), key=lambda x: x[1], reverse=True)[:10],
             start=1,
         ):
             pts_fmt = int(pts) if pts.is_integer() else round(pts, 1)
@@ -199,11 +237,8 @@ class F1OpenF1Commands(commands.Cog):
             inline=False,
         )
         embed.set_footer(text="Classement calculé d’après les résultats OpenF1")
-        await interaction.followup.send(embed=embed)
+        await self._post_or_edit("standings", embed)
 
 
 async def setup(bot: commands.Bot) -> None:
-    cog = F1OpenF1Commands(bot)
-    await bot.add_cog(cog)
-    bot.tree.remove_command(cog.group.name)
-    bot.tree.add_command(cog.group)
+    await bot.add_cog(F1OpenF1Auto(bot))
