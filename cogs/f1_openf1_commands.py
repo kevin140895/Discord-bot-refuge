@@ -32,6 +32,7 @@ class F1OpenF1Commands(commands.Cog):
                 asyncio.create_task(self.session.close())
             except RuntimeError:
                 pass
+        self.bot.tree.remove_command(self.group.name)
 
     group = app_commands.Group(name="f1", description="Infos Formule 1 via OpenF1")
 
