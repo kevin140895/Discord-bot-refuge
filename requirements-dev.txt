@@ -1,0 +1,4 @@
+pytest
+pytest-asyncio
+freezegun
+discord.py>=2,<3
