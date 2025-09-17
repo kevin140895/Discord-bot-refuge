@@ -16,6 +16,8 @@ async def test_startup_recovers_and_awards(tmp_path):
     rank_file = tmp_path / "daily_ranking.json"
     daily_ranking.DAILY_RANK_FILE = str(rank_file)
     daily_awards.DAILY_RANK_FILE = str(rank_file)
+    winners_file = tmp_path / "daily_winners.json"
+    daily_awards.DAILY_WINNERS_FILE = str(winners_file)
 
     xp.DAILY_STATS.clear()
     yesterday = (datetime.now(PARIS_TZ) - timedelta(days=1)).date().isoformat()
