@@ -19,6 +19,11 @@ from config import (
 )
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 
+try:  # pragma: no cover - import guard
+    from cogs.daily_leaderboard import DAILY_WINNERS_FILE
+except Exception:  # pragma: no cover - fallback
+    DAILY_WINNERS_FILE = os.path.join(DATA_DIR, "daily_winners.json")
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -53,6 +58,45 @@ def save_state(date: str | None, message_id: int | None) -> None:
     atomic_write_json(
         STATE_FILE, {"last_posted_date": date, "last_message_id": message_id}
     )
+
+
+def _normalize_award_payload(data: Dict[str, Any], *, date: str | None = None) -> Dict[str, Any]:
+    """Garantit la présence des clés attendues pour l'embed."""
+
+    payload: Dict[str, Any] = dict(data) if isinstance(data, dict) else {}
+    top3 = payload.get("top3") or {}
+    winners = payload.get("winners") or {}
+    payload["top3"] = top3 if isinstance(top3, dict) else {}
+    payload["winners"] = winners if isinstance(winners, dict) else {}
+    if date and "date" not in payload:
+        payload["date"] = date
+    return payload
+
+
+def _load_latest_award_data() -> Dict[str, Any] | None:
+    """Charge les derniers gagnants connus.
+
+    Préfère ``daily_winners.json`` mais conserve une compatibilité avec
+    ``daily_ranking.json`` si nécessaire.
+    """
+
+    winners_data = read_json_safe(DAILY_WINNERS_FILE)
+    if isinstance(winners_data, dict) and winners_data:
+        try:
+            latest_day = max(day for day in winners_data.keys() if isinstance(day, str))
+        except ValueError:
+            latest_day = None
+        if latest_day:
+            payload = winners_data.get(latest_day)
+            if isinstance(payload, dict):
+                return _normalize_award_payload(payload, date=latest_day)
+
+    legacy_data = read_json_safe(DAILY_RANK_FILE)
+    if isinstance(legacy_data, dict) and legacy_data:
+        date = legacy_data.get("date") if isinstance(legacy_data.get("date"), str) else None
+        return _normalize_award_payload(legacy_data, date=date)
+
+    return None
 
 
 def today_str_eu_paris() -> str:
@@ -178,6 +222,7 @@ class DailyAwards(commands.Cog):
     async def _maybe_award(self, data: Dict[str, Any]) -> None:
         if not data:
             return
+        payload = _normalize_award_payload(data)
         today = today_str_eu_paris()
         logger.info("[daily_awards] Début annonce du %s", today)
 
@@ -188,7 +233,7 @@ class DailyAwards(commands.Cog):
             if channel is None:
                 return
 
-            embed = await self._build_embed(data)
+            embed = await self._build_embed(payload)
 
             last_date = state.get("last_posted_date")
             last_id = state.get("last_message_id")
@@ -259,8 +304,8 @@ class DailyAwards(commands.Cog):
                 target += timedelta(days=1)
             await asyncio.sleep((target - now).total_seconds())
             for _ in range(10):
-                data = read_json_safe(DAILY_RANK_FILE)
-                if data.get("winners"):
+                data = _load_latest_award_data()
+                if data and data.get("winners"):
                     try:
                         await self._maybe_award(data)
                     except Exception:
@@ -274,8 +319,8 @@ class DailyAwards(commands.Cog):
         # l'annonce, on patiente quelques instants et on réessaie tant que
         # le fichier de classement ne contient pas les gagnants attendus.
         for _ in range(5):
-            data = read_json_safe(DAILY_RANK_FILE)
-            if data.get("winners"):
+            data = _load_latest_award_data()
+            if data and data.get("winners"):
                 await self._maybe_award(data)
                 return
             await asyncio.sleep(2)

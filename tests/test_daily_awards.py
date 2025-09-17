@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import discord
 
+import cogs.daily_awards as daily_awards
 from cogs.daily_awards import DailyAwards, today_str_eu_paris
 
 
@@ -38,7 +40,11 @@ async def test_maybe_award_partial_publishes():
 
     await DailyAwards._maybe_award(cog, data)
 
-    cog._build_embed.assert_awaited_once_with(data)
+    cog._build_embed.assert_awaited_once()
+    args, kwargs = cog._build_embed.await_args
+    payload = args[0]
+    assert payload["winners"] == data["winners"]
+    assert "top3" in payload
     channel.send.assert_awaited_once()
 
 
@@ -84,5 +90,52 @@ async def test_maybe_award_reposts_when_missing():
 
     channel.send.assert_awaited_once()
     assert state["last_message_id"] == 456
+
+
+def test_load_latest_award_data_prefers_winners(tmp_path, monkeypatch):
+    winners_file = tmp_path / "daily_winners.json"
+    winners_file.write_text(
+        json.dumps(
+            {
+                "2024-01-01": {"top3": {"mvp": []}, "winners": {"mvp": 1, "msg": 2, "vc": 3}},
+                "2024-01-02": {"top3": {"mvp": [{"id": 2}]}, "winners": {"mvp": 2}},
+            }
+        )
+    )
+    rank_file = tmp_path / "daily_ranking.json"
+    rank_file.write_text(json.dumps({"date": "2024-01-01", "top3": {}, "winners": {}}))
+
+    monkeypatch.setattr(daily_awards, "DAILY_WINNERS_FILE", str(winners_file))
+    monkeypatch.setattr(daily_awards, "DAILY_RANK_FILE", str(rank_file))
+
+    result = daily_awards._load_latest_award_data()
+
+    assert result["date"] == "2024-01-02"
+    assert result["winners"]["mvp"] == 2
+    assert "top3" in result
+
+
+def test_load_latest_award_data_fallback(tmp_path, monkeypatch):
+    winners_file = tmp_path / "daily_winners.json"
+    winners_file.write_text(json.dumps({}))
+    rank_file = tmp_path / "daily_ranking.json"
+    rank_file.write_text(
+        json.dumps(
+            {
+                "date": "2024-01-03",
+                "top3": {"mvp": [{"id": 5}]},
+                "winners": {"mvp": 5, "msg": None, "vc": None},
+            }
+        )
+    )
+
+    monkeypatch.setattr(daily_awards, "DAILY_WINNERS_FILE", str(winners_file))
+    monkeypatch.setattr(daily_awards, "DAILY_RANK_FILE", str(rank_file))
+
+    result = daily_awards._load_latest_award_data()
+
+    assert result["date"] == "2024-01-03"
+    assert result["winners"]["mvp"] == 5
+    assert result["top3"]["mvp"][0]["id"] == 5
 
 
