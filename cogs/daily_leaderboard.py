@@ -21,11 +21,14 @@ from utils.timezones import PARIS_TZ
 from utils.persistence import read_json_safe, atomic_write_json_async, ensure_dir
 from utils.interactions import safe_respond
 
-from cogs.xp import DAILY_STATS, DAILY_LOCK, save_daily_stats_to_disk
+from cogs import daily_ranking
+from cogs.xp import DAILY_STATS, DAILY_LOCK
 
 logger = logging.getLogger(__name__)
 
 DAILY_WINNERS_FILE = os.path.join(DATA_DIR, "daily_winners.json")
+# Maximum duration (in seconds) to wait for the ranking cog before giving up.
+RANKING_WAIT_TIMEOUT = 15.0
 ensure_dir(DATA_DIR)
 
 
@@ -34,7 +37,10 @@ class DailyLeaderboard(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        existing = read_json_safe(DAILY_WINNERS_FILE)
+        self._known_winners: set[str] = set(existing.keys())
         self._startup_task = asyncio.create_task(self._startup_recovery())
+        self._ranking_listener = asyncio.create_task(self._listen_for_rankings())
         if ENABLE_DAILY_AWARDS:
             self.daily_reset.start()
 
@@ -42,21 +48,36 @@ class DailyLeaderboard(commands.Cog):
         if self.daily_reset.is_running():
             self.daily_reset.cancel()
         self._startup_task.cancel()
+        if hasattr(self, "_ranking_listener"):
+            self._ranking_listener.cancel()
 
     async def _startup_recovery(self) -> None:
         await self.bot.wait_until_ready()
         today = datetime.now(PARIS_TZ).date()
-        async with DAILY_LOCK:
-            pending = [
-                day
-                for day in DAILY_STATS.keys()
-                if datetime.fromisoformat(day).date() < today
-            ]
-        for day in sorted(pending):
+        try:
+            cached = await daily_ranking.list_cached_rankings()
+        except Exception:
+            cached = set()
+
+        for day in sorted(cached):
+            if day in self._known_winners:
+                continue
             try:
-                data = await self._calculate_daily_winners(day)
-                if data:
-                    await self._save_winners(day, data)
+                if datetime.fromisoformat(day).date() >= today:
+                    continue
+            except ValueError:
+                continue
+            ranking = daily_ranking.get_cached_ranking(day)
+            if not ranking:
+                continue
+            try:
+                await self._save_winners(
+                    day,
+                    {
+                        "top3": ranking.get("top3", {}),
+                        "winners": ranking.get("winners", {}),
+                    },
+                )
             except Exception:
                 logger.exception("[daily_leaderboard] Échec récupération pour %s", day)
 
@@ -80,49 +101,64 @@ class DailyLeaderboard(commands.Cog):
         existing[day] = data
         try:
             await atomic_write_json_async(DAILY_WINNERS_FILE, existing)
+            if not hasattr(self, "_known_winners"):
+                self._known_winners = set()
+            self._known_winners.add(day)
         except OSError as e:  # pragma: no cover - log
             logger.exception("[daily_leaderboard] Échec sauvegarde gagnants: %s", e)
 
+    async def _listen_for_rankings(self) -> None:
+        try:
+            await self.bot.wait_until_ready()
+            startup = getattr(self, "_startup_task", None)
+            if startup is not None:
+                await asyncio.shield(startup)
+        except asyncio.CancelledError:  # pragma: no cover - teardown
+            return
+        except Exception:  # pragma: no cover - log and continue
+            logger.exception("[daily_leaderboard] Échec attente démarrage")
+        seen = set(getattr(self, "_known_winners", set()))
+        while True:
+            try:
+                updates = await daily_ranking.wait_for_new_rankings(seen, timeout=None)
+            except asyncio.CancelledError:  # pragma: no cover - teardown
+                return
+            except Exception:
+                logger.exception("[daily_leaderboard] Échec attente classement")
+                await asyncio.sleep(5)
+                continue
+            if not updates:
+                continue
+            seen.update(updates.keys())
+            today = datetime.now(PARIS_TZ).date()
+            for day, ranking in sorted(updates.items()):
+                try:
+                    if datetime.fromisoformat(day).date() >= today:
+                        continue
+                except ValueError:
+                    continue
+                if day in getattr(self, "_known_winners", set()):
+                    continue
+                try:
+                    await self._save_winners(
+                        day,
+                        {
+                            "top3": ranking.get("top3", {}),
+                            "winners": ranking.get("winners", {}),
+                        },
+                    )
+                except Exception:
+                    logger.exception("[daily_leaderboard] Échec sauvegarde auto pour %s", day)
+
     async def _calculate_daily_winners(self, date: str) -> Dict[str, Any] | None:
         """Calcule les gagnants à partir des statistiques journalières."""
-        async with DAILY_LOCK:
-            stats = DAILY_STATS.pop(date, None)
-        await save_daily_stats_to_disk()
-        if not stats:
-            logger.info("[daily_leaderboard] Aucune statistique pour %s", date)
+        ranking = await daily_ranking.wait_for_ranking(date, timeout=RANKING_WAIT_TIMEOUT)
+        if not ranking:
+            logger.info("[daily_leaderboard] Classement absent pour %s", date)
             return None
-        msg_sorted = sorted(stats.items(), key=lambda x: x[1].get("messages", 0), reverse=True)
-        vc_sorted = sorted(stats.items(), key=lambda x: x[1].get("voice", 0), reverse=True)
-
-        def score(item: tuple[str, Dict[str, int]]) -> float:
-            s = item[1]
-            return s.get("messages", 0) + s.get("voice", 0) / 60.0
-
-        mvp_sorted = sorted(stats.items(), key=score, reverse=True)
-
-        top_msg = [
-            {"id": int(uid), "count": int(data.get("messages", 0))}
-            for uid, data in msg_sorted[:3]
-        ]
-        top_vc = [
-            {"id": int(uid), "minutes": int(data.get("voice", 0) // 60)}
-            for uid, data in vc_sorted[:3]
-        ]
-        top_mvp = [
-            {
-                "id": int(uid),
-                "score": round(score((uid, data)), 2),
-                "messages": int(data.get("messages", 0)),
-                "voice": int(data.get("voice", 0) // 60),
-            }
-            for uid, data in mvp_sorted[:3]
-        ]
-        winners = {
-            "msg": top_msg[0]["id"] if top_msg else None,
-            "vc": top_vc[0]["id"] if top_vc else None,
-            "mvp": top_mvp[0]["id"] if top_mvp else None,
-        }
-        return {"top3": {"msg": top_msg, "vc": top_vc, "mvp": top_mvp}, "winners": winners}
+        top3 = ranking.get("top3", {})
+        winners = ranking.get("winners", {})
+        return {"top3": top3, "winners": winners}
 
 
     async def _announce_winners(self, data: Dict[str, Any]) -> None:
