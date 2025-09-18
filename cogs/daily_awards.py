@@ -87,8 +87,11 @@ def _load_latest_award_data() -> Dict[str, Any] | None:
         except ValueError:
             latest_day = None
         if latest_day:
+            yesterday = (datetime.now(PARIS_TZ).date() - timedelta(days=1)).isoformat()
             payload = winners_data.get(latest_day)
-            if isinstance(payload, dict):
+            if latest_day == yesterday and isinstance(payload, dict):
+                # ``daily_winners.json`` n'est fiable que lorsque l'entrée d'hier a
+                # été générée par la remise à zéro du classement.
                 return _normalize_award_payload(payload, date=latest_day)
 
     legacy_data = read_json_safe(DAILY_RANK_FILE)
