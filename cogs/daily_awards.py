@@ -19,11 +19,6 @@ from config import (
 )
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 
-try:  # pragma: no cover - import guard
-    from cogs.daily_leaderboard import DAILY_WINNERS_FILE
-except Exception:  # pragma: no cover - fallback
-    DAILY_WINNERS_FILE = os.path.join(DATA_DIR, "daily_winners.json")
-
 logger = logging.getLogger(__name__)
 
 try:
@@ -33,6 +28,7 @@ try:
 except Exception:  # pragma: no cover - fallback
     PARIS_TZ = timezone.utc
 
+DAILY_WINNERS_FILE = os.path.join(DATA_DIR, "daily_winners.json")
 DAILY_RANK_FILE = os.path.join(DATA_DIR, "daily_ranking.json")
 STATE_FILE = os.path.join(DATA_DIR, "daily_awards_state.json")
 ensure_dir(DATA_DIR)
