@@ -67,7 +67,6 @@ class RefugeBot(commands.Bot):
             "economy_ui",
             "machine_a_sous",
             "temp_vc",
-            "daily_leaderboard",
         ):
             if required not in loaded_names:
                 await self.load_extension(f"cogs.{required}")
