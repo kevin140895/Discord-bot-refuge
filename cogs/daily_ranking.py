@@ -9,6 +9,7 @@ journalières partagées avec la cog XP.
 import asyncio
 import logging
 import os
+from copy import deepcopy
 from datetime import datetime, timedelta, time, timezone
 from typing import Dict, Any
 
@@ -29,6 +30,102 @@ except Exception:  # pragma: no cover - fallback
 
 DAILY_RANK_FILE = os.path.join(DATA_DIR, "daily_ranking.json")
 ensure_dir(DATA_DIR)
+
+_RANKING_CONDITION: asyncio.Condition = asyncio.Condition()
+LATEST_RANKINGS: Dict[str, Dict[str, Any]] = {}
+
+
+def _snapshot(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a deep copy of ``data`` suitable for sharing across cogs."""
+
+    return deepcopy(data)
+
+
+def _prime_cache_from_disk() -> None:
+    data = read_json_safe(DAILY_RANK_FILE)
+    date = data.get("date")
+    if date:
+        LATEST_RANKINGS[date] = _snapshot(data)
+
+
+_prime_cache_from_disk()
+
+
+async def _record_ranking_result(day: str, ranking: Dict[str, Any]) -> None:
+    """Cache ``ranking`` and wake waiters waiting for ``day``."""
+
+    async with _RANKING_CONDITION:
+        LATEST_RANKINGS[day] = _snapshot(ranking)
+        _RANKING_CONDITION.notify_all()
+
+
+async def wait_for_ranking(date: str, *, timeout: float | None = 60.0) -> Dict[str, Any] | None:
+    """Wait until ranking data for ``date`` is available."""
+
+    async with _RANKING_CONDITION:
+        if date in LATEST_RANKINGS:
+            return _snapshot(LATEST_RANKINGS[date])
+        if timeout == 0:
+            return None
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout if timeout is not None else None
+        while date not in LATEST_RANKINGS:
+            if timeout is None:
+                await _RANKING_CONDITION.wait()
+                continue
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return None
+            try:
+                await asyncio.wait_for(_RANKING_CONDITION.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                return None
+        return _snapshot(LATEST_RANKINGS[date])
+
+
+async def list_cached_rankings() -> set[str]:
+    """Return the set of dates for which rankings are currently cached."""
+
+    async with _RANKING_CONDITION:
+        return set(LATEST_RANKINGS.keys())
+
+
+def get_cached_ranking(date: str) -> Dict[str, Any] | None:
+    """Return cached ranking data for ``date`` if available."""
+
+    data = LATEST_RANKINGS.get(date)
+    if not data:
+        return None
+    return _snapshot(data)
+
+
+async def wait_for_new_rankings(
+    seen: set[str], *, timeout: float | None = None
+) -> Dict[str, Dict[str, Any]]:
+    """Wait until new ranking entries (not in ``seen``) are available."""
+
+    async with _RANKING_CONDITION:
+        fresh = {day: _snapshot(data) for day, data in LATEST_RANKINGS.items() if day not in seen}
+        if fresh or timeout == 0:
+            return fresh
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout if timeout is not None else None
+        while True:
+            if timeout is None:
+                await _RANKING_CONDITION.wait()
+            else:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return {}
+                try:
+                    await asyncio.wait_for(_RANKING_CONDITION.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    return {}
+            fresh = {
+                day: _snapshot(data) for day, data in LATEST_RANKINGS.items() if day not in seen
+            }
+            if fresh:
+                return fresh
 
 
 class DailyRankingAndRoles(commands.Cog):
@@ -110,6 +207,7 @@ class DailyRankingAndRoles(commands.Cog):
             ranking = self._compute_ranking(stats)
             ranking["date"] = day
             self._write_persistence(ranking)
+            await _record_ranking_result(day, ranking)
             await xp.save_daily_stats_to_disk()
             logger.info("[daily_ranking] Classement %s sauvegardé", day)
 
@@ -139,6 +237,7 @@ class DailyRankingAndRoles(commands.Cog):
         ranking = self._compute_ranking(stats)
         ranking["date"] = day
         self._write_persistence(ranking)
+        await _record_ranking_result(day, ranking)
         await xp.save_daily_stats_to_disk()
         logger.info("[daily_ranking] Classement %s sauvegardé", day)
 
