@@ -1,4 +1,5 @@
 import json
+from datetime import datetime as real_datetime
 from types import SimpleNamespace
 
 import pytest
@@ -93,6 +94,13 @@ async def test_maybe_award_reposts_when_missing():
 
 
 def test_load_latest_award_data_prefers_winners(tmp_path, monkeypatch):
+    class FixedDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return real_datetime(2024, 1, 3)
+            return real_datetime(2024, 1, 3, tzinfo=tz)
+
     winners_file = tmp_path / "daily_winners.json"
     winners_file.write_text(
         json.dumps(
@@ -107,12 +115,51 @@ def test_load_latest_award_data_prefers_winners(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_awards, "DAILY_WINNERS_FILE", str(winners_file))
     monkeypatch.setattr(daily_awards, "DAILY_RANK_FILE", str(rank_file))
+    monkeypatch.setattr(daily_awards, "datetime", FixedDatetime)
 
     result = daily_awards._load_latest_award_data()
 
     assert result["date"] == "2024-01-02"
     assert result["winners"]["mvp"] == 2
     assert "top3" in result
+
+
+def test_load_latest_award_data_ignores_stale_winners(tmp_path, monkeypatch):
+    class FixedDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return real_datetime(2024, 1, 3)
+            return real_datetime(2024, 1, 3, tzinfo=tz)
+
+    winners_file = tmp_path / "daily_winners.json"
+    winners_file.write_text(
+        json.dumps(
+            {
+                "2024-01-01": {"top3": {"mvp": [{"id": 1}]}, "winners": {"mvp": 1}},
+            }
+        )
+    )
+    rank_file = tmp_path / "daily_ranking.json"
+    rank_file.write_text(
+        json.dumps(
+            {
+                "date": "2024-01-02",
+                "top3": {"mvp": [{"id": 9}]},
+                "winners": {"mvp": 9, "msg": None, "vc": None},
+            }
+        )
+    )
+
+    monkeypatch.setattr(daily_awards, "DAILY_WINNERS_FILE", str(winners_file))
+    monkeypatch.setattr(daily_awards, "DAILY_RANK_FILE", str(rank_file))
+    monkeypatch.setattr(daily_awards, "datetime", FixedDatetime)
+
+    result = daily_awards._load_latest_award_data()
+
+    assert result["date"] == "2024-01-02"
+    assert result["winners"]["mvp"] == 9
+    assert result["top3"]["mvp"][0]["id"] == 9
 
 
 def test_load_latest_award_data_fallback(tmp_path, monkeypatch):
