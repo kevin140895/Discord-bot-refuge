@@ -52,6 +52,14 @@ DAILY_LOCK = asyncio.Lock()
 XP_BOOSTS: dict[str, datetime] = {}
 
 
+def _prune_stale_daily_stats(current_day: str) -> None:
+    """Remove cached daily statistics for days other than ``current_day``."""
+
+    stale_days = [day for day in list(DAILY_STATS.keys()) if day != current_day]
+    for day in stale_days:
+        DAILY_STATS.pop(day, None)
+
+
 def load_voice_times() -> dict[str, datetime]:
     data = read_json_safe(VOICE_TIMES_FILE)
     out: dict[str, datetime] = {}
@@ -113,6 +121,8 @@ async def xp_bootstrap_cache() -> None:
     XP_LOCK = xp_store.lock
     voice_times = load_voice_times()
     DAILY_STATS = load_daily_stats()
+    today = datetime.now(PARIS_TZ).date().isoformat()
+    _prune_stale_daily_stats(today)
     XP_BOOSTS = load_xp_boosts()
     logger.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
@@ -218,6 +228,7 @@ class XPCog(commands.Cog):
         # Statistiques quotidiennes
         today = datetime.now(PARIS_TZ).date().isoformat()
         async with DAILY_LOCK:
+            _prune_stale_daily_stats(today)
             day = DAILY_STATS.setdefault(today, {})
             user = day.setdefault(str(message.author.id), {"messages": 0, "voice": 0})
             user["messages"] = int(user.get("messages", 0)) + 1
@@ -283,6 +294,7 @@ class XPCog(commands.Cog):
                 # Statistiques quotidiennes (en secondes)
                 day = now.date().isoformat()
                 async with DAILY_LOCK:
+                    _prune_stale_daily_stats(day)
                     d = DAILY_STATS.setdefault(day, {})
                     u = d.setdefault(uid, {"messages": 0, "voice": 0})
                     u["voice"] = int(u.get("voice", 0)) + int(duration.total_seconds())
