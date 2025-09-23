@@ -1,4 +1,5 @@
 import logging
+import shlex
 import shutil
 from typing import Callable, Optional
 
@@ -75,13 +76,18 @@ def play_stream(
     stream_url: str,
     *,
     after: Optional[Callable[[Optional[Exception]], None]] = None,
+    headers: Optional[str] = None,
 ) -> None:
     """Lance la lecture du flux ``stream_url`` si rien n'est joué."""
     if voice and not voice.is_playing():
         if shutil.which("ffmpeg") is None:
             logger.warning("FFmpeg introuvable: impossible de lire le flux %s", stream_url)
             return
+        before_options = FFMPEG_BEFORE
+        header_value = headers.strip() if headers else ""
+        if header_value:
+            before_options = f"{before_options} -headers {shlex.quote(header_value)}"
         source = discord.FFmpegPCMAudio(
-            stream_url, before_options=FFMPEG_BEFORE, options=FFMPEG_OPTIONS
+            stream_url, before_options=before_options, options=FFMPEG_OPTIONS
         )
         voice.play(source, after=after)

@@ -64,7 +64,17 @@ RADIO_STREAM_URL = os.getenv(
     "https://n08.radiojar.com/2b5w4a2kb?rj-ttl=5&rj-tok=AAABmNHaVWAAm4GDT5xyXjsi5A",
 )
 RADIO_RAP_STREAM_URL = "https://stream.laut.fm/24-7-rap"
-RADIO_RAP_FR_STREAM_URL = "http://icecast.radiofrance.fr/mouvrapfr-midfi.mp3"
+RADIO_RAP_FR_STREAM_URL = os.getenv(
+    "RADIO_RAP_FR_STREAM_URL",
+    "https://stream.radiofrance.fr/mouvrapfr/mouvrapfr_midfi.mp3?ID=radiofrance",
+)
+RADIO_RAP_FR_STREAM_HEADERS = os.getenv(
+    "RADIO_RAP_FR_STREAM_HEADERS",
+    (
+        "User-Agent: Mozilla/5.0 (Discord bot; +https://discord.com)\r\n"
+        "Referer: https://www.radiofrance.fr/mouv/rap-fr"
+    ),
+).strip()
 
 ROCK_RADIO_VC_ID = 1408081503707074650
 ROCK_RADIO_STREAM_URL = os.getenv(
