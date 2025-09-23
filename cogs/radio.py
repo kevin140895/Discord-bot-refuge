@@ -7,6 +7,7 @@ from discord.ext import commands
 
 from config import (
     DATA_DIR,
+    RADIO_RAP_FR_STREAM_HEADERS,
     RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
@@ -60,7 +61,17 @@ class RadioCog(commands.Cog):
                     self._delayed_reconnect()
                 )
             return
-        play_stream(self.voice, self.stream_url, after=self._after_play)
+        play_stream(
+            self.voice,
+            self.stream_url,
+            after=self._after_play,
+            headers=self._stream_headers(self.stream_url),
+        )
+
+    def _stream_headers(self, stream_url: Optional[str]) -> Optional[str]:
+        if stream_url == RADIO_RAP_FR_STREAM_URL:
+            return RADIO_RAP_FR_STREAM_HEADERS or None
+        return None
 
     def _after_play(self, error: Optional[Exception]) -> None:
         if error:
