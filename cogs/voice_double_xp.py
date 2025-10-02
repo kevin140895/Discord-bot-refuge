@@ -1,8 +1,9 @@
 """Gestion des sessions Double XP vocal.
 
-Tire quotidiennement jusqu'à deux créneaux horaires aléatoires et active
-un multiplicateur ×2 sur l'XP vocal pendant une heure avec annonces de début
-et de fin dans un salon dédié.
+Le multiplicateur ×2 sur l'XP vocal peut être déclenché manuellement via les
+sessions stockées dans l'état persistant. Aucune planification aléatoire
+n'est désormais générée automatiquement ; la liste des créneaux reste vide
+tant qu'elle n'est pas remplie ailleurs.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
 from datetime import date, datetime, time, timedelta
 from typing import List, Dict, Any
 
@@ -18,7 +18,6 @@ from discord.ext import commands, tasks
 
 from config import (
     DATA_DIR,
-    XP_DOUBLE_VOICE_SESSIONS_PER_DAY,
     XP_DOUBLE_VOICE_DURATION_MINUTES,
     XP_DOUBLE_VOICE_START_HOUR,
     XP_DOUBLE_VOICE_END_HOUR,
@@ -60,20 +59,6 @@ async def _write_state(data: dict) -> None:
         await atomic_write_json_async(STATE_FILE, data)
     except Exception:  # pragma: no cover - disk errors
         logger.exception("[double_xp] failed to write state file")
-
-
-def _random_sessions() -> List[str]:
-    """Return a list of random HH:MM sessions for today."""
-    count = random.randint(0, XP_DOUBLE_VOICE_SESSIONS_PER_DAY)
-    if count == 0:
-        return []
-    start_min = XP_DOUBLE_VOICE_START_HOUR * 60
-    end_min = XP_DOUBLE_VOICE_END_HOUR * 60 - XP_DOUBLE_VOICE_DURATION_MINUTES
-    if end_min < start_min:
-        end_min = start_min
-    minutes = random.sample(range(start_min, end_min + 1), count)
-    minutes.sort()
-    return [f"{m // 60:02d}:{m % 60:02d}" for m in minutes]
 
 
 def _hm_to_dt(hm: str, day: date) -> datetime:
@@ -125,10 +110,7 @@ class DoubleVoiceXP(commands.Cog):
             today = datetime.now(PARIS_TZ).date()
             state = _read_state()
             if force or state.get("date") != today.isoformat():
-                sessions = [
-                    {"hm": hm, "started": False, "end": None, "ended": False}
-                    for hm in _random_sessions()
-                ]
+                sessions: List[Dict[str, Any]] = []
                 state = {"date": today.isoformat(), "sessions": sessions}
                 await _write_state(state)
             else:

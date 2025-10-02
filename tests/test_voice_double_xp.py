@@ -13,19 +13,6 @@ import cogs.voice_double_xp as dx
 from utils.voice_bonus import get_voice_multiplier, set_voice_bonus
 
 
-@pytest.mark.parametrize("count, expected", [
-    (0, []),
-    (1, ["10:00"]),
-    (2, ["10:00", "22:00"]),
-])
-def test_random_sessions_limits(count, expected):
-    samples = [600, 1320][:count]
-    with patch.object(dx.random, "randint", return_value=count), patch.object(
-        dx.random, "sample", return_value=samples
-    ):
-        assert dx._random_sessions() == expected
-
-
 def test_multiplier_application():
     set_voice_bonus(False)
     assert get_voice_multiplier(1.0) == 1.0
@@ -59,10 +46,9 @@ async def test_persistence_no_redraw(tmp_path, monkeypatch):
     )
     with patch.object(dx.tasks.Loop, "start", lambda self, *a, **k: None):
         with patch.object(dx.DoubleVoiceXP, "_run_session", AsyncMock()):
-            with patch.object(dx.random, "randint", side_effect=AssertionError("no redraw")):
-                cog = dx.DoubleVoiceXP(bot)
-                await cog._prepare_today()
-                await asyncio.sleep(0)
+            cog = dx.DoubleVoiceXP(bot)
+            await cog._prepare_today()
+            await asyncio.sleep(0)
     assert len(cog._tasks) == 1
 
 
@@ -124,8 +110,8 @@ async def test_resume_after_restart(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_no_duplicate_messages_when_prepared_twice(monkeypatch):
-    """Calling _prepare_today twice should schedule only once."""
+async def test_force_reset_clears_sessions(monkeypatch):
+    """Forcer la préparation remet la liste des sessions à vide."""
 
     async def wait():
         return None
@@ -144,17 +130,17 @@ async def test_no_duplicate_messages_when_prepared_twice(monkeypatch):
     monkeypatch.setattr(dx, "datetime", FixedDatetime)
     monkeypatch.setattr(dx, "XP_DOUBLE_VOICE_START_HOUR", 0)
     monkeypatch.setattr(dx, "XP_DOUBLE_VOICE_END_HOUR", 1)
-    monkeypatch.setattr(dx.random, "randint", lambda a, b: 1)
-    monkeypatch.setattr(dx.random, "sample", lambda seq, k: [1])
 
-    with patch.object(dx, "_write_state", AsyncMock()):
-        with patch.object(dx.DoubleVoiceXP, "_run_session", AsyncMock()) as run_mock:
-            with patch.object(dx.DoubleVoiceXP, "_startup", AsyncMock()):
-                with patch.object(dx.tasks.Loop, "start", lambda self, *a, **k: None):
-                    cog = dx.DoubleVoiceXP(bot)
-                    cog.state = {"date": "", "sessions": []}
-                    await cog._prepare_today(force=True)
-                    await cog._prepare_today(force=True)
-                    await asyncio.sleep(0)
+    with patch.object(dx, "_read_state", return_value={"date": "", "sessions": []}):
+        with patch.object(dx, "_write_state", AsyncMock()) as write_mock:
+            with patch.object(dx.DoubleVoiceXP, "_run_session", AsyncMock()) as run_mock:
+                with patch.object(dx.DoubleVoiceXP, "_startup", AsyncMock()):
+                    with patch.object(dx.tasks.Loop, "start", lambda self, *a, **k: None):
+                        cog = dx.DoubleVoiceXP(bot)
+                        await cog._prepare_today(force=True)
+                        await cog._prepare_today(force=True)
+                        await asyncio.sleep(0)
 
-    assert run_mock.await_count == 1
+    assert run_mock.await_count == 0
+    assert write_mock.await_count == 2
+    assert cog.state == {"date": "2025-01-01", "sessions": []}
