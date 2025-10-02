@@ -146,10 +146,7 @@ DATA_DIR: str = _resolve_data_dir()
 """Répertoire de stockage persistant."""
 
 # ── Double XP vocal ───────────────────────────────────────────
-XP_DOUBLE_VOICE_SESSIONS_PER_DAY: int = int(
-    os.getenv("XP_DOUBLE_VOICE_SESSIONS_PER_DAY", "2")
-)
-"""Nombre maximum de sessions Double XP vocal par jour."""
+"""Les sessions Double XP vocal ne sont plus générées automatiquement."""
 
 XP_DOUBLE_VOICE_DURATION_MINUTES: int = int(
     os.getenv("XP_DOUBLE_VOICE_DURATION_MINUTES", "60")
