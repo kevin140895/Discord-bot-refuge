@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands, tasks  # noqa: F401
 from datetime import datetime
 from datetime import timedelta
+from datetime import date
 from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo
 from discord import ui
@@ -543,26 +544,12 @@ class RouletteRefugeCog(commands.Cog):
             )
             if result.get("double_xp"):
                 apply_double_xp_buff(user_id, 60)
-            transactions = storage.load_json(TX_PATH, [])
-            if not isinstance(transactions, list):
-                transactions = []
-            day_key = ts.split("T")[0]
-            transactions.append(
-                {
-                    "ts": ts,
-                    "user_id": user_id,
-                    "username": user.name,
-                    "bet": amount,
-                    "segment": segment,
-                    "payout": result["payout"],
-                    "delta": result["delta"],
-                    "mult": result["mult"],
-                    "notes": result["notes"],
-                    "double_xp": result["double_xp"],
-                    "day_key": day_key,
-                }
-            )
-            await storage.save_json(TX_PATH, transactions)
+            # The old roulette statistics features used to persist every bet to
+            # ``transactions.json``. Those consumers were removed so keeping
+            # the persistence would now only cause the file to grow
+            # indefinitely. To avoid unbounded disk usage (and the
+            # increasingly expensive JSON load/save cycle on each bet) we drop
+            # the write entirely.
 
             award_ticket = False
             if delta < 0:
