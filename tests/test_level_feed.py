@@ -121,6 +121,53 @@ async def test_level_up_machine_a_sous(setup_router):
 
 
 @pytest.mark.asyncio
+async def test_level_up_message(setup_router):
+    chan = setup_router
+    uid = 30
+    xp_store.data[str(uid)] = {"xp": 14400, "level": 12}
+    await xp_store.add_xp(uid, 2500, guild_id=1, source="message")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert len(chan.sent) == 1
+    msg = chan.sent[0]
+    assert msg.embed is not None
+    assert "discutant" in msg.embed.description
+    assert "niv. 13" in msg.embed.description
+
+
+@pytest.mark.asyncio
+async def test_level_up_message_ignores_game_toggle(monkeypatch, setup_router):
+    chan = setup_router
+    monkeypatch.setattr(config, "ENABLE_GAME_LEVEL_FEED", False)
+    uid = 31
+    xp_store.data[str(uid)] = {"xp": 14400, "level": 12}
+    await xp_store.add_xp(uid, 2500, guild_id=1, source="message")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert len(chan.sent) == 1
+    embed = chan.sent[0].embed
+    assert embed is not None
+    assert embed.color == discord.Color.green()
+    assert "niv. 13" in embed.description
+
+
+@pytest.mark.asyncio
+async def test_level_down_message_uses_template(setup_router):
+    chan = setup_router
+    uid = 32
+    xp_store.data[str(uid)] = {"xp": 16900, "level": 13}
+    await xp_store.add_xp(uid, -2500, guild_id=1, source="message")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert len(chan.sent) == 1
+    embed = chan.sent[0].embed
+    assert embed is not None
+    assert embed.color == discord.Color.red()
+    assert "retombe" in embed.description
+    assert "-2500 XP" in embed.description
+
+
+@pytest.mark.asyncio
 async def test_no_message_without_level_change(setup_router):
     chan = setup_router
     uid = 4

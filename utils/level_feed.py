@@ -15,6 +15,11 @@ from utils.discord_utils import safe_message_edit
 logger = logging.getLogger("level_feed")
 
 
+GAME_SOURCES = {"pari_xp", "machine_a_sous"}
+TEMPLATE_SOURCES = {key.rsplit("_", 1)[0] for key in LEVEL_FEED_TEMPLATES}
+SUPPORTED_SOURCES = GAME_SOURCES | TEMPLATE_SOURCES
+
+
 @dataclass
 class LevelChange:
     user_id: int
@@ -53,9 +58,9 @@ class LevelFeedRouter:
             await self._handle(event)
 
     async def _handle(self, event: LevelChange) -> None:
-        if event.source not in {"pari_xp", "machine_a_sous"}:
+        if event.source not in SUPPORTED_SOURCES:
             return
-        if not ENABLE_GAME_LEVEL_FEED:
+        if event.source in GAME_SOURCES and not ENABLE_GAME_LEVEL_FEED:
             return
         if not self.bot:
             return
