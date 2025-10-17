@@ -7,8 +7,6 @@ from discord.ext import commands
 
 from config import (
     DATA_DIR,
-    RADIO_RAP_FR_STREAM_HEADERS,
-    RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
     RADIO_TEXT_CHANNEL_ID,
@@ -65,13 +63,8 @@ class RadioCog(commands.Cog):
             self.voice,
             self.stream_url,
             after=self._after_play,
-            headers=self._stream_headers(self.stream_url),
+            headers=None,
         )
-
-    def _stream_headers(self, stream_url: Optional[str]) -> Optional[str]:
-        if stream_url == RADIO_RAP_FR_STREAM_URL:
-            return RADIO_RAP_FR_STREAM_HEADERS or None
-        return None
 
     def _after_play(self, error: Optional[Exception]) -> None:
         if error:
@@ -166,8 +159,6 @@ class RadioCog(commands.Cog):
             await rename_manager.request(channel, "🔘・Radio-Rap")
         elif stream_url == ROCK_RADIO_STREAM_URL:
             await rename_manager.request(channel, "☢️・Radio-Rock")
-        elif stream_url == RADIO_RAP_FR_STREAM_URL:
-            await rename_manager.request(channel, "🔴・Radio-RapFR")
         elif stream_url == RADIO_STREAM_URL:
             await rename_manager.request(channel, "📻・Radio-HipHop")
         else:
@@ -220,14 +211,6 @@ class RadioCog(commands.Cog):
             ROCK_RADIO_STREAM_URL,
             "Radio changée pour rock",
             "☢️・Radio-Rock",
-        )
-
-    async def radio_rapfr(self, interaction: discord.Interaction) -> None:
-        await self._switch_stream(
-            interaction,
-            RADIO_RAP_FR_STREAM_URL,
-            "Radio changée pour rap français",
-            "🔴・Radio-RapFR",
         )
 
     async def radio_hiphop(self, interaction: discord.Interaction) -> None:
