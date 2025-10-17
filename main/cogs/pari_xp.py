@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands, tasks  # noqa: F401
 from datetime import datetime
 from datetime import timedelta
-from datetime import date
 from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo
 from discord import ui
@@ -14,10 +13,10 @@ from main.utils.xp_adapter import (
     apply_double_xp_buff,
 )
 import random
-import inspect
 import re
 import logging
 import asyncio
+import inspect
 
 from pathlib import Path
 
@@ -37,71 +36,6 @@ TX_PATH = PARI_XP_DATA_DIR / "transactions.json"
 
 DEFAULT_CHANNEL_ID = 1408834276228730900
 
-WINNERS_COLOR = 0x00FF9F
-LOSERS_COLOR = 0xFF4757
-
-
-class MonthlyLeaderboardView(discord.ui.View):
-    """Vue persistante pour le classement mensuel."""
-
-    def __init__(self, cog: "RouletteRefugeCog") -> None:
-        super().__init__(timeout=None)
-        self.cog = cog
-
-    @discord.ui.button(
-        label="Top Gagnants",
-        style=discord.ButtonStyle.success,
-        custom_id="monthly_winners",
-    )
-    async def winners(  # type: ignore[override]
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        try:
-            self.cog.state["monthly_leaderboard_view"] = "winners"
-            await storage.save_json(STATE_PATH, self.cog.state)
-            embed = await self.cog._build_monthly_leaderboard_embed("winners")
-            await interaction.response.edit_message(embed=embed, view=self)
-        except Exception:
-            await interaction.response.send_message(
-                "Une erreur est survenue.", ephemeral=True
-            )
-
-    @discord.ui.button(
-        label="Top Perdants",
-        style=discord.ButtonStyle.danger,
-        custom_id="monthly_losers",
-    )
-    async def losers(  # type: ignore[override]
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        try:
-            self.cog.state["monthly_leaderboard_view"] = "losers"
-            await storage.save_json(STATE_PATH, self.cog.state)
-            embed = await self.cog._build_monthly_leaderboard_embed("losers")
-            await interaction.response.edit_message(embed=embed, view=self)
-        except Exception:
-            await interaction.response.send_message(
-                "Une erreur est survenue.", ephemeral=True
-            )
-
-    @discord.ui.button(
-        label="Actualiser",
-        style=discord.ButtonStyle.secondary,
-        custom_id="refresh_monthly",
-    )
-    async def refresh(  # type: ignore[override]
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        try:
-            self.cog._monthly_stats_month = None
-            self.cog._monthly_stats_cache = {}
-            await self.cog._update_monthly_leaderboard()
-            await interaction.response.defer()
-        except Exception:
-            await interaction.response.send_message(
-                "Une erreur est survenue.", ephemeral=True
-            )
-
 
 class RouletteRefugeCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
@@ -117,9 +51,6 @@ class RouletteRefugeCog(commands.Cog):
         self._autoheal_presence_task.start()
         self.roulette_store = RouletteStore(data_dir=DATA_DIR)
         self._loss_streak: dict[int, int] = {}
-        self._monthly_stats_cache: dict[int, dict[str, Any]] = {}
-        self._monthly_stats_month: str | None = None
-        self._monthly_stats_mtime: float | None = None
 
     def _now(self) -> datetime:
         return datetime.now(timezones.TZ_PARIS)
@@ -243,10 +174,8 @@ class RouletteRefugeCog(commands.Cog):
         channel = await self._get_channel()
         if channel:
             await self._ensure_hub_message(channel)
-            await self._ensure_monthly_leaderboard_message(channel)
         try:
             self.bot.add_view(self._build_hub_view())
-            self.bot.add_view(MonthlyLeaderboardView(self))
         except Exception:
             pass
         try:
@@ -282,234 +211,16 @@ class RouletteRefugeCog(commands.Cog):
             await channel.send(embed=embed)
         self.state["last_open_announce_ts"] = self._now().isoformat()
 
-    def _daily_stats(self) -> dict[str, Any]:
-        transactions = storage.load_json(TX_PATH, [])
-        if not isinstance(transactions, list):
-            transactions = []
-        now = datetime.now(TZ_PARIS)
-        today: date = now.date()
-        day_txs = []
-        for tx in transactions:
-            ts = tx.get("ts")
-            try:
-                dt = datetime.fromisoformat(ts).astimezone(TZ_PARIS)
-            except Exception:
-                continue
-            if dt.date() == today:
-                day_txs.append(tx)
-        total_bet = sum(int(tx.get("bet", 0)) for tx in day_txs)
-        total_payout = sum(int(tx.get("payout", 0)) for tx in day_txs)
-        net = total_payout - total_bet
-        return {
-            "day_txs": day_txs,
-            "total_bet": total_bet,
-            "total_payout": total_payout,
-            "net": net,
-        }
-
-    def _get_monthly_stats(self) -> dict[int, dict[str, Any]]:
-        now = self._now()
-        month_key = now.strftime("%Y-%m")
-        mtime = None
-        try:
-            mtime = TX_PATH.stat().st_mtime
-        except OSError:
-            pass
-        cached_month = getattr(self, "_monthly_stats_month", None)
-        cached_stats = getattr(self, "_monthly_stats_cache", {})
-        cached_mtime = getattr(self, "_monthly_stats_mtime", None)
-        if (
-            cached_month == month_key
-            and cached_stats
-            and mtime == cached_mtime
-        ):
-            return cached_stats
-        transactions = storage.load_json(TX_PATH, [])
-        if not isinstance(transactions, list):
-            transactions = []
-        stats: dict[int, dict[str, Any]] = {}
-        for tx in transactions:
-            ts = tx.get("ts")
-            uid = tx.get("user_id")
-            if not ts or uid is None:
-                continue
-            try:
-                dt = datetime.fromisoformat(ts).astimezone(TZ_PARIS)
-            except Exception:
-                continue
-            if dt.year != now.year or dt.month != now.month:
-                continue
-            username = tx.get("username", str(uid))
-            bet = int(tx.get("bet", 0))
-            payout = int(tx.get("payout", 0))
-            delta = int(tx.get("delta", 0))
-            user_stat = stats.setdefault(
-                int(uid),
-                {
-                    "username": username,
-                    "total_bet": 0,
-                    "total_payout": 0,
-                    "net_gain": 0,
-                    "games_played": 0,
-                },
-            )
-            user_stat["username"] = username
-            user_stat["total_bet"] += bet
-            user_stat["total_payout"] += payout
-            user_stat["net_gain"] += delta
-            user_stat["games_played"] += 1
-        self._monthly_stats_cache = stats
-        self._monthly_stats_month = month_key
-        self._monthly_stats_mtime = mtime
-        return stats
-
-    async def _build_monthly_leaderboard_embed(self, view_type: str) -> discord.Embed:
-        stats = self._get_monthly_stats()
-        now = self._now()
-        month_name = now.strftime("%B %Y")
-        total_games = sum(int(v["games_played"]) for v in stats.values())
-        if view_type == "losers":
-            title = f"💸 Top 10 Perdants - {month_name}"
-            color = LOSERS_COLOR
-            sorted_stats = sorted(
-                stats.values(), key=lambda x: int(x["net_gain"])
-            )[:10]
-        else:
-            title = f"🏆 Top 10 Gagnants - {month_name}"
-            color = WINNERS_COLOR
-            sorted_stats = sorted(
-                stats.values(), key=lambda x: int(x["net_gain"]), reverse=True
-            )[:10]
-        lines = []
-        medals = {0: "🥇", 1: "🥈", 2: "🥉"}
-        for idx, s in enumerate(sorted_stats):
-            medal = medals.get(idx, f"{idx + 1}.")
-            net = int(s["net_gain"])
-            lines.append(
-                f"{medal} **{s['username']}** • {net:+} XP ({int(s['games_played'])} parties)"
-            )
-        if not lines:
-            lines = ["Aucune donnée disponible."]
-        embed = discord.Embed(
-            title=title,
-            description="\n".join(lines),
-            color=color,
-            timestamp=now,
-        )
-        embed.set_footer(
-            text=f"📊 Basé sur {total_games} parties ce mois • 🔄 Mis à jour en temps réel"
-        )
-        return embed
-
-    async def _ensure_monthly_leaderboard_message(
-        self, channel: discord.TextChannel
-    ) -> None:
-        msg_id = self.state.get("monthly_leaderboard_msg_id")
-        view_type = self.state.get("monthly_leaderboard_view", "winners")
-        embed = await self._build_monthly_leaderboard_embed(view_type)
-        view = MonthlyLeaderboardView(self)
-        message = None
-        if msg_id:
-            try:
-                message = await channel.fetch_message(int(msg_id))
-            except Exception:
-                message = None
-        if message:
-            await safe_message_edit(message, embed=embed, view=view)
-        elif hasattr(channel, "send"):
-            message = await channel.send(embed=embed, view=view)
-            self.state["monthly_leaderboard_msg_id"] = message.id
-            await storage.save_json(STATE_PATH, self.state)
-
-    async def _update_monthly_leaderboard(self) -> None:
-        channel = await self._get_channel()
-        if not channel:
-            return
-        await self._ensure_monthly_leaderboard_message(channel)
-
     async def _announce_close(self, channel: discord.TextChannel) -> None:
-        stats = self._daily_stats()
-        day_txs = stats["day_txs"]
-        total_bet = stats["total_bet"]
-        total_payout = stats["total_payout"]
-        net = stats["net"]
-        lines = [
-            f"Paris : {len(day_txs)}",
-            f"Total misé : {total_bet} XP",
-            f"Total redistribué : {total_payout} XP",
-            f"Résultat net : {net:+} XP",
-        ]
         embed = discord.Embed(
-            title="🤑 Roulette Refuge — Clôture du jour",
-            description="\n".join(lines),
+            title="🤑 Roulette Refuge — Fermeture",
+            description="La roulette est désormais fermée. Revenez demain pour retenter votre chance !",
             color=discord.Color.red(),
         )
         announce_channel = await self._get_announce_channel()
         if announce_channel:
             await announce_channel.send(embed=embed)
             return
-        await channel.send(embed=embed)
-
-    async def _post_daily_summary(self, channel: discord.TextChannel) -> None:
-        announce_channel = await self._get_announce_channel()
-        if announce_channel:
-            channel = announce_channel
-        now = datetime.now(TZ_PARIS)
-        daily = self._daily_stats()
-        day_txs = daily["day_txs"]
-        total_bet = daily["total_bet"]
-        total_payout = daily["total_payout"]
-        user_stats: dict[int, dict[str, int | str]] = {}
-        biggest = None
-        for tx in day_txs:
-            uid = tx.get("user_id")
-            username = tx.get("username", str(uid))
-            delta = int(tx.get("delta", 0))
-            if delta > 0:
-                if not biggest or delta > biggest["delta"]:
-                    biggest = tx
-            user_stat = user_stats.setdefault(uid, {"username": username, "net": 0})
-            user_stat["username"] = username
-            user_stat["net"] = int(user_stat["net"]) + delta
-        winners = sorted(
-            [v for v in user_stats.values() if int(v["net"]) > 0],
-            key=lambda x: int(x["net"]),
-            reverse=True,
-        )[:3]
-        losers = sorted(
-            [v for v in user_stats.values() if int(v["net"]) < 0],
-            key=lambda x: int(x["net"]),
-        )[:3]
-        win_lines = [f"{idx + 1}. {w['username']} ({int(w['net']):+} XP)" for idx, w in enumerate(winners)]
-        loss_lines = [f"{idx + 1}. {loser['username']} ({int(loser['net']):+} XP)" for idx, loser in enumerate(losers)]
-        biggest_val = f"{biggest['username']} (+{biggest['delta']} XP)" if biggest else "N/A"
-        embed = discord.Embed(
-            title="🤑 Roulette Refuge — Clôture du jour",
-            color=discord.Color.gold(),
-            timestamp=now,
-        )
-        embed.add_field(
-            name="🏆 Top 3 gagnants",
-            value="\n".join(win_lines) if win_lines else "N/A",
-            inline=False,
-        )
-        embed.add_field(
-            name="💸 Top 3 perdants",
-            value="\n".join(loss_lines) if loss_lines else "N/A",
-            inline=False,
-        )
-        embed.add_field(
-            name="💥 Plus gros gain unique",
-            value=biggest_val,
-            inline=False,
-        )
-        embed.add_field(
-            name="📊 Total misé / redistribué",
-            value=f"{total_bet} XP / {total_payout} XP",
-            inline=False,
-        )
-        open_hour = int(self.config.get("open_hour", 8))
-        embed.set_footer(text=f"Réouverture demain à {open_hour:02d}:00 ⏰")
         await channel.send(embed=embed)
 
     @tasks.loop(minutes=1.0)
@@ -525,18 +236,9 @@ class RouletteRefugeCog(commands.Cog):
             self.state["daily_cap_counter"] = 0
             await storage.save_json(STATE_PATH, self.state)
 
-        if now.day == 1 and now.hour == 0 and now.minute == 0:
-            await storage.save_json(TX_PATH, [])
-            self._monthly_stats_cache = {}
-            self._monthly_stats_month = None
-            self._monthly_stats_mtime = None
-            await self._update_monthly_leaderboard()
-
         channel = await self._get_channel()
         if not channel:
             return
-
-        await self._ensure_monthly_leaderboard_message(channel)
 
         # --- Gestion ouverture/fermeture + "dernier appel" ---
         is_open_now = self._is_open_hours(now)
@@ -574,7 +276,6 @@ class RouletteRefugeCog(commands.Cog):
             # On sort de la plage d'ouverture → clôture + récap + fermeture
             await self._announce_close(channel)
             await self._update_hub_state(False)
-            await self._post_daily_summary(channel)
 
     @scheduler_task.before_loop
     async def _wait_ready_scheduler(self) -> None:
@@ -992,18 +693,6 @@ class RouletteRefugeCog(commands.Cog):
             and "user.mention" in src
         )
         report["announces"] = "PASS" if announces_ok else "FAIL"
-
-        summary_src = inspect.getsource(self._post_daily_summary)
-        summary_ok = all(
-            s in summary_src
-            for s in [
-                "Top 3 gagnants",
-                "Top 3 perdants",
-                "Plus gros gain unique",
-                "Total misé / redistribué",
-            ]
-        )
-        report["daily_summary"] = "PASS" if summary_ok else "FAIL"
 
         module = inspect.getmodule(self)
         module_src = inspect.getsource(module) if module else ""
