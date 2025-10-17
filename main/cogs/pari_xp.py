@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands, tasks  # noqa: F401
-from datetime import datetime
+from datetime import date, datetime
 from datetime import timedelta
 from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo
@@ -42,6 +42,10 @@ class RouletteRefugeCog(commands.Cog):
         self.bot = bot
         self.config = storage.load_json(CONFIG_PATH, {})
         self.state = storage.load_json(STATE_PATH, {})
+        if "jackpot_pool" not in self.state:
+            self.state["jackpot_pool"] = 0.0
+        if "last_result" not in self.state:
+            self.state["last_result"] = None
         self.scheduler_task.start()
         self._cooldowns: dict[int, datetime] = {}
         self._bets_today: dict[int, int] = {}
@@ -127,6 +131,9 @@ class RouletteRefugeCog(commands.Cog):
     def _build_hub_embed(self) -> discord.Embed:
         title = f"🎰 {self.config.get('game_display_name', '🤑 Roulette Refuge')} 🎰"
         is_open = self.state.get("is_open", self._is_open_hours())
+        jackpot_pool = float(self.state.get("jackpot_pool", 0.0) or 0.0)
+        jackpot_goal = float(self.config.get("jackpot_goal", 1000))
+        last_result = self.state.get("last_result") or {}
         lines = [
             "━━━━━━━━━━━━━━━",
             "💵 Mise minimum : 5 XP",
@@ -136,14 +143,56 @@ class RouletteRefugeCog(commands.Cog):
             "📩 Résultats privés (éphémères)",
             "📢 Les gros événements sont annoncés publiquement",
             "",
-            "━━━━━━━━━━━━━━━",
-            (
-                f"🟢 État : Ouvert — ferme à ⏰ {int(self.config.get('close_hour', 2)):02d}:00"
-                if is_open
-                else f"🔴 État : Fermé — ouvre à ⏰ {int(self.config.get('open_hour', 8)):02d}:00"
-            ),
+            self._format_jackpot_line(jackpot_pool, jackpot_goal),
         ]
+        last_result_line = self._format_last_result_line(last_result)
+        if last_result_line:
+            lines.extend([last_result_line, ""])
+        lines.extend(
+            [
+                "━━━━━━━━━━━━━━━",
+                (
+                    f"🟢 État : Ouvert — ferme à ⏰ {int(self.config.get('close_hour', 2)):02d}:00"
+                    if is_open
+                    else f"🔴 État : Fermé — ouvre à ⏰ {int(self.config.get('open_hour', 8)):02d}:00"
+                ),
+            ]
+        )
         return discord.Embed(title=title, description="\n".join(lines))
+
+    def _format_jackpot_line(self, pool: float, goal: float) -> str:
+        amount = int(pool)
+        if goal <= 0:
+            return f"💰 Jackpot progressif : {amount} XP"
+        progress = min(max(pool / goal, 0.0), 1.0)
+        bar_length = 10
+        filled = int(progress * bar_length)
+        bar = "█" * filled + "░" * (bar_length - filled)
+        percent = int(progress * 100)
+        return f"💰 Jackpot progressif : {amount} XP ({bar} {percent}%)"
+
+    def _format_last_result_line(self, last_result: dict | None) -> str:
+        if not last_result:
+            return ""
+        segment = self._format_segment_name(str(last_result.get("segment", "")))
+        payout = int(last_result.get("payout", 0) or 0)
+        user = last_result.get("user") or "?"
+        return f"🧾 Dernier résultat : {segment} — {payout} XP — {user}"
+
+    def _format_segment_name(self, segment: str) -> str:
+        mapping = {
+            "lose_0x": "Perdu (0×)",
+            "half_0_5x": "Moitié (0,5×)",
+            "even_1x": "Égal (1×)",
+            "win_2x": "Gagné (2×)",
+            "win_5x": "Gagné (5×)",
+            "win_10x": "Gagné (10×)",
+            "super_jackpot_plus_1000": "Super Jackpot",
+            "double_xp_1h": "Boost Double XP 1h",
+            "color_rouge": "Rouge (2×)",
+            "color_noir": "Noir (2×)",
+        }
+        return mapping.get(segment, segment or "-")
 
     def _build_hub_view(self) -> discord.ui.View:
         cog = self
@@ -512,6 +561,12 @@ class RouletteRefugeCog(commands.Cog):
             "✅ Mise reçue. Tirage en cours…",
             ephemeral=True,
         )
+        spin_delay = float(self.config.get("spin_delay_seconds", 1.5))
+        await asyncio.sleep(min(max(spin_delay, 0.0), 5.0))
+        segment = ""
+        result: dict[str, Any] = {}
+        ts = self._now().isoformat()
+        success = False
         try:
             if color_choice:
                 outcome_color = random.choice(["rouge", "noir"])
@@ -528,13 +583,31 @@ class RouletteRefugeCog(commands.Cog):
                 segment = self._draw_segment()
                 result = self._compute_result(amount, segment)
 
+            jackpot_pool = float(self.state.get("jackpot_pool", 0.0) or 0.0)
+            jackpot_rate = float(self.config.get("jackpot_rate", 0.1))
+            jackpot_bonus = 0
+            result["segment"] = segment
             payout = int(cast(int, result["payout"]))
             ticket_used = await consume_any_ticket(
                 user_id, self.roulette_store, consume_free_ticket
             )
+            if segment == "super_jackpot_plus_1000":
+                jackpot_bonus = int(jackpot_pool)
+                if jackpot_bonus:
+                    payout += jackpot_bonus
+                    result["payout"] = payout
+                    result["delta"] = int(cast(int, result["delta"])) + jackpot_bonus
+                    note = result.get("notes") or ""
+                    note = (note + " — " if note else "") + f"Jackpot progressif : +{jackpot_bonus} XP"
+                    result["notes"] = note
+                self.state["jackpot_pool"] = 0.0
+            else:
+                increment = 0.0
+                if jackpot_rate > 0:
+                    increment = amount * jackpot_rate
+                self.state["jackpot_pool"] = jackpot_pool + increment
             delta = payout if ticket_used else int(cast(int, result["delta"]))
             result["delta"] = delta
-            ts = self._now().isoformat()
             add_user_xp(
                 user_id,
                 delta,
@@ -585,6 +658,8 @@ class RouletteRefugeCog(commands.Cog):
                 lines.insert(1, f"Pari couleur : {color_choice}")
             if result["notes"]:
                 lines.append(f"Note : {result['notes']}")
+            if jackpot_bonus:
+                lines.append(f"🎉 Jackpot progressif remporté : +{jackpot_bonus} XP !")
             if result.get("double_xp"):
                 lines.append("⚡ Tu as gagné un boost Double XP 1h !")
             embed = discord.Embed(title="🎲 Résultat", description="\n".join(lines))
@@ -607,7 +682,8 @@ class RouletteRefugeCog(commands.Cog):
                 big_win_mult = self.config.get("announce_big_win_mult_threshold", 5)
                 big_loss_xp = self.config.get("announce_big_loss_xp_threshold", 100)
                 if segment == "super_jackpot_plus_1000":
-                    content = f"💥 SUPER JACKPOT ! {user.mention} +1000 XP !"
+                    extra = f" +{jackpot_bonus} XP" if jackpot_bonus else ""
+                    content = f"💥 SUPER JACKPOT ! {user.mention} +1000 XP{extra} !"
                     if self.config.get("announce_super_jackpot_ping_here", False):
                         content = "@here " + content
                     await public_channel.send(content)
@@ -617,6 +693,7 @@ class RouletteRefugeCog(commands.Cog):
                     await public_channel.send(
                         f"😢 {user.display_name} vient de perdre {abs(int(cast(int, result['delta'])))} XP..."
                     )
+            success = True
         except Exception as exc:  # pragma: no cover - handled explicitly
             logging.exception("Error while handling bet submission", exc_info=exc)
             try:
@@ -627,6 +704,22 @@ class RouletteRefugeCog(commands.Cog):
             except Exception:
                 pass
             return
+        finally:
+            if success:
+                try:
+                    self.state["last_result"] = {
+                        "user": interaction.user.display_name,
+                        "segment": segment,
+                        "payout": int(result.get("payout", 0) or 0),
+                        "delta": int(result.get("delta", 0) or 0),
+                        "ts": ts,
+                    }
+                    await storage.save_json(STATE_PATH, self.state)
+                    channel = await self._get_channel()
+                    if channel:
+                        await self._ensure_hub_message(channel)
+                except Exception:
+                    pass
     
     async def _self_check_report(self) -> dict:
         report: dict[str, str] = {}
