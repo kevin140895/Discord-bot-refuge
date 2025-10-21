@@ -21,10 +21,10 @@ async def test_safe_message_edit_removes_embed(monkeypatch):
         edit=AsyncMock(),
         channel=SimpleNamespace(id=123),
     )
-    monkeypatch.setattr(
-        "utils.discord_utils.limiter", SimpleNamespace(acquire=AsyncMock())
-    )
+    limiter = SimpleNamespace(acquire=AsyncMock())
+    monkeypatch.setattr("utils.discord_utils.limiter", limiter)
 
     await safe_message_edit(message, embed=None)
 
     message.edit.assert_awaited_once_with(embed=None)
+    limiter.acquire.assert_awaited_once_with(bucket="channel:123")
