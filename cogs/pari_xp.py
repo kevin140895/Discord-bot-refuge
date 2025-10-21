@@ -154,6 +154,9 @@ class PariXPCog(commands.Cog):
     async def _announce_state(self) -> None:
         if self._last_announced_state == self.is_open:
             return
+        if ANNOUNCE_CHANNEL_ID <= 0:
+            self._last_announced_state = self.is_open
+            return
         channel = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if channel is None:
             try:
