@@ -123,7 +123,7 @@ class XPStore:
             if to_remove > 0:
                 removed_users = [uid for uid, _ in items[:to_remove]]
                 
-                # Sauvegarder sur disque avant suppression
+                # Supprimer du cache sans déclencher de sauvegarde immédiate
                 for uid in removed_users:
                     del self.data[uid]
                     
