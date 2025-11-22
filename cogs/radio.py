@@ -156,7 +156,7 @@ class RadioCog(commands.Cog):
         self, channel: discord.VoiceChannel, stream_url: str
     ) -> None:
         if stream_url == RADIO_RAP_STREAM_URL:
-            await rename_manager.request(channel, "🔘・Radio-Rap")
+            await rename_manager.request(channel, "🔘・Radio-Rap-US")
         elif stream_url == ROCK_RADIO_STREAM_URL:
             await rename_manager.request(channel, "☢️・Radio-Rock")
         elif stream_url == RADIO_STREAM_URL:
