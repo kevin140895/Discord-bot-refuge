@@ -8,13 +8,14 @@ interaction with the bot.
 
 from __future__ import annotations
 
+import logging
 import pkgutil
 from typing import Final
 
 import discord
 from discord.ext import commands
 
-from config import GUILD_ID
+from config import GUILD_ID, LEVEL_FEED_CHANNEL_ID
 import cogs
 
 from storage.xp_store import xp_store
@@ -28,6 +29,7 @@ from utils import level_feed
 
 # global rate limiter instance
 limiter: Final[GlobalRateLimiter] = _limiter
+logger = logging.getLogger(__name__)
 
 
 async def reset_http_error_counter() -> None:
@@ -85,6 +87,52 @@ class RefugeBot(commands.Bot):
         if not getattr(self, "_player_type_view_added", False):
             self.add_view(PlayerTypeView())
             self._player_type_view_added = True
+
+    async def announce_level_up(
+        self,
+        guild: discord.Guild,
+        member: discord.abc.User,
+        old_level: int,
+        new_level: int,
+        new_xp: int,
+    ) -> None:
+        """Send a level-up notification to the configured channel.
+
+        The method is invoked by XP-related cogs when a member gains a level.
+        It tries to resolve ``LEVEL_FEED_CHANNEL_ID`` within the provided
+        guild, and silently returns when the channel cannot be used.
+        """
+
+        channel = guild.get_channel(LEVEL_FEED_CHANNEL_ID)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(LEVEL_FEED_CHANNEL_ID)
+            except Exception:
+                channel = None
+
+        if not isinstance(channel, discord.abc.Messageable):
+            logger.warning("level feed channel unavailable or invalid")
+            return
+
+        embed = discord.Embed(
+            title="🆙 Niveau augmenté !",
+            description=(
+                f"{member.mention} passe **niv. {new_level}** "
+                f"(de {old_level}) avec {new_xp} XP."
+            ),
+            color=discord.Color.green(),
+        )
+        avatar_url = getattr(getattr(member, "display_avatar", None), "url", None)
+        if avatar_url:
+            embed.set_thumbnail(url=avatar_url)
+        embed.set_footer(text="Félicitations !")
+
+        try:
+            await channel.send(embed=embed)
+        except discord.Forbidden:
+            logger.warning("missing permission to send level feed message")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("failed to send level feed message: %s", exc)
 
     async def close(self) -> None:  # type: ignore[override]
         """Ensure background helpers are stopped before shutting down."""
