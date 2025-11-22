@@ -61,14 +61,14 @@ RADIO_VC_ID = 1405695147114758245
 RADIO_TEXT_CHANNEL_ID = 1409333722754580571
 RADIO_STREAM_URL = os.getenv(
     "RADIO_STREAM_URL",
-    "https://n08.radiojar.com/2b5w4a2kb?rj-ttl=5&rj-tok=AAABmNHaVWAAm4GDT5xyXjsi5A",
+    "https://stream.laut.fm/hiphop-forever",
 )
-RADIO_RAP_STREAM_URL = "https://stream.laut.fm/24-7-rap"
+RADIO_RAP_STREAM_URL = "https://stream.laut.fm/englishrap"
 
 ROCK_RADIO_VC_ID = 1408081503707074650
 ROCK_RADIO_STREAM_URL = os.getenv(
     "ROCK_RADIO_STREAM_URL",
-    "http://stream.radioparadise.com/rock-192",
+    "https://stream.laut.fm/rockworld",
 )
 
 # ── Divers ───────────────────────────────────────────────────
