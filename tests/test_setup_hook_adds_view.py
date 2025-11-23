@@ -34,12 +34,13 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
     add_view_mock = MagicMock()
     monkeypatch.setattr(test_bot, "add_view", add_view_mock)
 
-    # First call registers the view
+    # First call registers the views
     await test_bot.setup_hook()
     # Second call should be idempotent
     await test_bot.setup_hook()
-    add_view_mock.assert_called_once()
-    assert isinstance(add_view_mock.call_args.args[0], view.PlayerTypeView)
+    assert add_view_mock.call_count == 2
+    call_types = [type(c.args[0]) for c in add_view_mock.call_args_list]
+    assert call_types == [view.PlayerTypeView, view.RadioView]
     bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot)])
 
     # Simulate a restart with a new instance
@@ -52,7 +53,7 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
     monkeypatch.setattr(other_bot, "add_view", add_view_mock2)
 
     await other_bot.setup_hook()
-    add_view_mock2.assert_called_once()
-    assert isinstance(add_view_mock2.call_args.args[0], view.PlayerTypeView)
+    call_types = [type(c.args[0]) for c in add_view_mock2.call_args_list]
+    assert call_types == [view.PlayerTypeView, view.RadioView]
     bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot), call(other_bot)])
 
