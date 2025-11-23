@@ -26,9 +26,22 @@ async def test_radio_rap_toggles_stream(monkeypatch):
     rename_mock = AsyncMock()
     monkeypatch.setattr(radio_mod.rename_manager, "request", rename_mock)
 
+    class FakeResponse:
+        def __init__(self) -> None:
+            self._done = False
+            self.send_message = AsyncMock()
+            self.defer = AsyncMock(side_effect=self._mark_done)
+
+        def _mark_done(self, *args, **kwargs):
+            self._done = True
+
+        def is_done(self) -> bool:
+            return self._done
+
     interaction = SimpleNamespace(
         user=SimpleNamespace(id=123),
-        response=SimpleNamespace(send_message=AsyncMock()),
+        response=FakeResponse(),
+        followup=SimpleNamespace(send=AsyncMock()),
     )
 
     await cog.radio_rap(interaction)
@@ -36,9 +49,11 @@ async def test_radio_rap_toggles_stream(monkeypatch):
     assert cog.stream_url == RADIO_RAP_STREAM_URL
     assert cog._previous_stream == RADIO_STREAM_URL
     rename_mock.assert_awaited_once_with(channel, "🔘・Radio-Rap-US")
-    interaction.response.send_message.assert_awaited_once()
+    interaction.response.defer.assert_awaited_once()
+    interaction.followup.send.assert_awaited_once()
 
-    interaction.response.send_message.reset_mock()
+    interaction.response = FakeResponse()
+    interaction.followup.send.reset_mock()
     rename_mock.reset_mock()
 
     await cog.radio_rap(interaction)
@@ -46,5 +61,6 @@ async def test_radio_rap_toggles_stream(monkeypatch):
     assert cog.stream_url == RADIO_STREAM_URL
     assert cog._previous_stream is None
     rename_mock.assert_awaited_once_with(channel, "📻・Radio-HipHop")
-    interaction.response.send_message.assert_awaited_once()
+    interaction.response.defer.assert_awaited_once()
+    interaction.followup.send.assert_awaited_once()
 
