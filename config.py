@@ -66,7 +66,7 @@ RADIO_STREAM_URL = os.getenv(
 RADIO_RAP_STREAM_URL = "https://stream.laut.fm/englishrap"
 RADIO_RAP_FR_STREAM_URL = os.getenv(
     "RADIO_RAP_FR_STREAM_URL",
-    "http://icecast.radiofrance.fr/mouv-hifi.aac",
+    "https://icecast.skyrock.net/s/natio_aac_128k",
 )
 
 ROCK_RADIO_VC_ID = 1408081503707074650
