@@ -64,6 +64,10 @@ RADIO_STREAM_URL = os.getenv(
     "https://stream.laut.fm/hiphop-forever",
 )
 RADIO_RAP_STREAM_URL = "https://stream.laut.fm/englishrap"
+RADIO_RAP_FR_STREAM_URL = os.getenv(
+    "RADIO_RAP_FR_STREAM_URL",
+    "https://stream.laut.fm/rapfr",
+)
 
 ROCK_RADIO_VC_ID = 1408081503707074650
 ROCK_RADIO_STREAM_URL = os.getenv(

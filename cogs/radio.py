@@ -7,6 +7,7 @@ from discord.ext import commands
 
 from config import (
     DATA_DIR,
+    RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
     RADIO_TEXT_CHANNEL_ID,
@@ -157,6 +158,8 @@ class RadioCog(commands.Cog):
     ) -> None:
         if stream_url == RADIO_RAP_STREAM_URL:
             await rename_manager.request(channel, "🔘・Radio-Rap-US")
+        elif stream_url == RADIO_RAP_FR_STREAM_URL:
+            await rename_manager.request(channel, "🟣・Radio-Rap-FR")
         elif stream_url == ROCK_RADIO_STREAM_URL:
             await rename_manager.request(channel, "☢️・Radio-Rock")
         elif stream_url == RADIO_STREAM_URL:
@@ -202,7 +205,15 @@ class RadioCog(commands.Cog):
             interaction,
             RADIO_RAP_STREAM_URL,
             "Radio changée pour rap",
-            "🔘・Radio-Rap",
+            "🔘・Radio-Rap-US",
+        )
+
+    async def radio_rap_fr(self, interaction: discord.Interaction) -> None:
+        await self._switch_stream(
+            interaction,
+            RADIO_RAP_FR_STREAM_URL,
+            "Radio changée pour rap FR",
+            "🟣・Radio-Rap-FR",
         )
 
     async def radio_rock(self, interaction: discord.Interaction) -> None:
