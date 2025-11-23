@@ -176,6 +176,12 @@ class RadioCog(commands.Cog):
         rename_name: str,
     ) -> None:
         """Basculer vers un flux radio et renommer le salon."""
+        is_done = getattr(interaction.response, "is_done", lambda: False)
+        if not is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except Exception:
+                logger.debug("Impossible de defer la réponse radio", exc_info=True)
         channel = self.bot.get_channel(self.vc_id)
 
         if self.stream_url == stream_url and self._previous_stream:
@@ -186,8 +192,8 @@ class RadioCog(commands.Cog):
             await self._connect_and_play()
             if isinstance(channel, discord.VoiceChannel):
                 await self._rename_for_stream(channel, self.stream_url)
-            await interaction.response.send_message(
-                "Radio changée pour la station précédente", ephemeral=True
+            await self._send_radio_response(
+                interaction, "Radio changée pour la station précédente"
             )
             return
 
@@ -198,7 +204,7 @@ class RadioCog(commands.Cog):
         await self._connect_and_play()
         if isinstance(channel, discord.VoiceChannel):
             await rename_manager.request(channel, rename_name)
-        await interaction.response.send_message(user_message, ephemeral=True)
+        await self._send_radio_response(interaction, user_message)
 
     async def radio_rap(self, interaction: discord.Interaction) -> None:
         await self._switch_stream(
@@ -233,9 +239,26 @@ class RadioCog(commands.Cog):
         await self._connect_and_play()
         if isinstance(channel, discord.VoiceChannel):
             await self._rename_for_stream(channel, RADIO_STREAM_URL)
-        await interaction.response.send_message(
-            "Radio changée pour la station Hip-Hop", ephemeral=True
+        await self._send_radio_response(
+            interaction, "Radio changée pour la station Hip-Hop"
         )
+
+    async def _send_radio_response(
+        self, interaction: discord.Interaction, message: str
+    ) -> None:
+        """Répond en message éphemère quel que soit l'état de la réponse."""
+        responder = (
+            getattr(interaction, "followup", None) and interaction.followup.send
+        )
+        if responder is None:
+            responder = interaction.response.send_message
+        elif not getattr(interaction.response, "is_done", lambda: False)():
+            responder = interaction.response.send_message
+
+        try:
+            await responder(message, ephemeral=True)
+        except Exception:
+            logger.warning("Réponse radio impossible", exc_info=True)
 
     @commands.Cog.listener()
     async def on_voice_state_update(
