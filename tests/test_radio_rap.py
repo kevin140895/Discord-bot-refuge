@@ -35,7 +35,7 @@ async def test_radio_rap_toggles_stream(monkeypatch):
 
     assert cog.stream_url == RADIO_RAP_STREAM_URL
     assert cog._previous_stream == RADIO_STREAM_URL
-    rename_mock.assert_awaited_once_with(channel, "🔘・Radio-Rap")
+    rename_mock.assert_awaited_once_with(channel, "🔘・Radio-Rap-US")
     interaction.response.send_message.assert_awaited_once()
 
     interaction.response.send_message.reset_mock()
