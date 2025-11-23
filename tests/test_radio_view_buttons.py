@@ -14,6 +14,7 @@ from view import RadioView
 async def test_radio_view_has_expected_buttons():
     view = RadioView()
     expected = {
+        "radio_rap_fr": "Rap FR",
         "radio_rap": "Rap US",
         "radio_rock": "Rock",
         "radio_hiphop": "Radio Hip-Hop",
@@ -34,6 +35,7 @@ async def test_radio_view_has_expected_buttons():
 async def test_radio_view_buttons_call_methods():
     view = RadioView()
     mapping = {
+        "radio_rap_fr": "radio_rap_fr",
         "radio_rap": "radio_rap",
         "radio_rock": "radio_rock",
         "radio_hiphop": "radio_hiphop",
