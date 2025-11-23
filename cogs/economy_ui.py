@@ -227,20 +227,56 @@ class EconomyUICog(commands.Cog):
         user_id = interaction.user.id
         limit = PURCHASE_LIMITS.get(item_key)
         if limit is not None:
-            txs = await transactions.all()
-            count = sum(
-                1
-                for tx in txs
-                if tx.get("type") == "buy"
-                and tx.get("user_id") == user_id
-                and tx.get("item") == item_key
-            )
-            if count >= limit:
-                await interaction.response.send_message(
-                    f"Vous avez atteint la limite d'achat pour {item.get('name', item_key)} (max {limit}).",
-                    ephemeral=True,
+            if item_key == "ticket_royal":
+                tickets = load_tickets()
+                count = int(tickets.get(str(user_id), 0))
+                if count >= limit:
+                    await interaction.response.send_message(
+                        (
+                            f"Tu as déjà {count} Ticket Royal en stock "
+                            f"(max {limit}). Utilise-les avant d'en racheter."
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+            elif item_key == "double_xp_1h":
+                boosts = load_boosts()
+                now = datetime.now(timezone.utc)
+                active_boosts = 0
+                for entry in boosts.get(str(user_id), []):
+                    if entry.get("type") != "double_xp":
+                        continue
+                    until_str = entry.get("until")
+                    try:
+                        until = datetime.fromisoformat(until_str)
+                    except Exception:
+                        continue
+                    if until > now:
+                        active_boosts += 1
+                if active_boosts >= limit:
+                    await interaction.response.send_message(
+                        (
+                            "Tu as déjà atteint la limite de boosts Double XP actifs "
+                            f"(max {limit}). Attends leur expiration avant d'en racheter."
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+            else:
+                txs = await transactions.all()
+                count = sum(
+                    1
+                    for tx in txs
+                    if tx.get("type") == "buy"
+                    and tx.get("user_id") == user_id
+                    and tx.get("item") == item_key
                 )
-                return
+                if count >= limit:
+                    await interaction.response.send_message(
+                        f"Vous avez atteint la limite d'achat pour {item.get('name', item_key)} (max {limit}).",
+                        ephemeral=True,
+                    )
+                    return
         price = int(item.get("price", 0))
         balance = xp_adapter.get_balance(user_id)
         if balance < price:
