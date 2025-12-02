@@ -246,7 +246,7 @@ class XPCog(commands.Cog):
         )
         if new_lvl > old_lvl:
             await self.bot.announce_level_up(
-                message.guild, message.author, old_lvl, new_lvl, new_xp
+                message.guild, message.author, old_lvl, new_lvl, old_xp, new_xp
             )
 
     @commands.Cog.listener()
@@ -289,7 +289,7 @@ class XPCog(commands.Cog):
                 )
                 if new_lvl > old_lvl:
                     await self.bot.announce_level_up(
-                        member.guild, member, old_lvl, new_lvl, new_xp
+                        member.guild, member, old_lvl, new_lvl, old_xp, new_xp
                     )
                 # Statistiques quotidiennes (en secondes)
                 day = now.date().isoformat()
