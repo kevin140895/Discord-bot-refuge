@@ -241,7 +241,7 @@ class MachineASousView(discord.ui.View):
             if result is None:
                 return
 
-        msg, _, _, old_lvl, new_lvl, _, total_xp = result
+        msg, _, _, old_lvl, new_lvl, old_xp, total_xp = result
 
         try:
             announce = getattr(cog.bot, "announce_level_up", None)
