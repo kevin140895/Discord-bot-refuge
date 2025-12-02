@@ -18,6 +18,7 @@ logger = logging.getLogger("level_feed")
 GAME_SOURCES = {"pari_xp", "machine_a_sous"}
 TEMPLATE_SOURCES = {key.rsplit("_", 1)[0] for key in LEVEL_FEED_TEMPLATES}
 SUPPORTED_SOURCES = GAME_SOURCES | TEMPLATE_SOURCES
+REFUGE_GAMER_COLOR = discord.Color(0xFF5DA2)
 
 
 @dataclass
@@ -82,33 +83,32 @@ class LevelFeedRouter:
         xp_delta = event.new_xp - event.old_xp
         direction = "up" if event.new_level > event.old_level else "down"
 
-        if event.source == "pari_xp":
-            if direction == "up":
-                embed = discord.Embed(
-                    title="🆙 Niveau augmenté !",
-                    description=f"{mention} passe **niv. {event.new_level}** *(de {event.old_level})* 🎉",
-                    color=discord.Color.green(),
-                )
-                embed.add_field(name="🎰 Source", value="🤑 Roulette Refuge", inline=True)
-                embed.add_field(
-                    name="➕ Gain d'XP", value=f"**+{int(xp_delta)} XP**", inline=True
-                )
-                embed.set_footer(text="Félicitations !")
-            else:
-                embed = discord.Embed(
-                    title="⬇️ Niveau diminué",
-                    description=f"{mention} descend **niv. {event.new_level}** *(depuis {event.old_level})*",
-                    color=discord.Color.red(),
-                )
-                embed.add_field(name="🎰 Source", value="🤑 Pari XP", inline=True)
-                embed.add_field(
-                    name="➖ Perte d'XP", value=f"**{int(abs(xp_delta))} XP**", inline=True
-                )
-                embed.set_footer(text="Ça arrive… retente ta chance !")
-
+        def _build_embed(title: str, description: str) -> discord.Embed:
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=REFUGE_GAMER_COLOR,
+            )
             if avatar_url:
                 embed.set_thumbnail(url=avatar_url)
             embed.timestamp = discord.utils.utcnow()
+            return embed
+
+        if event.source == "pari_xp":
+            if direction == "up":
+                description = LEVEL_FEED_TEMPLATES["pari_xp_up"].format(
+                    mention=mention,
+                    new_level=event.new_level,
+                    xp_gain=int(abs(xp_delta)),
+                )
+                embed = _build_embed("⬆️ LEVEL UP DANS LE REFUGE ! 🎮", description)
+            else:
+                description = LEVEL_FEED_TEMPLATES["pari_xp_down"].format(
+                    mention=mention,
+                    new_level=event.new_level,
+                    xp_loss=int(abs(xp_delta)),
+                )
+                embed = _build_embed("⬇️ LEVEL DOWN", description)
             key = (event.user_id, direction)
             last_msg = self._pari_xp_messages.get(key)
             try:
@@ -130,24 +130,18 @@ class LevelFeedRouter:
         if not template:
             logger.warning("missing level feed template for %s", template_key)
             return
-        msg = template.format(
+        description = template.format(
             mention=mention,
-            old_level=event.old_level,
             new_level=event.new_level,
-            xp_delta=f"{xp_delta:+d}",
+            xp_gain=int(abs(xp_delta)),
+            xp_loss=int(abs(xp_delta)),
         )
+        title = (
+            "⬆️ LEVEL UP DANS LE REFUGE ! 🎮" if direction == "up" else "⬇️ LEVEL DOWN"
+        )
+        embed = _build_embed(title, description)
         try:
-            if avatar_url:
-                color = (
-                    discord.Color.green()
-                    if direction == "up"
-                    else discord.Color.red()
-                )
-                embed = discord.Embed(description=msg, color=color)
-                embed.set_thumbnail(url=avatar_url)
-                await channel.send(embed=embed)
-            else:
-                await channel.send(msg)
+            await channel.send(embed=embed)
             self.metrics[f"level_feed.sent.{event.source}"] += 1
         except discord.Forbidden:
             self.metrics["level_feed.skipped_no_channel"] += 1

@@ -251,6 +251,7 @@ class MachineASousView(discord.ui.View):
                     interaction.user,
                     old_lvl,
                     new_lvl,
+                    old_xp,
                     total_xp,
                 )
         except Exception as e:

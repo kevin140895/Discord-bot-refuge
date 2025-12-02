@@ -98,6 +98,7 @@ class RefugeBot(commands.Bot):
         member: discord.abc.User,
         old_level: int,
         new_level: int,
+        old_xp: int,
         new_xp: int,
     ) -> None:
         """Send a level-up notification to the configured channel.
@@ -118,18 +119,19 @@ class RefugeBot(commands.Bot):
             logger.warning("level feed channel unavailable or invalid")
             return
 
+        xp_gain = max(new_xp - old_xp, 0)
         embed = discord.Embed(
-            title="🆙 Niveau augmenté !",
+            title="⬆️ LEVEL UP DANS LE REFUGE ! 🎮",
             description=(
-                f"{member.mention} passe **niv. {new_level}** "
-                f"(de {old_level}) avec {new_xp} XP."
+                f"🔥 {member.mention} passe **niveau {new_level}**\n"
+                f"+{xp_gain} XP – activité détectée 💬⚡\n\n"
+                "GG ! Le Refuge te voit 👀"
             ),
-            color=discord.Color.green(),
+            color=discord.Color(0xFF5DA2),
         )
         avatar_url = getattr(getattr(member, "display_avatar", None), "url", None)
         if avatar_url:
             embed.set_thumbnail(url=avatar_url)
-        embed.set_footer(text="Félicitations !")
 
         try:
             await channel.send(embed=embed)
