@@ -131,10 +131,6 @@ class FirstMessageCog(commands.Cog):
             guild_id=message.guild.id if message.guild else 0,
             source="message",
         )
-        if new_lvl > old_lvl:
-            await self.bot.announce_level_up(
-                message.guild, message.author, old_lvl, new_lvl, old_xp, total_xp
-            )
         await message.channel.send(
             f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 400 XP !",
         )

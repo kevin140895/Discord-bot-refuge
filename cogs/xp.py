@@ -244,10 +244,6 @@ class XPCog(commands.Cog):
             guild_id=message.guild.id,
             source="message",
         )
-        if new_lvl > old_lvl:
-            await self.bot.announce_level_up(
-                message.guild, message.author, old_lvl, new_lvl, old_xp, new_xp
-            )
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -287,10 +283,6 @@ class XPCog(commands.Cog):
                     guild_id=member.guild.id,
                     source="voice_leave",
                 )
-                if new_lvl > old_lvl:
-                    await self.bot.announce_level_up(
-                        member.guild, member, old_lvl, new_lvl, old_xp, new_xp
-                    )
                 # Statistiques quotidiennes (en secondes)
                 day = now.date().isoformat()
                 async with DAILY_LOCK:
