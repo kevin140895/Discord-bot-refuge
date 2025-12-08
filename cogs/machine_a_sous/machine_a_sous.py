@@ -241,21 +241,7 @@ class MachineASousView(discord.ui.View):
             if result is None:
                 return
 
-        msg, _, _, old_lvl, new_lvl, _, total_xp = result
-
-        try:
-            announce = getattr(cog.bot, "announce_level_up", None)
-            if announce and new_lvl > old_lvl:
-                await announce(
-                    interaction.guild,
-                    interaction.user,
-                    old_lvl,
-                    new_lvl,
-                    old_xp,
-                    total_xp,
-                )
-        except Exception as e:
-            logger.error("[MachineASous] announce_level_up échouée: %s", e)
+        msg, _, _, _, _, _, _ = result
 
         spin_embed = discord.Embed(title="🎰 La machine à sous tourne…")
         spin_embed.set_image(url=SPIN_GIF_URL)
