@@ -2,7 +2,13 @@ import logging
 import discord
 from discord import app_commands
 
-from config import ROLE_PC, ROLE_CONSOLE, ROLE_MOBILE, ROLE_NOTIFICATION
+from config import (
+    ROLE_ANTHYX_COMMUNITY,
+    ROLE_CONSOLE,
+    ROLE_MOBILE,
+    ROLE_NOTIFICATION,
+    ROLE_PC,
+)
 
 
 class PlayerTypeView(discord.ui.View):
@@ -43,6 +49,16 @@ class PlayerTypeView(discord.ui.View):
     )
     async def btn_notify(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_role(interaction, ROLE_NOTIFICATION, "Notifications")
+
+    @discord.ui.button(
+        label="👾 Anthyx Community",
+        style=discord.ButtonStyle.secondary,
+        custom_id="role_anthyx_community",
+    )
+    async def btn_anthyx_community(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._toggle_role(interaction, ROLE_ANTHYX_COMMUNITY, "Anthyx Community")
 
     # ── Helpers ──────────────────────────────────────────────────────────
     async def _set_platform_role(
@@ -309,4 +325,3 @@ class RSVPView(discord.ui.View):
 
     async def _no(self, interaction: discord.Interaction) -> None:
         await self._handle(interaction, "no")
-
