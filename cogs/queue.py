@@ -293,10 +293,12 @@ class QueueCog(commands.Cog):
             view.update_options(queue)
             await self._edit_queue_message(interaction, embed, view)
 
+        # Notification du joueur validé
         if interaction.guild:
             member = interaction.guild.get_member(member_id)
         else:
             member = None
+        
         if member:
             try:
                 await member.send(
