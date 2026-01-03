@@ -293,6 +293,24 @@ class QueueCog(commands.Cog):
             view.update_options(queue)
             await self._edit_queue_message(interaction, embed, view)
 
+        # Notification du joueur validé
+        if interaction.guild:
+            member = interaction.guild.get_member(member_id)
+        else:
+            member = None
+        
+        if member:
+            try:
+                await member.send(
+                    "Prépare toi tu as été choisis - Refuge"
+                )
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Impossible de notifier le joueur %s: %s",
+                    member_id,
+                    exc,
+                )
+
     async def _edit_queue_message(
         self,
         interaction: discord.Interaction,
