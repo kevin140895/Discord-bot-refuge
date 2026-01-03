@@ -60,11 +60,11 @@ class QueueView(discord.ui.View):
     async def _join(self, interaction: discord.Interaction) -> None:
         await self.cog.handle_join(interaction, self)
 
-    async def _close(self, interaction: discord.Interaction) -> None:
-        await self.cog.handle_close(interaction, self)
-
     async def _validate(self, interaction: discord.Interaction) -> None:
         await self.cog.handle_validate(interaction, self)
+
+    async def _close(self, interaction: discord.Interaction) -> None:
+        await self.cog.handle_close(interaction, self)
 
 
 class QueueCog(commands.Cog):
@@ -153,39 +153,6 @@ class QueueCog(commands.Cog):
         embed = self._build_embed(queue)
         await self._edit_queue_message(interaction, embed, view)
 
-    async def handle_close(
-        self, interaction: discord.Interaction, view: QueueView
-    ) -> None:
-        queue = self.queues.get(view.channel_id)
-        if queue is None:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est introuvable.",
-                ephemeral=True,
-            )
-            return
-
-        if interaction.user.id != queue.creator_id:
-            await safe_respond(
-                interaction,
-                "❌ Seul le créateur peut clôturer la file !",
-                ephemeral=True,
-            )
-            return
-
-        if queue.is_closed:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est déjà clôturée.",
-                ephemeral=True,
-            )
-            return
-
-        queue.is_closed = True
-        view.disable_all()
-        embed = self._build_embed(queue)
-        await self._edit_queue_message(interaction, embed, view)
-
     async def handle_validate(
         self, interaction: discord.Interaction, view: QueueView
     ) -> None:
@@ -223,6 +190,39 @@ class QueueCog(commands.Cog):
             return
 
         queue.member_ids.pop(0)
+        embed = self._build_embed(queue)
+        await self._edit_queue_message(interaction, embed, view)
+
+    async def handle_close(
+        self, interaction: discord.Interaction, view: QueueView
+    ) -> None:
+        queue = self.queues.get(view.channel_id)
+        if queue is None:
+            await safe_respond(
+                interaction,
+                "❌ Cette file d'attente est introuvable.",
+                ephemeral=True,
+            )
+            return
+
+        if interaction.user.id != queue.creator_id:
+            await safe_respond(
+                interaction,
+                "❌ Seul le créateur peut clôturer la file !",
+                ephemeral=True,
+            )
+            return
+
+        if queue.is_closed:
+            await safe_respond(
+                interaction,
+                "❌ Cette file d'attente est déjà clôturée.",
+                ephemeral=True,
+            )
+            return
+
+        queue.is_closed = True
+        view.disable_all()
         embed = self._build_embed(queue)
         await self._edit_queue_message(interaction, embed, view)
 
