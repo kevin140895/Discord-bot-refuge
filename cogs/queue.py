@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import discord
 from discord import app_commands
@@ -20,8 +21,36 @@ logger = logging.getLogger(__name__)
 class QueueState:
     creator_id: int
     name: str
+    guild_id: int
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     member_ids: List[int] = field(default_factory=list)
+    selected_ids: List[int] = field(default_factory=list)
     is_closed: bool = False
+
+
+class CloseConfirmView(discord.ui.View):
+    """Vue de confirmation (éphémère) avant clôture."""
+
+    def __init__(self, cog: "QueueCog", channel_id: int, queue_message_id: int) -> None:
+        super().__init__(timeout=30)
+        self.cog = cog
+        self.channel_id = channel_id
+        self.queue_message_id = queue_message_id
+
+    @discord.ui.button(label="Confirmer la clôture", style=discord.ButtonStyle.danger)
+    async def confirm(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self.cog.handle_close_confirm(
+            interaction, channel_id=self.channel_id, queue_message_id=self.queue_message_id
+        )
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await safe_respond(interaction, "Clôture annulée.", ephemeral=True)
+        self.stop()
 
 
 class QueueView(discord.ui.View):
@@ -33,36 +62,50 @@ class QueueView(discord.ui.View):
         self.select_menu = QueueSelect(self.cog, self.channel_id)
 
         self.join_button = discord.ui.Button(
-            label="REJOINDRE",
+            label="➕ Rejoindre",
             style=discord.ButtonStyle.success,
         )
         self.join_button.callback = self._join
 
+        self.leave_button = discord.ui.Button(
+            label="➖ Quitter",
+            style=discord.ButtonStyle.secondary,
+        )
+        self.leave_button.callback = self._leave
+
         self.close_button = discord.ui.Button(
-            label="CLÔTURER",
+            label="🔒 Clôturer",
             style=discord.ButtonStyle.danger,
         )
         self.close_button.callback = self._close
 
         self.add_item(self.select_menu)
         self.add_item(self.join_button)
+        self.add_item(self.leave_button)
         self.add_item(self.close_button)
 
     def disable_all(self) -> None:
         for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
-            if isinstance(item, discord.ui.Select):
+            if isinstance(item, (discord.ui.Button, discord.ui.Select)):
                 item.disabled = True
 
     def update_options(self, queue: QueueState) -> None:
         self.select_menu.update_options(queue)
 
+        # Si clôturée : on désactive aussi les boutons d'action.
+        if queue.is_closed:
+            self.join_button.disabled = True
+            self.leave_button.disabled = True
+            self.close_button.disabled = True
+
     async def _join(self, interaction: discord.Interaction) -> None:
         await self.cog.handle_join(interaction, self)
 
+    async def _leave(self, interaction: discord.Interaction) -> None:
+        await self.cog.handle_leave(interaction, self)
+
     async def _close(self, interaction: discord.Interaction) -> None:
-        await self.cog.handle_close(interaction, self)
+        await self.cog.handle_close_request(interaction, self)
 
 
 class QueueSelect(discord.ui.Select):
@@ -72,9 +115,7 @@ class QueueSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=[
-                discord.SelectOption(
-                    label="Aucun joueur", value="none", description="File vide"
-                )
+                discord.SelectOption(label="Aucun joueur", value="none", description="File vide")
             ],
             disabled=True,
         )
@@ -84,35 +125,50 @@ class QueueSelect(discord.ui.Select):
     def update_options(self, queue: QueueState) -> None:
         if queue.is_closed:
             self.disabled = True
+            self.placeholder = "File clôturée"
             self.options = [
                 discord.SelectOption(
-                    label="File clôturée",
+                    label="Validation indisponible",
                     value="none",
-                    description="Validation indisponible",
+                    description="La file est clôturée",
                 )
             ]
             return
 
         if not queue.member_ids:
             self.disabled = True
+            self.placeholder = "File vide"
             self.options = [
                 discord.SelectOption(
                     label="Aucun joueur",
                     value="none",
-                    description="File vide",
+                    description="Personne n'attend pour le moment",
                 )
             ]
             return
 
         self.disabled = False
-        self.options = [
-            discord.SelectOption(
-                label=f"{index}. {member_id}",
-                value=str(member_id),
-                description=f"<@{member_id}>",
+        self.placeholder = "Sélectionner un joueur à valider"
+
+        # On tente d'afficher un nom lisible, sinon fallback sur l'ID.
+        guild = self.cog.bot.get_guild(queue.guild_id)
+        options: List[discord.SelectOption] = []
+        for index, member_id in enumerate(queue.member_ids, start=1):
+            display = str(member_id)
+            if guild:
+                m = guild.get_member(member_id)
+                if m:
+                    display = m.display_name
+
+            options.append(
+                discord.SelectOption(
+                    label=f"{index}. {display}",
+                    value=str(member_id),
+                    description=f"<@{member_id}>",
+                )
             )
-            for index, member_id in enumerate(queue.member_ids, start=1)
-        ]
+
+        self.options = options
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await self.cog.handle_validate_select(interaction, self)
@@ -146,18 +202,14 @@ class QueueCog(commands.Cog):
 
         channel_id = interaction.channel_id
         if channel_id is None:
-            await safe_respond(
-                interaction,
-                "❌ Salon introuvable.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Salon introuvable.", ephemeral=True)
             return
 
         existing = self.queues.get(channel_id)
         if existing and not existing.is_closed:
             await safe_respond(
                 interaction,
-                "❌ Une file d'attente est déjà ouverte dans ce salon.",
+                "Une file d'attente est déjà ouverte dans ce salon.",
                 ephemeral=True,
             )
             return
@@ -165,6 +217,7 @@ class QueueCog(commands.Cog):
         queue = QueueState(
             creator_id=interaction.user.id,
             name=nom.strip() if nom and nom.strip() else "File d'attente",
+            guild_id=interaction.guild.id,
         )
         self.queues[channel_id] = queue
 
@@ -173,143 +226,173 @@ class QueueCog(commands.Cog):
         view.update_options(queue)
         await interaction.response.send_message(embed=embed, view=view)
 
-    async def handle_join(
-        self, interaction: discord.Interaction, view: QueueView
-    ) -> None:
+    async def handle_join(self, interaction: discord.Interaction, view: QueueView) -> None:
         queue = self.queues.get(view.channel_id)
         if queue is None:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est introuvable.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Cette file d'attente est introuvable.", ephemeral=True)
             return
 
         if queue.is_closed:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est clôturée.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Cette file d'attente est clôturée.", ephemeral=True)
             return
 
         if interaction.user.id in queue.member_ids:
-            await safe_respond(
-                interaction,
-                "⚠️ Tu es déjà dans la file d'attente !",
-                ephemeral=True,
-            )
+            pos = queue.member_ids.index(interaction.user.id) + 1
+            await safe_respond(interaction, f"Tu es déjà dans la file (position {pos}).", ephemeral=True)
+            return
+
+        if interaction.user.id in queue.selected_ids:
+            await safe_respond(interaction, "Tu as déjà été sélectionné.", ephemeral=True)
             return
 
         queue.member_ids.append(interaction.user.id)
+        pos = len(queue.member_ids)
+
         embed = self._build_embed(queue)
         view.update_options(queue)
         await self._edit_queue_message(interaction, embed, view)
 
-    async def handle_close(
-        self, interaction: discord.Interaction, view: QueueView
-    ) -> None:
+        await safe_respond(interaction, f"✅ Ajouté à la file (position {pos}).", ephemeral=True)
+
+    async def handle_leave(self, interaction: discord.Interaction, view: QueueView) -> None:
         queue = self.queues.get(view.channel_id)
         if queue is None:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est introuvable.",
-                ephemeral=True,
-            )
-            return
-
-        if interaction.user.id != queue.creator_id:
-            await safe_respond(
-                interaction,
-                "❌ Seul le créateur peut clôturer la file !",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Cette file d'attente est introuvable.", ephemeral=True)
             return
 
         if queue.is_closed:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est déjà clôturée.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Cette file d'attente est clôturée.", ephemeral=True)
+            return
+
+        if interaction.user.id not in queue.member_ids:
+            await safe_respond(interaction, "Tu n'es pas dans la file.", ephemeral=True)
+            return
+
+        queue.member_ids.remove(interaction.user.id)
+        embed = self._build_embed(queue)
+        view.update_options(queue)
+        await self._edit_queue_message(interaction, embed, view)
+
+        await safe_respond(interaction, "➖ Retiré de la file.", ephemeral=True)
+
+    async def handle_close_request(self, interaction: discord.Interaction, view: QueueView) -> None:
+        queue = self.queues.get(view.channel_id)
+        if queue is None:
+            await safe_respond(interaction, "Cette file d'attente est introuvable.", ephemeral=True)
+            return
+
+        if interaction.user.id != queue.creator_id:
+            await safe_respond(interaction, "Seul le créateur peut clôturer la file.", ephemeral=True)
+            return
+
+        if queue.is_closed:
+            await safe_respond(interaction, "Cette file d'attente est déjà clôturée.", ephemeral=True)
+            return
+
+        if interaction.message is None:
+            await safe_respond(interaction, "Message de file introuvable.", ephemeral=True)
+            return
+
+        confirm_view = CloseConfirmView(self, view.channel_id, interaction.message.id)
+        await safe_respond(
+            interaction,
+            "Confirmer la clôture de la file ?",
+            ephemeral=True,
+            view=confirm_view,
+        )
+
+    async def handle_close_confirm(
+        self, interaction: discord.Interaction, channel_id: int, queue_message_id: int
+    ) -> None:
+        queue = self.queues.get(channel_id)
+        if queue is None:
+            await safe_respond(interaction, "Cette file d'attente est introuvable.", ephemeral=True)
+            return
+
+        if interaction.user.id != queue.creator_id:
+            await safe_respond(interaction, "Seul le créateur peut clôturer la file.", ephemeral=True)
+            return
+
+        if queue.is_closed:
+            await safe_respond(interaction, "Cette file d'attente est déjà clôturée.", ephemeral=True)
             return
 
         queue.is_closed = True
+
+        # Edit du message principal (celui qui contient la view)
+        channel = interaction.channel
+        if not isinstance(channel, discord.abc.Messageable):
+            await safe_respond(interaction, "Salon introuvable.", ephemeral=True)
+            return
+
+        try:
+            msg = await channel.fetch_message(queue_message_id)
+        except discord.HTTPException:
+            await safe_respond(interaction, "Impossible de retrouver le message de la file.", ephemeral=True)
+            return
+
+        view = QueueView(self, channel_id)
         view.disable_all()
+        view.update_options(queue)
         embed = self._build_embed(queue)
-        await self._edit_queue_message(interaction, embed, view)
+
+        try:
+            await msg.edit(embed=embed, view=view)
+        except discord.HTTPException as exc:
+            logger.warning("Impossible de clôturer la file (edit): %s", exc)
+
+        await safe_respond(interaction, "🔒 File clôturée.", ephemeral=True)
 
     async def handle_validate_select(
         self, interaction: discord.Interaction, select: QueueSelect
     ) -> None:
         queue = self.queues.get(select.channel_id)
         if queue is None:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est introuvable.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Cette file d'attente est introuvable.", ephemeral=True)
             return
 
         if interaction.user.id != queue.creator_id:
-            await safe_respond(
-                interaction,
-                "❌ Seul le créateur peut valider un joueur !",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Seul le créateur peut valider un joueur.", ephemeral=True)
             return
 
         if queue.is_closed:
-            await safe_respond(
-                interaction,
-                "❌ Cette file d'attente est clôturée.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Cette file d'attente est clôturée.", ephemeral=True)
             return
 
         selected = select.values[0]
         try:
             member_id = int(selected)
         except ValueError:
-            await safe_respond(
-                interaction,
-                "⚠️ Aucun joueur à valider.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Aucun joueur à valider.", ephemeral=True)
             return
 
         if member_id not in queue.member_ids:
-            await safe_respond(
-                interaction,
-                "⚠️ Ce joueur n'est plus dans la file.",
-                ephemeral=True,
-            )
+            await safe_respond(interaction, "Ce joueur n'est plus dans la file.", ephemeral=True)
             return
 
+        # Déplacer dans selected_ids
         queue.member_ids.remove(member_id)
+        queue.selected_ids.append(member_id)
+
         embed = self._build_embed(queue)
+
         view = select.view
         if isinstance(view, QueueView):
             view.update_options(queue)
             await self._edit_queue_message(interaction, embed, view)
 
+        await safe_respond(interaction, f"✅ Joueur sélectionné : <@{member_id}>", ephemeral=True)
+
         # Notification du joueur validé
+        member: Optional[discord.Member] = None
         if interaction.guild:
             member = interaction.guild.get_member(member_id)
-        else:
-            member = None
-        
+
         if member:
             try:
-                await member.send(
-                    "Prépare toi tu as été choisis - Refuge"
-                )
+                await member.send("Prépare-toi, tu as été sélectionné — Refuge")
             except discord.HTTPException as exc:
-                logger.warning(
-                    "Impossible de notifier le joueur %s: %s",
-                    member_id,
-                    exc,
-                )
+                logger.warning("Impossible de notifier le joueur %s: %s", member_id, exc)
 
     async def _edit_queue_message(
         self,
@@ -327,27 +410,61 @@ class QueueCog(commands.Cog):
             logger.warning("Impossible de mettre à jour la file: %s", exc)
 
     def _build_embed(self, queue: QueueState) -> discord.Embed:
-        if queue.is_closed:
-            title = f"🔒 File d'attente clôturée — {queue.name}"
-            color = discord.Color.red()
-        else:
-            title = f"✅ File d'attente ouverte — {queue.name}"
-            color = discord.Color.green()
+        status = "clôturée" if queue.is_closed else "ouverte"
+        title = f"File d'attente {status} — {queue.name}"
+        color = discord.Color.red() if queue.is_closed else discord.Color.green()
 
-        embed = discord.Embed(title=title, color=color)
+        embed = discord.Embed(title=title, color=color, timestamp=queue.created_at)
+
+        embed.add_field(name="👤 Créateur", value=f"<@{queue.creator_id}>", inline=True)
+        embed.add_field(name="⏳ En attente", value=str(len(queue.member_ids)), inline=True)
+        embed.add_field(name="✅ Sélectionnés", value=str(len(queue.selected_ids)), inline=True)
+
+        # Liste des joueurs en attente
         embed.add_field(
-            name="👥 Participants",
+            name="⏳ File d'attente",
             value=self._format_members(queue.member_ids),
             inline=False,
         )
+
+        # Liste des sélectionnés
+        embed.add_field(
+            name="✅ Sélectionnés",
+            value=self._format_members(queue.selected_ids),
+            inline=False,
+        )
+
+        if not queue.is_closed:
+            embed.set_footer(text="Utilise ➕ Rejoindre / ➖ Quitter. Le créateur peut valider via le menu.")
+        else:
+            embed.set_footer(text="🔒 File clôturée.")
+
         return embed
 
     def _format_members(self, member_ids: List[int]) -> str:
         if not member_ids:
-            return "*(vide pour le moment)*"
-        return "\n".join(
-            f"{index}. <@{member_id}>" for index, member_id in enumerate(member_ids, start=1)
-        )
+            return "*(vide)*"
+
+        # Evite de dépasser les limites de champs embed (1024 chars).
+        lines = []
+        for index, member_id in enumerate(member_ids, start=1):
+            lines.append(f"{index}. <@{member_id}>")
+
+        text = "\n".join(lines)
+        if len(text) <= 1024:
+            return text
+
+        # Troncature "safe"
+        safe_lines: List[str] = []
+        total = 0
+        for line in lines:
+            if total + len(line) + 1 > 1000:
+                break
+            safe_lines.append(line)
+            total += len(line) + 1
+
+        remaining = len(lines) - len(safe_lines)
+        return "\n".join(safe_lines) + f"\n… (+{remaining} autres)"
 
 
 async def setup(bot: commands.Bot) -> None:
