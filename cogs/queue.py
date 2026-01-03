@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class QueueState:
     creator_id: int
+    name: str
     member_ids: List[int] = field(default_factory=list)
     is_closed: bool = False
 
@@ -35,6 +36,12 @@ class QueueView(discord.ui.View):
         )
         self.join_button.callback = self._join
 
+        self.validate_button = discord.ui.Button(
+            label="VALIDER",
+            style=discord.ButtonStyle.primary,
+        )
+        self.validate_button.callback = self._validate
+
         self.close_button = discord.ui.Button(
             label="CLÔTURER",
             style=discord.ButtonStyle.danger,
@@ -42,6 +49,7 @@ class QueueView(discord.ui.View):
         self.close_button.callback = self._close
 
         self.add_item(self.join_button)
+        self.add_item(self.validate_button)
         self.add_item(self.close_button)
 
     def disable_all(self) -> None:
@@ -54,6 +62,9 @@ class QueueView(discord.ui.View):
 
     async def _close(self, interaction: discord.Interaction) -> None:
         await self.cog.handle_close(interaction, self)
+
+    async def _validate(self, interaction: discord.Interaction) -> None:
+        await self.cog.handle_validate(interaction, self)
 
 
 class QueueCog(commands.Cog):
@@ -68,7 +79,12 @@ class QueueCog(commands.Cog):
         description="Ouvrir une file d'attente pour jouer avec le streamer",
     )
     @app_commands.checks.has_role(XP_VIEWER_ROLE_ID)
-    async def file(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(nom="Nom de la file d'attente")
+    async def file(
+        self,
+        interaction: discord.Interaction,
+        nom: str | None = None,
+    ) -> None:
         if interaction.guild is None or interaction.channel is None:
             await safe_respond(
                 interaction,
@@ -95,7 +111,10 @@ class QueueCog(commands.Cog):
             )
             return
 
-        queue = QueueState(creator_id=interaction.user.id)
+        queue = QueueState(
+            creator_id=interaction.user.id,
+            name=nom.strip() if nom and nom.strip() else "File d'attente",
+        )
         self.queues[channel_id] = queue
 
         embed = self._build_embed(queue)
@@ -167,6 +186,46 @@ class QueueCog(commands.Cog):
         embed = self._build_embed(queue)
         await self._edit_queue_message(interaction, embed, view)
 
+    async def handle_validate(
+        self, interaction: discord.Interaction, view: QueueView
+    ) -> None:
+        queue = self.queues.get(view.channel_id)
+        if queue is None:
+            await safe_respond(
+                interaction,
+                "❌ Cette file d'attente est introuvable.",
+                ephemeral=True,
+            )
+            return
+
+        if interaction.user.id != queue.creator_id:
+            await safe_respond(
+                interaction,
+                "❌ Seul le créateur peut valider un joueur !",
+                ephemeral=True,
+            )
+            return
+
+        if queue.is_closed:
+            await safe_respond(
+                interaction,
+                "❌ Cette file d'attente est clôturée.",
+                ephemeral=True,
+            )
+            return
+
+        if not queue.member_ids:
+            await safe_respond(
+                interaction,
+                "⚠️ Aucun joueur à valider.",
+                ephemeral=True,
+            )
+            return
+
+        queue.member_ids.pop(0)
+        embed = self._build_embed(queue)
+        await self._edit_queue_message(interaction, embed, view)
+
     async def _edit_queue_message(
         self,
         interaction: discord.Interaction,
@@ -184,10 +243,10 @@ class QueueCog(commands.Cog):
 
     def _build_embed(self, queue: QueueState) -> discord.Embed:
         if queue.is_closed:
-            title = "🔒 File d'attente clôturée"
+            title = f"🔒 File d'attente clôturée — {queue.name}"
             color = discord.Color.red()
         else:
-            title = "✅ File d'attente ouverte"
+            title = f"✅ File d'attente ouverte — {queue.name}"
             color = discord.Color.green()
 
         embed = discord.Embed(title=title, color=color)
