@@ -292,8 +292,9 @@ class TempVCCog(commands.Cog):
         category = self.bot.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
             category = trigger_channel.category
+
         if not isinstance(category, discord.CategoryChannel):
-            raise RuntimeError("TEMP_VC_CATEGORY invalide")
+            raise RuntimeError("TEMP_VC_CATEGORY invalide (catégorie introuvable)")
 
         # Rôle streamer (cache guild puis fallback sur roles du membre)
         streamer_role = member.guild.get_role(STREAMER_ROLE_ID)
@@ -329,8 +330,9 @@ class TempVCCog(commands.Cog):
         base = "Streamer"
         limit = self._resolve_user_limit(base)
 
-        channel = await category.create_voice_channel(
+        channel = await member.guild.create_voice_channel(
             base,
+            category=category,
             user_limit=limit,
             overwrites=overwrites,
         )
