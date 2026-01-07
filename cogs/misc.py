@@ -41,6 +41,29 @@ class MiscCog(commands.Cog):
         if channel:
             await channel.send("Quel type de joueur es-tu ?", view=PlayerTypeView())
 
+    @app_commands.command(
+        name="roles",
+        description="Publier le message de choix des rôles dans le salon dédié",
+    )
+    @app_commands.checks.has_role(XP_VIEWER_ROLE_ID)
+    async def roles(self, interaction: discord.Interaction) -> None:
+        with measure("slash:roles"):
+            if interaction.guild is None:
+                await safe_respond(
+                    interaction,
+                    "Commande utilisable uniquement sur un serveur.",
+                    ephemeral=True,
+                )
+                return
+            await safe_respond(
+                interaction,
+                f"Le message de choix des rôles a été posté dans <#{CHANNEL_ROLES}> 😉",
+                ephemeral=True,
+            )
+            channel = interaction.guild.get_channel(CHANNEL_ROLES)
+        if channel:
+            await channel.send("Choisis tes rôles ci-dessous 👇", view=PlayerTypeView())
+
     @app_commands.command(name="purge", description="Supprime N messages récents de ce salon (réservé à Kevin)")
     @app_commands.describe(nb="Nombre de messages à supprimer (1-100)")
     async def purge(self, interaction: discord.Interaction, nb: app_commands.Range[int, 1, 100]) -> None:
