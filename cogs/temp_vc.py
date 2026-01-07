@@ -283,11 +283,17 @@ class TempVCCog(commands.Cog):
         await self._save_last_names_cache()
         return channel
 
-    async def _create_streamer_vc(self, member: discord.Member) -> discord.VoiceChannel:
+    async def _create_streamer_vc(
+        self,
+        member: discord.Member,
+        trigger_channel: discord.VoiceChannel,
+    ) -> discord.VoiceChannel:
         """Crée un salon vocal temporaire réservé au rôle streamer."""
         category = self.bot.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
-            raise RuntimeError("TEMP_VC_CATEGORY invalide")
+            category = trigger_channel.category
+        if not isinstance(category, discord.CategoryChannel):
+            category = None
 
         # Rôle streamer (cache guild puis fallback sur roles du membre)
         streamer_role = member.guild.get_role(STREAMER_ROLE_ID)
@@ -304,11 +310,6 @@ class TempVCCog(commands.Cog):
             member.guild.default_role: discord.PermissionOverwrite(
                 view_channel=False,
                 connect=False,
-            ),
-            member: discord.PermissionOverwrite(
-                view_channel=True,
-                connect=True,
-                speak=True,
             ),
             streamer_role: discord.PermissionOverwrite(
                 view_channel=True,
@@ -328,8 +329,9 @@ class TempVCCog(commands.Cog):
         base = "Streamer"
         limit = self._resolve_user_limit(base)
 
-        channel = await category.create_voice_channel(
+        channel = await member.guild.create_voice_channel(
             base,
+            category=category,
             user_limit=limit,
             overwrites=overwrites,
         )
@@ -355,7 +357,7 @@ class TempVCCog(commands.Cog):
             if not any(r.id == STREAMER_ROLE_ID for r in member.roles):
                 return
 
-            new_vc = await self._create_streamer_vc(member)
+            new_vc = await self._create_streamer_vc(member, after.channel)
             logger.info(
                 "[temp_vc] created streamer channel '%s' (ID %s) for %s (%s)",
                 new_vc.name,
