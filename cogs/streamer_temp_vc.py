@@ -146,12 +146,14 @@ class StreamerTempVCCog(commands.Cog):
             )
             return
 
-        if interaction.channel_id != TRIGGER_CHANNEL_ID:
-            await interaction.response.send_message(
-                f"Utilise ce bouton dans <#{TRIGGER_CHANNEL_ID}>.",
-                ephemeral=True,
-            )
-            return
+        trigger_channel = guild.get_channel(TRIGGER_CHANNEL_ID)
+        if trigger_channel and isinstance(trigger_channel, discord.abc.Messageable):
+            if interaction.channel_id != TRIGGER_CHANNEL_ID:
+                await interaction.response.send_message(
+                    f"Utilise ce bouton dans <#{TRIGGER_CHANNEL_ID}>.",
+                    ephemeral=True,
+                )
+                return
 
         member = interaction.user
         if not isinstance(member, discord.Member):
@@ -169,7 +171,8 @@ class StreamerTempVCCog(commands.Cog):
             )
             return
 
-        trigger_channel = guild.get_channel(TRIGGER_CHANNEL_ID)
+        if trigger_channel is None and isinstance(interaction.channel, discord.abc.GuildChannel):
+            trigger_channel = interaction.channel
         if trigger_channel is None:
             await interaction.response.send_message(
                 "Salon déclencheur introuvable.",
@@ -240,12 +243,15 @@ class StreamerTempVCCog(commands.Cog):
     async def post_button_message(
         self, interaction: discord.Interaction
     ) -> None:
-        if interaction.channel_id != TRIGGER_CHANNEL_ID:
-            await interaction.response.send_message(
-                f"Utilise cette commande dans <#{TRIGGER_CHANNEL_ID}>.",
-                ephemeral=True,
-            )
-            return
+        guild = interaction.guild
+        trigger_channel = guild.get_channel(TRIGGER_CHANNEL_ID) if guild else None
+        if trigger_channel and isinstance(trigger_channel, discord.abc.Messageable):
+            if interaction.channel_id != TRIGGER_CHANNEL_ID:
+                await interaction.response.send_message(
+                    f"Utilise cette commande dans <#{TRIGGER_CHANNEL_ID}>.",
+                    ephemeral=True,
+                )
+                return
 
         await interaction.channel.send(
             "Clique sur le bouton pour créer ton vocal streamer.",
