@@ -8,7 +8,7 @@ import discord
 import pytest
 
 from bot import RefugeBot
-from view import PlayerTypeView, RadioView
+from view import PlayerTypeView, RadioView, StreamerTempVoiceView
 
 
 @pytest.mark.asyncio
@@ -36,3 +36,4 @@ async def test_setup_hook_registers_persistent_views(monkeypatch):
 
     assert PlayerTypeView in added
     assert RadioView in added
+    assert StreamerTempVoiceView in added

@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 
 from config import (
+    TRIGGER_CHANNEL_ID,
     ROLE_ANTHYX_COMMUNITY,
     ROLE_CONSOLE,
     ROLE_MOBILE,
@@ -336,3 +337,36 @@ class RSVPView(discord.ui.View):
 
     async def _no(self, interaction: discord.Interaction) -> None:
         await self._handle(interaction, "no")
+
+
+class StreamerTempVoiceView(discord.ui.View):
+    """Bouton persistant pour créer un vocal streamer."""
+
+    def __init__(self, bot: discord.Client) -> None:
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    @discord.ui.button(
+        label="Créer mon vocal",
+        style=discord.ButtonStyle.success,
+        custom_id="streamer_temp_vc:create",
+    )
+    async def create_vocal(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if interaction.channel_id != TRIGGER_CHANNEL_ID:
+            await interaction.response.send_message(
+                f"Utilise ce bouton dans <#{TRIGGER_CHANNEL_ID}>.",
+                ephemeral=True,
+            )
+            return
+
+        cog = self.bot.get_cog("StreamerTempVCCog")
+        if cog is None:
+            await interaction.response.send_message(
+                "Le système de vocal temporaire n'est pas disponible.",
+                ephemeral=True,
+            )
+            return
+
+        await cog.handle_create_request(interaction)

@@ -23,7 +23,7 @@ from utils.api_meter import api_meter
 from utils.channel_edit_manager import channel_edit_manager
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter, limiter as _limiter
-from view import PlayerTypeView, RadioView
+from view import PlayerTypeView, RadioView, StreamerTempVoiceView
 from utils import level_feed
 
 
@@ -91,6 +91,10 @@ class RefugeBot(commands.Bot):
         if not getattr(self, "_radio_view_added", False):
             self.add_view(RadioView())
             self._radio_view_added = True
+
+        if not getattr(self, "_streamer_temp_vc_view_added", False):
+            self.add_view(StreamerTempVoiceView(self))
+            self._streamer_temp_vc_view_added = True
 
     async def announce_level_up(
         self,
