@@ -8,6 +8,17 @@ import os
 import time
 
 
+# ── Channel trigger (création salons temporaires / views) ─────────────
+
+def _get_int_env(name: str, default: int = 0) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+TRIGGER_CHANNEL_ID: int = _get_int_env("TRIGGER_CHANNEL_ID", 0)
+
+
 def _resolve_data_dir() -> str:
     """Résout le répertoire utilisé pour le stockage persistant.
 
