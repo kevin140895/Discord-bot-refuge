@@ -7,6 +7,7 @@ from config import (
     ROLE_CONSOLE,
     ROLE_MOBILE,
     ROLE_NOTIFICATION,
+    ROLE_PARIS_SPORTIFS,
     ROLE_PC,
 )
 
@@ -59,6 +60,16 @@ class PlayerTypeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         await self._toggle_role(interaction, ROLE_ANTHYX_COMMUNITY, "Anthyx Community")
+
+    @discord.ui.button(
+        label="🎯 Paris Sportifs",
+        style=discord.ButtonStyle.secondary,
+        custom_id="role_paris_sportifs",
+    )
+    async def btn_paris_sportifs(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._toggle_role(interaction, ROLE_PARIS_SPORTIFS, "Paris Sportifs")
 
     # ── Helpers ──────────────────────────────────────────────────────────
     async def _set_platform_role(
