@@ -26,6 +26,7 @@ from storage.temp_vc_store import (
 )
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
 from utils.rename_manager import rename_manager
+
 logger = logging.getLogger(__name__)
 
 # IDs des salons vocaux temporaires connus
@@ -244,7 +245,7 @@ class TempVCCog(commands.Cog):
         self._rename_tasks[channel.id] = new_task
 
     async def _create_temp_vc(self, member: discord.Member) -> discord.VoiceChannel:
-        """Crée un salon vocal temporaire et l’enregistre."""
+        """Crée un salon vocal temporaire et l'enregistre."""
         category = self.bot.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
             raise RuntimeError("TEMP_VC_CATEGORY invalide")
@@ -351,7 +352,7 @@ class TempVCCog(commands.Cog):
             await self._update_channel_name(new_vc)
             return
 
-        # 1) Création quand on rejoint le lobby
+        # 2) Création quand on rejoint le lobby
         if after.channel and after.channel.id == LOBBY_VC_ID:
             new_vc = await self._create_temp_vc(member)
             logger.info(
@@ -387,7 +388,7 @@ class TempVCCog(commands.Cog):
             await self._update_channel_name(new_vc)
             return
 
-        # 2) Suppression du salon temporaire quand il se vide
+        # 3) Suppression du salon temporaire quand il se vide
         if before.channel and before.channel.id in TEMP_VC_IDS:
             if before.channel.members:
                 pass
@@ -415,7 +416,7 @@ class TempVCCog(commands.Cog):
                     await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
                     await self._save_last_names_cache()
 
-        # 3) Renommage sur changement d'état vocal
+        # 4) Renommage sur changement d'état vocal
         if after.channel and after.channel.id in TEMP_VC_IDS:
             if not before.channel or before.channel.id != after.channel.id:
                 logger.info(
