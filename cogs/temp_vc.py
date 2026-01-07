@@ -305,11 +305,6 @@ class TempVCCog(commands.Cog):
                 view_channel=False,
                 connect=False,
             ),
-            member: discord.PermissionOverwrite(
-                view_channel=True,
-                connect=True,
-                speak=True,
-            ),
             streamer_role: discord.PermissionOverwrite(
                 view_channel=True,
                 connect=True,
