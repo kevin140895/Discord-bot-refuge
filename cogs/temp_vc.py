@@ -26,6 +26,7 @@ from storage.temp_vc_store import (
 )
 from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
 from utils.rename_manager import rename_manager
+
 logger = logging.getLogger(__name__)
 
 # IDs des salons vocaux temporaires connus
@@ -47,6 +48,7 @@ class TempVCCog(commands.Cog):
         self.bot = bot
         self._rename_tasks: Dict[int, asyncio.Task] = {}
         self._last_names: Dict[int, str] = {}
+        self._streamer_vc_ids: Set[int] = set()
 
         if not TEMP_VC_IDS:
             getter = getattr(bot, "get_channel", lambda _id: None)
@@ -243,7 +245,7 @@ class TempVCCog(commands.Cog):
         self._rename_tasks[channel.id] = new_task
 
     async def _create_temp_vc(self, member: discord.Member) -> discord.VoiceChannel:
-        """Crée un salon vocal temporaire et l’enregistre."""
+        """Crée un salon vocal temporaire et l'enregistre."""
         category = self.bot.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
             raise RuntimeError("TEMP_VC_CATEGORY invalide")
@@ -268,6 +270,7 @@ class TempVCCog(commands.Cog):
         if streamer_role is None:
             raise RuntimeError("STREAMER_ROLE_ID invalide")
 
+        bot_member = member.guild.me
         overwrites = {
             member.guild.default_role: discord.PermissionOverwrite(
                 view_channel=False,
@@ -279,6 +282,13 @@ class TempVCCog(commands.Cog):
                 speak=True,
             ),
         }
+        if bot_member is not None:
+            overwrites[bot_member] = discord.PermissionOverwrite(
+                view_channel=True,
+                connect=True,
+                move_members=True,
+                manage_channels=True,
+            )
 
         limit = TEMP_VC_LIMITS.get(TEMP_VC_CATEGORY)
         channel = await category.create_voice_channel(
@@ -288,6 +298,7 @@ class TempVCCog(commands.Cog):
         )
 
         TEMP_VC_IDS.add(channel.id)
+        self._streamer_vc_ids.add(channel.id)
         self._last_names[channel.id] = channel.name
         await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
         await self._save_last_names_cache()
@@ -302,7 +313,46 @@ class TempVCCog(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ) -> None:
-        # 1) Création quand on rejoint le lobby
+        # 1) Création du salon streamer dédié
+        if after.channel and after.channel.id == STREAMER_LOBBY_VC_ID:
+            if not member.get_role(STREAMER_ROLE_ID):
+                return
+            new_vc = await self._create_streamer_vc(member)
+            logger.info(
+                "[temp_vc] created streamer channel '%s' (ID %s) for %s (%s)",
+                new_vc.name,
+                new_vc.id,
+                member,
+                member.id,
+            )
+            try:
+                await member.move_to(new_vc)
+                logger.debug(
+                    "[temp_vc] moved %s (%s) into streamer channel '%s' (ID %s)",
+                    member,
+                    member.id,
+                    new_vc.name,
+                    new_vc.id,
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "[temp_vc] failed to move %s (%s) into streamer channel '%s' (ID %s)",
+                    member,
+                    member.id,
+                    new_vc.name,
+                    new_vc.id,
+                )
+                await new_vc.delete(reason="Échec du déplacement du membre")
+                TEMP_VC_IDS.discard(new_vc.id)
+                self._streamer_vc_ids.discard(new_vc.id)
+                self._last_names.pop(new_vc.id, None)
+                await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                await self._save_last_names_cache()
+                return
+            await self._update_channel_name(new_vc)
+            return
+
+        # 2) Création quand on rejoint le lobby
         if after.channel and after.channel.id == LOBBY_VC_ID:
             new_vc = await self._create_temp_vc(member)
             logger.info(
@@ -338,45 +388,7 @@ class TempVCCog(commands.Cog):
             await self._update_channel_name(new_vc)
             return
 
-        # 1bis) Création du salon streamer dédié
-        if after.channel and after.channel.id == STREAMER_LOBBY_VC_ID:
-            if not member.get_role(STREAMER_ROLE_ID):
-                return
-            new_vc = await self._create_streamer_vc(member)
-            logger.info(
-                "[temp_vc] created streamer channel '%s' (ID %s) for %s (%s)",
-                new_vc.name,
-                new_vc.id,
-                member,
-                member.id,
-            )
-            try:
-                await member.move_to(new_vc)
-                logger.debug(
-                    "[temp_vc] moved %s (%s) into streamer channel '%s' (ID %s)",
-                    member,
-                    member.id,
-                    new_vc.name,
-                    new_vc.id,
-                )
-            except discord.HTTPException:
-                logger.exception(
-                    "[temp_vc] failed to move %s (%s) into streamer channel '%s' (ID %s)",
-                    member,
-                    member.id,
-                    new_vc.name,
-                    new_vc.id,
-                )
-                await new_vc.delete(reason="Échec du déplacement du membre")
-                TEMP_VC_IDS.discard(new_vc.id)
-                self._last_names.pop(new_vc.id, None)
-                await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
-                await self._save_last_names_cache()
-                return
-            await self._update_channel_name(new_vc)
-            return
-
-        # 2) Suppression du salon temporaire quand il se vide
+        # 3) Suppression du salon temporaire quand il se vide
         if before.channel and before.channel.id in TEMP_VC_IDS:
             if before.channel.members:
                 pass
@@ -399,11 +411,12 @@ class TempVCCog(commands.Cog):
                         member.id,
                     )
                     TEMP_VC_IDS.discard(before.channel.id)
+                    self._streamer_vc_ids.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
                     await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
                     await self._save_last_names_cache()
 
-        # 3) Renommage sur changement d'état vocal
+        # 4) Renommage sur changement d'état vocal
         if after.channel and after.channel.id in TEMP_VC_IDS:
             if not before.channel or before.channel.id != after.channel.id:
                 logger.info(
