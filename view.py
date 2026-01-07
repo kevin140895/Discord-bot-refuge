@@ -354,12 +354,15 @@ class StreamerTempVoiceView(discord.ui.View):
     async def create_vocal(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        if interaction.channel_id != TRIGGER_CHANNEL_ID:
-            await interaction.response.send_message(
-                f"Utilise ce bouton dans <#{TRIGGER_CHANNEL_ID}>.",
-                ephemeral=True,
-            )
-            return
+        guild = interaction.guild
+        trigger_channel = guild.get_channel(TRIGGER_CHANNEL_ID) if guild else None
+        if trigger_channel and isinstance(trigger_channel, discord.abc.Messageable):
+            if interaction.channel_id != TRIGGER_CHANNEL_ID:
+                await interaction.response.send_message(
+                    f"Utilise ce bouton dans <#{TRIGGER_CHANNEL_ID}>.",
+                    ephemeral=True,
+                )
+                return
 
         cog = self.bot.get_cog("StreamerTempVCCog")
         if cog is None:
