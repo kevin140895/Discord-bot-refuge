@@ -14,7 +14,8 @@ from config import (
     TEMP_VC_LIMITS,
     RENAME_DELAY,
     STREAMER_LOBBY_VC_ID,
-    STREAMER_ROLE_ID,
+    STREAMER_ALLOWED_ROLE_ID,
+    STREAMER_VC_BASE_NAME,
     TEMP_VC_CHECK_INTERVAL_SECONDS,
 )
 from storage.temp_vc_store import (
@@ -37,7 +38,7 @@ ROLE_NAMES: Dict[int, str] = {
     ROLE_PC: "PC",
     ROLE_CONSOLE: "Console",
     ROLE_MOBILE: "Mobile",
-    STREAMER_ROLE_ID: "Streamer",
+    STREAMER_ALLOWED_ROLE_ID: STREAMER_VC_BASE_NAME,
 }
 
 
@@ -297,9 +298,11 @@ class TempVCCog(commands.Cog):
             raise RuntimeError("TEMP_VC_CATEGORY invalide (catégorie introuvable)")
 
         # Rôle streamer (cache guild puis fallback sur roles du membre)
-        streamer_role = member.guild.get_role(STREAMER_ROLE_ID)
+        streamer_role = member.guild.get_role(STREAMER_ALLOWED_ROLE_ID)
         if streamer_role is None:
-            streamer_role = next((r for r in member.roles if r.id == STREAMER_ROLE_ID), None)
+            streamer_role = next(
+                (r for r in member.roles if r.id == STREAMER_ALLOWED_ROLE_ID), None
+            )
         if streamer_role is None:
             raise RuntimeError("STREAMER_ROLE_ID invalide")
 
@@ -327,7 +330,7 @@ class TempVCCog(commands.Cog):
                 manage_channels=True,
             )
 
-        base = "Streamer"
+        base = STREAMER_VC_BASE_NAME
         limit = self._resolve_user_limit(base)
 
         channel = await member.guild.create_voice_channel(
@@ -355,7 +358,7 @@ class TempVCCog(commands.Cog):
     ) -> None:
         # 1) Création du salon streamer dédié
         if after.channel and after.channel.id == STREAMER_LOBBY_VC_ID:
-            if not any(r.id == STREAMER_ROLE_ID for r in member.roles):
+            if not any(r.id == STREAMER_ALLOWED_ROLE_ID for r in member.roles):
                 return
 
             new_vc = await self._create_streamer_vc(member, after.channel)
