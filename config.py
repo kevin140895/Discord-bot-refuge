@@ -85,6 +85,10 @@ STREAMER_LOBBY_VC_ID = 1458443268185391104
 
 # Rôle requis pour déclencher et pour voir/rejoindre le salon créé
 STREAMER_ROLE_ID = 1458444090931810456
+STREAMER_ALLOWED_ROLE_ID = STREAMER_ROLE_ID
+
+# Nom de base du salon vocal créé
+STREAMER_VC_BASE_NAME = "Streamer"
 
 # Alias cohérents (évite les doublons dans le code appelant)
 TRIGGER_VOICE_CHANNEL_ID = STREAMER_LOBBY_VC_ID
