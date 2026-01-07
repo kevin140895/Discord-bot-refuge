@@ -283,9 +283,15 @@ class TempVCCog(commands.Cog):
         await self._save_last_names_cache()
         return channel
 
-    async def _create_streamer_vc(self, member: discord.Member) -> discord.VoiceChannel:
+    async def _create_streamer_vc(
+        self,
+        member: discord.Member,
+        trigger_channel: discord.VoiceChannel,
+    ) -> discord.VoiceChannel:
         """Crée un salon vocal temporaire réservé au rôle streamer."""
         category = self.bot.get_channel(TEMP_VC_CATEGORY)
+        if not isinstance(category, discord.CategoryChannel):
+            category = trigger_channel.category
         if not isinstance(category, discord.CategoryChannel):
             raise RuntimeError("TEMP_VC_CATEGORY invalide")
 
@@ -350,7 +356,7 @@ class TempVCCog(commands.Cog):
             if not any(r.id == STREAMER_ROLE_ID for r in member.roles):
                 return
 
-            new_vc = await self._create_streamer_vc(member)
+            new_vc = await self._create_streamer_vc(member, after.channel)
             logger.info(
                 "[temp_vc] created streamer channel '%s' (ID %s) for %s (%s)",
                 new_vc.name,
