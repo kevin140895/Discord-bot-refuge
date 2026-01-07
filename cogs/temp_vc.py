@@ -86,14 +86,13 @@ class TempVCCog(commands.Cog):
     async def _ensure_rename_worker(self) -> bool:
         """Start the rename manager worker if it's not running.
 
-        Returns True if the worker is active, False otherwise."""
+        Returns True if the worker is active, False otherwise.
+        """
         if rename_manager._worker is None or rename_manager._worker.done():
             try:
                 await rename_manager.start()
             except Exception:
-                logger.exception(
-                    "[temp_vc] échec du démarrage du worker rename_manager"
-                )
+                logger.exception("[temp_vc] échec du démarrage du worker rename_manager")
                 return False
             else:
                 logger.info("[temp_vc] rename_manager worker démarré")
@@ -121,7 +120,7 @@ class TempVCCog(commands.Cog):
     def _base_name_for(self, member: discord.Member) -> str:
         """Retourne le nom de base du salon selon le rôle principal."""
         for rid, name in ROLE_NAMES.items():
-            if member.get_role(rid):
+            if any(r.id == rid for r in member.roles):
                 return name
         return "Chat"
 
@@ -141,23 +140,27 @@ class TempVCCog(commands.Cog):
     def _get_primary_activity(self, member: discord.Member) -> str | None:
         """Détecte l'activité principale d'un membre."""
         acts = list(member.activities)
+
         for act in acts:
             if isinstance(act, discord.Game) or (
                 isinstance(act, discord.Activity)
                 and act.type is discord.ActivityType.playing
             ):
                 return act.name
+
         for act in acts:
             if isinstance(act, discord.Streaming) or (
                 isinstance(act, discord.Activity)
                 and act.type is discord.ActivityType.streaming
             ):
                 return act.name
+
         for act in acts:
             if isinstance(act, discord.Spotify):
                 return act.title
             if isinstance(act, discord.Activity) and act.type is discord.ActivityType.listening:
                 return act.name
+
         for act in acts:
             if isinstance(act, discord.CustomActivity) or (
                 isinstance(act, discord.Activity)
@@ -167,15 +170,17 @@ class TempVCCog(commands.Cog):
                     return act.name
                 if getattr(act, "state", None):
                     return act.state
+
         return None
 
     def _compute_channel_name(self, channel: discord.VoiceChannel) -> str | None:
         """Calcule le nom attendu pour le salon selon les membres."""
         if not channel.members:
             return None
+
         base = self._base_name_from_members(channel.members)
 
-        # NOUVELLE PRIORITÉ : activité > "AFK" (si mute) > "Chat"
+        # PRIORITÉ : activité > "AFK" (si mute) > "Chat"
         activity_counts: Dict[str, int] = {}
         for m in channel.members:
             act_name = self._get_primary_activity(m)
@@ -183,15 +188,12 @@ class TempVCCog(commands.Cog):
                 activity_counts[act_name] = activity_counts.get(act_name, 0) + 1
 
         if activity_counts:
-            # Il y a une activité détectée - priorité maximale
             activity_name = max(activity_counts, key=activity_counts.get)
-            max_status_len = 100 - len(base) - 3
+            max_status_len = 100 - len(base) - 3  # " • "
             status = activity_name[:max_status_len]
         elif any(m.voice and m.voice.self_mute for m in channel.members):
-            # Quelqu'un est mute - "AFK"
             status = "AFK"
         else:
-            # Aucune activité détectée et personne mute - "Chat"
             status = "Chat"
 
         name = f"{base} • {status}"
@@ -204,6 +206,7 @@ class TempVCCog(commands.Cog):
             task = asyncio.current_task()
             if self._rename_tasks.get(channel.id) is not task:
                 return
+
             # Le salon peut avoir été supprimé pendant l'attente
             if getattr(channel, "guild", None) and channel.guild.get_channel(channel.id) is None:
                 return
@@ -233,14 +236,18 @@ class TempVCCog(commands.Cog):
             return
         if cached == new and channel.name == new:
             return
+
         self._last_names[channel.id] = new
+
         task = self._rename_tasks.get(channel.id)
         if task:
             task.cancel()
+
         if not await self._ensure_rename_worker():
             return
         if channel.guild.get_channel(channel.id) is None:
             return
+
         new_task = asyncio.create_task(self._rename_channel(channel))
         self._rename_tasks[channel.id] = new_task
 
@@ -268,13 +275,24 @@ class TempVCCog(commands.Cog):
 
         streamer_role = member.guild.get_role(STREAMER_ROLE_ID)
         if streamer_role is None:
+            # Fallback au cas où le cache des rôles n'est pas à jour
+            streamer_role = next((r for r in member.roles if r.id == STREAMER_ROLE_ID), None)
+        if streamer_role is None:
             raise RuntimeError("STREAMER_ROLE_ID invalide")
 
-        bot_member = member.guild.me
-        overwrites = {
+        bot_member = None
+        if self.bot.user is not None:
+            bot_member = member.guild.get_member(self.bot.user.id)
+
+        overwrites: Dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
             member.guild.default_role: discord.PermissionOverwrite(
                 view_channel=False,
                 connect=False,
+            ),
+            member: discord.PermissionOverwrite(
+                view_channel=True,
+                connect=True,
+                speak=True,
             ),
             streamer_role: discord.PermissionOverwrite(
                 view_channel=True,
@@ -282,6 +300,7 @@ class TempVCCog(commands.Cog):
                 speak=True,
             ),
         }
+
         if bot_member is not None:
             overwrites[bot_member] = discord.PermissionOverwrite(
                 view_channel=True,
@@ -315,8 +334,9 @@ class TempVCCog(commands.Cog):
     ) -> None:
         # 1) Création du salon streamer dédié
         if after.channel and after.channel.id == STREAMER_LOBBY_VC_ID:
-            if not member.get_role(STREAMER_ROLE_ID):
+            if not any(r.id == STREAMER_ROLE_ID for r in member.roles):
                 return
+
             new_vc = await self._create_streamer_vc(member)
             logger.info(
                 "[temp_vc] created streamer channel '%s' (ID %s) for %s (%s)",
@@ -349,6 +369,7 @@ class TempVCCog(commands.Cog):
                 await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
                 await self._save_last_names_cache()
                 return
+
             await self._update_channel_name(new_vc)
             return
 
@@ -385,24 +406,22 @@ class TempVCCog(commands.Cog):
                 await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
                 await self._save_last_names_cache()
                 return
+
             await self._update_channel_name(new_vc)
             return
 
         # 3) Suppression du salon temporaire quand il se vide
         if before.channel and before.channel.id in TEMP_VC_IDS:
-            if before.channel.members:
-                pass
-            else:
+            if not before.channel.members:
                 try:
                     await before.channel.delete(reason="Salon temporaire vide")
                 except discord.HTTPException:
-                    logger.exception(
-                        "Suppression du salon %s échouée", before.channel.id
-                    )
+                    logger.exception("Suppression du salon %s échouée", before.channel.id)
                 else:
                     task = self._rename_tasks.pop(before.channel.id, None)
                     if task:
                         task.cancel()
+
                     logger.info(
                         "[temp_vc] deleted temporary channel '%s' (ID %s) after %s (%s) left",
                         before.channel.name,
@@ -427,17 +446,12 @@ class TempVCCog(commands.Cog):
                     after.channel.id,
                 )
             await self._update_channel_name(after.channel)
-        if (
-            before.channel
-            and before.channel != after.channel
-            and before.channel.id in TEMP_VC_IDS
-        ):
+
+        if before.channel and before.channel != after.channel and before.channel.id in TEMP_VC_IDS:
             await self._update_channel_name(before.channel)
 
     @commands.Cog.listener()
-    async def on_presence_update(
-        self, before: discord.Member, after: discord.Member
-    ) -> None:
+    async def on_presence_update(self, before: discord.Member, after: discord.Member) -> None:
         """Renomme le salon quand un membre commence/arrête un jeu."""
         if after.voice and after.voice.channel and after.voice.channel.id in TEMP_VC_IDS:
             await self._update_channel_name(after.voice.channel)
@@ -498,9 +512,8 @@ class TempVCCog(commands.Cog):
                 channel = self.bot.get_channel(channel_id)
                 if isinstance(channel, discord.VoiceChannel):
                     await self._update_channel_name(channel)
-            await delete_untracked_temp_vcs(
-                self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS.copy()
-            )
+
+            await delete_untracked_temp_vcs(self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS.copy())
             await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
             await self._save_last_names_cache()
         except Exception:
