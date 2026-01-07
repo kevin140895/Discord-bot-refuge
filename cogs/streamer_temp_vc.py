@@ -78,11 +78,6 @@ class StreamerTempVCCog(commands.Cog):
                 stream=True,
                 use_voice_activation=True,
             ),
-            member: discord.PermissionOverwrite(
-                view_channel=True,
-                connect=True,
-                speak=True,
-            ),
         }
         if bot_member is not None:
             overwrites[bot_member] = discord.PermissionOverwrite(
