@@ -38,9 +38,13 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
     await test_bot.setup_hook()
     # Second call should be idempotent
     await test_bot.setup_hook()
-    assert add_view_mock.call_count == 2
+    assert add_view_mock.call_count == 3
     call_types = [type(c.args[0]) for c in add_view_mock.call_args_list]
-    assert call_types == [view.PlayerTypeView, view.RadioView]
+    assert call_types == [
+        view.PlayerTypeView,
+        view.RadioView,
+        view.StreamerTempVoiceView,
+    ]
     bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot)])
 
     # Simulate a restart with a new instance
@@ -54,6 +58,9 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
 
     await other_bot.setup_hook()
     call_types = [type(c.args[0]) for c in add_view_mock2.call_args_list]
-    assert call_types == [view.PlayerTypeView, view.RadioView]
+    assert call_types == [
+        view.PlayerTypeView,
+        view.RadioView,
+        view.StreamerTempVoiceView,
+    ]
     bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot), call(other_bot)])
-

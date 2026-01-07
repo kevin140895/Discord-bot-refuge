@@ -50,6 +50,7 @@ class TempVCCog(commands.Cog):
         self._last_names: Dict[int, str] = {}
         self._streamer_vc_ids: Set[int] = set()
 
+        # Récupération “best effort” si la liste en storage est vide
         if not TEMP_VC_IDS:
             getter = getattr(bot, "get_channel", lambda _id: None)
             category = getter(TEMP_VC_CATEGORY)
@@ -59,6 +60,7 @@ class TempVCCog(commands.Cog):
                     if TEMP_VC_NAME_RE.match(base):
                         TEMP_VC_IDS.add(ch.id)
                         self._last_names[ch.id] = ch.name
+
                 if TEMP_VC_IDS:
                     save_temp_vc_ids(TEMP_VC_IDS.copy())
                     loop = getattr(bot, "loop", None)
@@ -203,6 +205,7 @@ class TempVCCog(commands.Cog):
         """Tâche différée effectuant le renommage du salon."""
         try:
             await asyncio.sleep(RENAME_DELAY)
+
             task = asyncio.current_task()
             if self._rename_tasks.get(channel.id) is not task:
                 return
@@ -217,6 +220,7 @@ class TempVCCog(commands.Cog):
                     await rename_manager.request(channel, new)
                     self._last_names[channel.id] = new
                     await self._save_last_names_cache()
+
         except asyncio.CancelledError:
             pass
         finally:
@@ -251,6 +255,17 @@ class TempVCCog(commands.Cog):
         new_task = asyncio.create_task(self._rename_channel(channel))
         self._rename_tasks[channel.id] = new_task
 
+    def _resolve_user_limit(self, base: str) -> int | None:
+        """Détermine la limite user_limit pour un salon (fallback propre)."""
+        # Si TEMP_VC_LIMITS est un mapping base_name -> limit
+        if isinstance(TEMP_VC_LIMITS, dict):
+            if base in TEMP_VC_LIMITS:
+                return TEMP_VC_LIMITS.get(base)
+            # Si vous aviez stocké par category id
+            if TEMP_VC_CATEGORY in TEMP_VC_LIMITS:
+                return TEMP_VC_LIMITS.get(TEMP_VC_CATEGORY)
+        return None
+
     async def _create_temp_vc(self, member: discord.Member) -> discord.VoiceChannel:
         """Crée un salon vocal temporaire et l'enregistre."""
         category = self.bot.get_channel(TEMP_VC_CATEGORY)
@@ -258,7 +273,8 @@ class TempVCCog(commands.Cog):
             raise RuntimeError("TEMP_VC_CATEGORY invalide")
 
         base = self._base_name_for(member)
-        limit = TEMP_VC_LIMITS.get(TEMP_VC_CATEGORY)
+        limit = self._resolve_user_limit(base)
+
         channel = await category.create_voice_channel(base, user_limit=limit)
 
         TEMP_VC_IDS.add(channel.id)
@@ -273,9 +289,9 @@ class TempVCCog(commands.Cog):
         if not isinstance(category, discord.CategoryChannel):
             raise RuntimeError("TEMP_VC_CATEGORY invalide")
 
+        # Rôle streamer (cache guild puis fallback sur roles du membre)
         streamer_role = member.guild.get_role(STREAMER_ROLE_ID)
         if streamer_role is None:
-            # Fallback au cas où le cache des rôles n'est pas à jour
             streamer_role = next((r for r in member.roles if r.id == STREAMER_ROLE_ID), None)
         if streamer_role is None:
             raise RuntimeError("STREAMER_ROLE_ID invalide")
@@ -309,9 +325,11 @@ class TempVCCog(commands.Cog):
                 manage_channels=True,
             )
 
-        limit = TEMP_VC_LIMITS.get(TEMP_VC_CATEGORY)
+        base = "Streamer"
+        limit = self._resolve_user_limit(base)
+
         channel = await category.create_voice_channel(
-            "Streamer",
+            base,
             user_limit=limit,
             overwrites=overwrites,
         )
@@ -347,13 +365,6 @@ class TempVCCog(commands.Cog):
             )
             try:
                 await member.move_to(new_vc)
-                logger.debug(
-                    "[temp_vc] moved %s (%s) into streamer channel '%s' (ID %s)",
-                    member,
-                    member.id,
-                    new_vc.name,
-                    new_vc.id,
-                )
             except discord.HTTPException:
                 logger.exception(
                     "[temp_vc] failed to move %s (%s) into streamer channel '%s' (ID %s)",
@@ -385,13 +396,6 @@ class TempVCCog(commands.Cog):
             )
             try:
                 await member.move_to(new_vc)
-                logger.debug(
-                    "[temp_vc] moved %s (%s) into temporary channel '%s' (ID %s)",
-                    member,
-                    member.id,
-                    new_vc.name,
-                    new_vc.id,
-                )
             except discord.HTTPException:
                 logger.exception(
                     "[temp_vc] failed to move %s (%s) into temporary channel '%s' (ID %s)",
@@ -422,13 +426,6 @@ class TempVCCog(commands.Cog):
                     if task:
                         task.cancel()
 
-                    logger.info(
-                        "[temp_vc] deleted temporary channel '%s' (ID %s) after %s (%s) left",
-                        before.channel.name,
-                        before.channel.id,
-                        member,
-                        member.id,
-                    )
                     TEMP_VC_IDS.discard(before.channel.id)
                     self._streamer_vc_ids.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
@@ -437,17 +434,13 @@ class TempVCCog(commands.Cog):
 
         # 4) Renommage sur changement d'état vocal
         if after.channel and after.channel.id in TEMP_VC_IDS:
-            if not before.channel or before.channel.id != after.channel.id:
-                logger.info(
-                    "[temp_vc] %s (%s) joined temporary channel '%s' (ID %s)",
-                    member,
-                    member.id,
-                    after.channel.name,
-                    after.channel.id,
-                )
             await self._update_channel_name(after.channel)
 
-        if before.channel and before.channel != after.channel and before.channel.id in TEMP_VC_IDS:
+        if (
+            before.channel
+            and before.channel != after.channel
+            and before.channel.id in TEMP_VC_IDS
+        ):
             await self._update_channel_name(before.channel)
 
     @commands.Cog.listener()
