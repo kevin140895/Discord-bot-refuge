@@ -13,6 +13,8 @@ from config import (
     TEMP_VC_CATEGORY,
     TEMP_VC_LIMITS,
     RENAME_DELAY,
+    STREAMER_LOBBY_VC_ID,
+    STREAMER_ROLE_ID,
     TEMP_VC_CHECK_INTERVAL_SECONDS,
 )
 from storage.temp_vc_store import (
@@ -34,6 +36,7 @@ ROLE_NAMES: Dict[int, str] = {
     ROLE_PC: "PC",
     ROLE_CONSOLE: "Console",
     ROLE_MOBILE: "Mobile",
+    STREAMER_ROLE_ID: "Streamer",
 }
 
 
@@ -255,6 +258,41 @@ class TempVCCog(commands.Cog):
         await self._save_last_names_cache()
         return channel
 
+    async def _create_streamer_vc(self, member: discord.Member) -> discord.VoiceChannel:
+        """Crée un salon vocal temporaire réservé au rôle streamer."""
+        category = self.bot.get_channel(TEMP_VC_CATEGORY)
+        if not isinstance(category, discord.CategoryChannel):
+            raise RuntimeError("TEMP_VC_CATEGORY invalide")
+
+        streamer_role = member.guild.get_role(STREAMER_ROLE_ID)
+        if streamer_role is None:
+            raise RuntimeError("STREAMER_ROLE_ID invalide")
+
+        overwrites = {
+            member.guild.default_role: discord.PermissionOverwrite(
+                view_channel=False,
+                connect=False,
+            ),
+            streamer_role: discord.PermissionOverwrite(
+                view_channel=True,
+                connect=True,
+                speak=True,
+            ),
+        }
+
+        limit = TEMP_VC_LIMITS.get(TEMP_VC_CATEGORY)
+        channel = await category.create_voice_channel(
+            "Streamer",
+            user_limit=limit,
+            overwrites=overwrites,
+        )
+
+        TEMP_VC_IDS.add(channel.id)
+        self._last_names[channel.id] = channel.name
+        await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+        await self._save_last_names_cache()
+        return channel
+
     # ----------- événements Discord -----------
 
     @commands.Cog.listener()
@@ -286,6 +324,44 @@ class TempVCCog(commands.Cog):
             except discord.HTTPException:
                 logger.exception(
                     "[temp_vc] failed to move %s (%s) into temporary channel '%s' (ID %s)",
+                    member,
+                    member.id,
+                    new_vc.name,
+                    new_vc.id,
+                )
+                await new_vc.delete(reason="Échec du déplacement du membre")
+                TEMP_VC_IDS.discard(new_vc.id)
+                self._last_names.pop(new_vc.id, None)
+                await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                await self._save_last_names_cache()
+                return
+            await self._update_channel_name(new_vc)
+            return
+
+        # 1bis) Création du salon streamer dédié
+        if after.channel and after.channel.id == STREAMER_LOBBY_VC_ID:
+            if not member.get_role(STREAMER_ROLE_ID):
+                return
+            new_vc = await self._create_streamer_vc(member)
+            logger.info(
+                "[temp_vc] created streamer channel '%s' (ID %s) for %s (%s)",
+                new_vc.name,
+                new_vc.id,
+                member,
+                member.id,
+            )
+            try:
+                await member.move_to(new_vc)
+                logger.debug(
+                    "[temp_vc] moved %s (%s) into streamer channel '%s' (ID %s)",
+                    member,
+                    member.id,
+                    new_vc.name,
+                    new_vc.id,
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "[temp_vc] failed to move %s (%s) into streamer channel '%s' (ID %s)",
                     member,
                     member.id,
                     new_vc.name,
