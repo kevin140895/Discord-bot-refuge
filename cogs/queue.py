@@ -305,6 +305,72 @@ class QueueCog(commands.Cog):
         view.update_options(queue)
         await interaction.response.send_message(embed=embed, view=view)
 
+    @app_commands.command(
+        name="clotureliste",
+        description="Supprimer les files d'attente ouvertes dans ce salon",
+    )
+    @app_commands.checks.has_role(XP_VIEWER_ROLE_ID)
+    async def clotureliste(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None or interaction.channel is None:
+            await safe_respond(
+                interaction,
+                "Commande utilisable uniquement sur un serveur.",
+                ephemeral=True,
+            )
+            return
+
+        channel_id = interaction.channel_id
+        if channel_id is None:
+            await safe_respond(interaction, "Salon introuvable.", ephemeral=True)
+            return
+
+        channel = interaction.channel
+        if not isinstance(channel, discord.abc.Messageable):
+            await safe_respond(interaction, "Salon introuvable.", ephemeral=True)
+            return
+
+        queue = self.queues.get(channel_id)
+        if queue is None or queue.is_closed:
+            await safe_respond(
+                interaction,
+                "Aucune file d'attente ouverte dans ce salon.",
+                ephemeral=True,
+            )
+            return
+
+        del self.queues[channel_id]
+
+        deleted = 0
+        async for msg in channel.history(limit=50):
+            if msg.author != self.bot.user or not msg.embeds:
+                continue
+
+            title = msg.embeds[0].title or ""
+            if "File d'attente ouverte" not in title:
+                continue
+
+            try:
+                await msg.delete()
+            except discord.HTTPException as exc:
+                logger.warning("Impossible de supprimer une file (delete): %s", exc)
+                continue
+
+            deleted += 1
+
+        if deleted == 0:
+            await safe_respond(
+                interaction,
+                "Aucune file d'attente ouverte n'a été trouvée.",
+                ephemeral=True,
+            )
+            return
+
+        await safe_respond(
+            interaction,
+            f"🗑️ {deleted} file(s) d'attente supprimée(s) dans ce salon.",
+            ephemeral=True,
+        )
+
     async def handle_join(self, interaction: discord.Interaction, view: QueueView) -> None:
         queue = self.queues.get(view.channel_id)
         if queue is None:
