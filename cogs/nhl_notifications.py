@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import contextlib
 import logging
 import os
 import sqlite3
@@ -199,10 +199,13 @@ class NHLNotificationsCog(commands.Cog):
         os.makedirs(DATA_DIR, exist_ok=True)
         db_path = os.path.join(DATA_DIR, "nhl_notifications.sqlite")
         self.db = NHLDatabase(db_path)
+
+        # Keep the User-Agent header (helps some endpoints/CDNs) while preserving the same timeout.
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=15),
             headers={"User-Agent": "DiscordBot-NHL/1.0"},
         )
+
         self.queue = MessageQueue(bot)
         self.queue.start()
         self._xg_cache: Dict[int, Tuple[float, datetime]] = {}
@@ -251,6 +254,7 @@ class NHLNotificationsCog(commands.Cog):
                 away_team = away.get("team", {})
                 status = game.get("status", {}).get("detailedState", "Unknown")
                 start_time = datetime.fromisoformat(game["gameDate"].replace("Z", "+00:00"))
+
                 games.append(
                     MatchInfo(
                         match_id=str(game.get("gamePk")),
@@ -307,6 +311,7 @@ class NHLNotificationsCog(commands.Cog):
     async def _fetch_team_xg(self, team_id: int) -> Optional[float]:
         if not team_id:
             return None
+
         cached = self._xg_cache.get(team_id)
         if cached and datetime.now(timezone.utc) - cached[1] < timedelta(hours=12):
             return cached[0]
@@ -315,10 +320,13 @@ class NHLNotificationsCog(commands.Cog):
         splits = payload.get("stats", [{}])[0].get("splits", [])
         if not splits:
             return None
+
         stats = splits[0].get("stat", {})
         goals_per_game = stats.get("goalsPerGame")
         if goals_per_game is None:
             return None
+
+        # NOTE: This is not true xG; it is a proxy (goals per game). Keep naming if intentional.
         xg_value = float(goals_per_game)
         self._xg_cache[team_id] = (xg_value, datetime.now(timezone.utc))
         return xg_value
@@ -326,6 +334,7 @@ class NHLNotificationsCog(commands.Cog):
     async def _fetch_odds(self, match: MatchInfo) -> str:
         if not ODDS_API_URL or not ODDS_API_KEY:
             return "Cotes indisponibles"
+
         try:
             payload = await self._fetch_json(
                 ODDS_API_URL,
@@ -362,11 +371,11 @@ class NHLNotificationsCog(commands.Cog):
             return payload.get("injuries", [])
         return []
 
-    async def _announce_live_game(
-        self, match: MatchInfo, row: Optional[sqlite3.Row]
-    ) -> None:
+    async def _announce_live_game(self, match: MatchInfo, row: Optional[sqlite3.Row]) -> None:
         current_score = match.score_label
         stored_score = row["scores"] if row else ""
+
+        # Avoid noise: only post when score changed (unless final).
         if current_score == stored_score and match.status != "Final":
             return
         if match.status == "Final" and row and row["notified_final"]:
@@ -385,15 +394,20 @@ class NHLNotificationsCog(commands.Cog):
     async def _maybe_send_preview(self, match: MatchInfo, row: Optional[sqlite3.Row]) -> None:
         now = datetime.now(timezone.utc)
         delta = match.start_time - now
-        if delta <= timedelta(hours=8, minutes=30) and delta >= timedelta(hours=7, minutes=30):
+
+        # ~8h before start
+        if timedelta(hours=7, minutes=30) <= delta <= timedelta(hours=8, minutes=30):
             if row and row["notified_preview"]:
                 return
+
             home_xg = await self._fetch_team_xg(match.home_id)
             away_xg = await self._fetch_team_xg(match.away_id)
             odds_line = await self._fetch_odds(match)
+
             xg_line = "xG indisponible"
             if home_xg is not None and away_xg is not None:
                 xg_line = f"{match.away_team} {away_xg:.2f} | {match.home_team} {home_xg:.2f}"
+
             message = (
                 f"💰 PARIS | {match.away_team} @ {match.home_team}\n"
                 f"📊 xG | {xg_line}\n"
@@ -408,9 +422,12 @@ class NHLNotificationsCog(commands.Cog):
     async def _maybe_send_last_call(self, match: MatchInfo, row: Optional[sqlite3.Row]) -> None:
         now = datetime.now(timezone.utc)
         delta = match.start_time - now
-        if delta <= timedelta(hours=2, minutes=30) and delta >= timedelta(hours=1, minutes=30):
+
+        # ~2h before start
+        if timedelta(hours=1, minutes=30) <= delta <= timedelta(hours=2, minutes=30):
             if row and row["notified_2h"]:
                 return
+
             odds_line = await self._fetch_odds(match)
             message = (
                 f"💰 PARIS | Dernière chance | {match.away_team} @ {match.home_team}\n"
@@ -434,12 +451,14 @@ class NHLNotificationsCog(commands.Cog):
                 continue
             if NHL_KEY_PLAYERS and player.lower() not in NHL_KEY_PLAYERS:
                 continue
+
             row = await self.db.fetchone(
                 "SELECT injury_id, notified FROM injuries WHERE player_name = ? AND status = ?",
                 (player, status),
             )
             if row and row["notified"]:
                 continue
+
             await self.db.execute(
                 """
                 INSERT INTO injuries (player_name, team, status, impact, notified)
@@ -452,12 +471,15 @@ class NHLNotificationsCog(commands.Cog):
 
     async def _run_match_updates(self) -> None:
         games = await self._fetch_schedule()
+
         for match in games:
             row = await self._get_match_row(match.match_id)
             await self._upsert_match(match)
+
             if match.status in {"In Progress", "Final"}:
                 await self._announce_live_game(match, row)
                 continue
+
             if match.status in {"Scheduled", "Pre-Game"}:
                 if not (row and row["notified_upcoming"]):
                     message = (
@@ -469,6 +491,7 @@ class NHLNotificationsCog(commands.Cog):
                         "UPDATE matches SET notified_upcoming = 1 WHERE match_id = ?",
                         (match.match_id,),
                     )
+
                 await self._maybe_send_preview(match, row)
                 await self._maybe_send_last_call(match, row)
 
@@ -479,7 +502,6 @@ class NHLNotificationsCog(commands.Cog):
         except Exception as exc:
             logger.error("Failed to fetch schedule: %s", exc)
             await self._send_admin_alert(f"API NHL indisponible: {exc}")
-            return
 
     @tasks.loop(minutes=15)
     async def betting_alerts_task(self) -> None:
@@ -488,9 +510,8 @@ class NHLNotificationsCog(commands.Cog):
         except Exception as exc:
             logger.error("Failed to fetch schedule for betting: %s", exc)
             await self._send_admin_alert(f"Betting alert schedule error: {exc}")
-            return
 
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=5)
     async def injury_task(self) -> None:
         try:
             await self._process_injuries()
@@ -538,9 +559,7 @@ class NHLNotificationsCog(commands.Cog):
         except Exception as exc:
             logger.error("Manual NHL update failed: %s", exc)
             await self._send_admin_alert(f"Mise à jour NHL manuelle en erreur: {exc}")
-            await interaction.followup.send(
-                f"❌ Mise à jour manuelle échouée: {exc}", ephemeral=True
-            )
+            await interaction.followup.send("❌ Mise à jour manuelle échouée.", ephemeral=True)
             return
         await interaction.followup.send("✅ Mise à jour NHL terminée.", ephemeral=True)
 
