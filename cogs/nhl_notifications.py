@@ -199,7 +199,13 @@ class NHLNotificationsCog(commands.Cog):
         os.makedirs(DATA_DIR, exist_ok=True)
         db_path = os.path.join(DATA_DIR, "nhl_notifications.sqlite")
         self.db = NHLDatabase(db_path)
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+
+        # Keep the User-Agent header (helps some endpoints/CDNs) while preserving the same timeout.
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15),
+            headers={"User-Agent": "DiscordBot-NHL/1.0"},
+        )
+
         self.queue = MessageQueue(bot)
         self.queue.start()
         self._xg_cache: Dict[int, Tuple[float, datetime]] = {}
