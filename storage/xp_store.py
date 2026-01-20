@@ -357,6 +357,10 @@ class XPStore:
         
         return sorted_users
 
+    def read_json(self) -> Dict[str, XPUserData]:
+        """Lit le fichier JSON brut des XP."""
+        return read_json_safe(self.path)
+
     async def get_stats(self) -> Dict[str, any]:
         """Retourne les statistiques du store."""
         async with self.lock:
