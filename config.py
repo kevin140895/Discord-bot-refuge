@@ -46,6 +46,11 @@ except AttributeError:
     # ``tzset`` n'existe pas sur toutes les plateformes (ex: Windows)
     pass
 
+# ── Horaires du casino ────────────────────────────────────────
+CASINO_OPEN_HOUR: int = int(os.getenv("CASINO_OPEN_HOUR", "10"))
+CASINO_CLOSE_HOUR: int = int(os.getenv("CASINO_CLOSE_HOUR", "2"))
+CASINO_SCHEDULE_LABEL = f"{CASINO_OPEN_HOUR:02d}h00 - {CASINO_CLOSE_HOUR:02d}h00"
+
 
 # ── Salons statistiques ───────────────────────────────────────
 STATS_MEMBERS_CHANNEL_ID = 1406435185813098537

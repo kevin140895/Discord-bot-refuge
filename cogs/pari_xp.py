@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import random
@@ -7,6 +8,7 @@ from datetime import datetime
 from typing import Optional
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from config import (
@@ -14,6 +16,9 @@ from config import (
     ANNOUNCE_CHANNEL_ID,
     PARI_XP_CHANNEL_ID,
     PARI_XP_ROLE_ID,
+    CASINO_OPEN_HOUR,
+    CASINO_CLOSE_HOUR,
+    CASINO_SCHEDULE_LABEL,
 )
 from storage.xp_store import xp_store
 from cogs.xp import award_xp
@@ -28,6 +33,10 @@ logger = logging.getLogger(__name__)
 STATE_FILE = os.path.join(DATA_DIR, "pari_xp_state.json")
 PARI_XP_MIN_BET = int(os.getenv("PARI_XP_MIN_BET", "10"))
 PARI_XP_MAX_BET = int(os.getenv("PARI_XP_MAX_BET", "500"))
+SPINNING_GIF_URL = (
+    "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGpxaXd6ZDZhaGlvbXhjOTJtdDA5MTl5cGo2N2oxbHB2aXZpNjJtZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26uflBhaGt5lQsaCA/giphy.gif"
+)
+CASINO_CLOSED_MESSAGE = "🌙 Le Casino est fermé. Horaires : 10h00 - 02h00."
 
 
 class BetAmountModal(discord.ui.Modal):
@@ -87,35 +96,35 @@ class RouletteXPView(discord.ui.View):
         if self.cog.is_open:
             await interaction.response.send_modal(BetAmountModal(self.cog, "red"))
         else:
-            await safe_respond(interaction, "La roulette est fermée.", ephemeral=True)
+            await safe_respond(interaction, CASINO_CLOSED_MESSAGE, ephemeral=True)
 
     @discord.ui.button(label="⚫ Noir", style=discord.ButtonStyle.secondary, custom_id="pari_xp:black")
     async def bet_black(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         if self.cog.is_open:
             await interaction.response.send_modal(BetAmountModal(self.cog, "black"))
         else:
-            await safe_respond(interaction, "La roulette est fermée.", ephemeral=True)
+            await safe_respond(interaction, CASINO_CLOSED_MESSAGE, ephemeral=True)
 
     @discord.ui.button(label="Pair", style=discord.ButtonStyle.primary, custom_id="pari_xp:even")
     async def bet_even(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         if self.cog.is_open:
             await interaction.response.send_modal(BetAmountModal(self.cog, "even"))
         else:
-            await safe_respond(interaction, "La roulette est fermée.", ephemeral=True)
+            await safe_respond(interaction, CASINO_CLOSED_MESSAGE, ephemeral=True)
 
     @discord.ui.button(label="Impair", style=discord.ButtonStyle.primary, custom_id="pari_xp:odd")
     async def bet_odd(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         if self.cog.is_open:
             await interaction.response.send_modal(BetAmountModal(self.cog, "odd"))
         else:
-            await safe_respond(interaction, "La roulette est fermée.", ephemeral=True)
+            await safe_respond(interaction, CASINO_CLOSED_MESSAGE, ephemeral=True)
 
     @discord.ui.button(label="Numéro", style=discord.ButtonStyle.success, custom_id="pari_xp:number")
     async def bet_number(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         if self.cog.is_open:
             await interaction.response.send_modal(NumberBetModal(self.cog))
         else:
-            await safe_respond(interaction, "La roulette est fermée.", ephemeral=True)
+            await safe_respond(interaction, CASINO_CLOSED_MESSAGE, ephemeral=True)
 
 
 class PariXPCog(commands.Cog):
@@ -135,7 +144,9 @@ class PariXPCog(commands.Cog):
     def _is_open_now(self, dt: Optional[datetime] = None) -> bool:
         dt = dt or datetime.now(self.tz)
         h = dt.hour
-        return h >= 10 or h < 2
+        if CASINO_OPEN_HOUR < CASINO_CLOSE_HOUR:
+            return CASINO_OPEN_HOUR <= h < CASINO_CLOSE_HOUR
+        return h >= CASINO_OPEN_HOUR or h < CASINO_CLOSE_HOUR
 
     @tasks.loop(minutes=1)
     async def check_schedule(self) -> None:
@@ -166,9 +177,9 @@ class PariXPCog(commands.Cog):
         if not isinstance(channel, discord.TextChannel):
             return
         msg = (
-            "🎰 La roulette XP est maintenant ouverte jusqu'à 02h00 !"
+            f"🎰 La roulette XP est maintenant ouverte jusqu'à {CASINO_CLOSE_HOUR:02d}h00 !"
             if self.is_open
-            else "🔒 La roulette XP est fermée. Rendez-vous à 10h00."
+            else f"🔒 La roulette XP est fermée. Rendez-vous à {CASINO_OPEN_HOUR:02d}h00."
         )
         try:
             await channel.send(msg)
@@ -181,7 +192,11 @@ class PariXPCog(commands.Cog):
 
     # ── Message & embed ──
     def _build_embed(self) -> discord.Embed:
-        next_hour = "02:00" if self.is_open else "10:00"
+        next_hour = (
+            f"{CASINO_CLOSE_HOUR:02d}:00"
+            if self.is_open
+            else f"{CASINO_OPEN_HOUR:02d}:00"
+        )
         status = "🟢 Ouvert" if self.is_open else "🔴 Fermé"
         desc = [
             f"Mise min : {PARI_XP_MIN_BET} XP",
@@ -191,8 +206,10 @@ class PariXPCog(commands.Cog):
             "• Rouge/Noir : 45% → x2",
             "• Pair/Impair : 45% → x2",
             "• Numéro : 5% → x10",
+            "• Zéro Vert : 3% → 0x",
             "",
             f"État : {status} — {'ferme' if self.is_open else 'ouvre'} à ⏰ {next_hour}",
+            f"Horaires du casino : {CASINO_SCHEDULE_LABEL}",
             "",
             f"Total misés : {self.state.get('total_bets', 0)} XP",
             f"Total gagnés : {self.state.get('total_winnings', 0)} XP",
@@ -245,7 +262,7 @@ class PariXPCog(commands.Cog):
     ) -> None:
         with measure("pari_xp_bet"):
             if not self.is_open:
-                await safe_respond(interaction, "❌ La roulette est fermée.", ephemeral=True)
+                await safe_respond(interaction, CASINO_CLOSED_MESSAGE, ephemeral=True)
                 return
             if amount < PARI_XP_MIN_BET or amount > PARI_XP_MAX_BET:
                 await safe_respond(
@@ -271,13 +288,18 @@ class PariXPCog(commands.Cog):
                 await safe_respond(interaction, "❌ Erreur interne.", ephemeral=True)
                 return
 
+            roll = random.random()
+            zero_hit = roll < 0.03
             win = False
             multiplier = 0
-            if bet_type == "number":
-                win = random.random() < 0.05
+            if zero_hit:
+                win = False
+                multiplier = 0
+            elif bet_type == "number":
+                win = roll < 0.03 + 0.05
                 multiplier = 10
             else:
-                win = random.random() < 0.45
+                win = roll < 0.03 + 0.45
                 multiplier = 2
             if win:
                 try:
@@ -308,9 +330,61 @@ class PariXPCog(commands.Cog):
                             pass
             else:
                 msg = "❌ Perdu."
+            if zero_hit:
+                outcome_line = "🟢 Zéro Vert (0) ! La maison gagne."
+            else:
+                outcome_line = "🎯 Pas de zéro vert cette fois."
             self.state["total_bets"] = self.state.get("total_bets", 0) + amount
             await self._save_state()
-            await safe_respond(interaction, msg, ephemeral=True)
+            result_embed = discord.Embed(
+                title="🎰 Résultat",
+                description=f"{outcome_line}\n{msg}",
+            )
+            spin_embed = discord.Embed(title="La roue tourne...")
+            spin_embed.set_image(url=SPINNING_GIF_URL)
+            await interaction.response.send_message(embed=spin_embed, ephemeral=True)
+            message = await interaction.original_response()
+            await asyncio.sleep(2.5)
+            await message.edit(embed=result_embed)
+
+    @app_commands.command(
+        name="top_casino",
+        description="Afficher le top 10 des joueurs XP du casino",
+    )
+    async def top_casino(self, interaction: discord.Interaction) -> None:
+        data = xp_store.read_json()
+        if not data:
+            embed = discord.Embed(
+                title="🏆 Top Casino",
+                description="Aucune donnée XP disponible pour le moment.",
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        leaderboard = sorted(
+            data.items(),
+            key=lambda item: item[1].get("xp", 0) if isinstance(item[1], dict) else item[1],
+            reverse=True,
+        )[:10]
+        lines = []
+        for idx, (user_id, payload) in enumerate(leaderboard, start=1):
+            xp_amount = payload.get("xp", 0) if isinstance(payload, dict) else payload
+            member = None
+            if interaction.guild:
+                member = interaction.guild.get_member(int(user_id))
+            if member:
+                display_name = member.display_name
+            else:
+                try:
+                    user = await self.bot.fetch_user(int(user_id))
+                    display_name = user.display_name
+                except discord.HTTPException:
+                    display_name = f"Utilisateur {user_id}"
+            lines.append(f"**#{idx}** {display_name} — {xp_amount} XP")
+        embed = discord.Embed(
+            title="🏆 Top Casino",
+            description="\n".join(lines),
+        )
+        await interaction.response.send_message(embed=embed)
 
     async def cog_load(self) -> None:
         try:

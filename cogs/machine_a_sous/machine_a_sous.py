@@ -9,7 +9,6 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from zoneinfo import ZoneInfo
 
-from utils.timewin import is_open_now, next_boundary_dt
 from utils.metrics import measure
 from storage.roulette_store import RouletteStore
 from ..xp import award_xp, add_xp_boost
@@ -21,6 +20,9 @@ from config import (
     DATA_DIR,
     MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES,
     XP_VIEWER_ROLE_ID,
+    CASINO_OPEN_HOUR,
+    CASINO_CLOSE_HOUR,
+    CASINO_SCHEDULE_LABEL,
 )
 from utils.discord_utils import safe_message_edit
 from utils.economy_tickets import consume_any_ticket, consume_free_ticket
@@ -44,9 +46,19 @@ REWARDS = [
 WEIGHTS = [250, 230, 150, 80, 40, 15, 5, 80, 80, 70]
 SPIN_GIF_URL = "https://media.tenor.com/2roX3zvclxkAAAAC/slot-machine.gif"
 WIN_GIF_URL = "https://media.tenor.com/XwI-iYdkfVIAAAAi/lottery-winner.gif"
+CASINO_CLOSED_MESSAGE = "🌙 Le Casino est fermé. Horaires : 10h00 - 02h00."
 
 def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _is_casino_open(now: Optional[datetime] = None) -> bool:
+    tz = ZoneInfo(PARIS_TZ)
+    now = now or datetime.now(tz)
+    hour = now.hour
+    if CASINO_OPEN_HOUR < CASINO_CLOSE_HOUR:
+        return CASINO_OPEN_HOUR <= hour < CASINO_CLOSE_HOUR
+    return hour >= CASINO_OPEN_HOUR or hour < CASINO_CLOSE_HOUR
 
 
 class MachineASousView(discord.ui.View):
@@ -274,14 +286,9 @@ class MachineASousView(discord.ui.View):
                 ephemeral=True,
             )
 
-        if not is_open_now(PARIS_TZ, 10, 22):
-            nxt = next_boundary_dt(tz=PARIS_TZ, start_h=10, end_h=22)
+        if not _is_casino_open():
             return await interaction.response.send_message(
-                (
-                    "⏳ La machine à sous est ouverte "
-                    "**de 10:00 à 22:00 (Europe/Paris)**.\n"
-                    f"🔔 Prochaine ouverture/fermeture : **{_fmt(nxt)}**."
-                ),
+                CASINO_CLOSED_MESSAGE,
                 ephemeral=True,
             )
 
@@ -323,16 +330,16 @@ class MachineASousCog(commands.Cog):
         self.bot = bot
         self.tz = ZoneInfo(PARIS_TZ)
         self.store = RouletteStore(data_dir=DATA_DIR)
-        self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
+        self.current_view_enabled = _is_casino_open()
         self._last_announced_state: Optional[bool] = None
 
     def _poster_embed(self) -> discord.Embed:
         """Create the poster embed describing rewards and open state."""
         if self.current_view_enabled:
-            desc_state = "✅ **Ouverte** de 10:00 à 22:00 (Europe/Paris)"
+            desc_state = f"✅ **Ouverte** de {CASINO_SCHEDULE_LABEL} (Europe/Paris)"
             color = 0x2ECC71
         else:
-            desc_state = "⛔ **Fermée** (10:00–22:00)"
+            desc_state = f"⛔ **Fermée** ({CASINO_SCHEDULE_LABEL})"
             color = 0xED4245
         return discord.Embed(
             title="🎰 Machine à sous",
@@ -437,7 +444,7 @@ class MachineASousCog(commands.Cog):
 
     async def _init_after_ready(self):
         await self.bot.wait_until_ready()
-        self.current_view_enabled = is_open_now(PARIS_TZ, 10, 22)
+        self.current_view_enabled = _is_casino_open()
         self._last_announced_state = self.current_view_enabled
         try:
             await self._ensure_poster_message()
@@ -487,7 +494,7 @@ class MachineASousCog(commands.Cog):
             title = f"🎰 Machine à sous — {'OUVERTE' if opened else 'FERMÉE'}"
             if opened:
                 content = (
-                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **machine à sous ouvre** maintenant — vous pouvez jouer jusqu’à **22:00**."
+                    f"<@&{NOTIF_ROLE_ID}> 🎰 La **machine à sous ouvre** maintenant — vous pouvez jouer jusqu’à **{CASINO_CLOSE_HOUR:02d}:00**."
                 )
                 allowed = discord.AllowedMentions(roles=True)
                 description = (
@@ -563,7 +570,7 @@ class MachineASousCog(commands.Cog):
     async def maintenance_loop(self):
         # Vérification des horaires d'ouverture
         try:
-            enabled_now = is_open_now(PARIS_TZ, 10, 22)
+            enabled_now = _is_casino_open()
             if (
                 self._last_announced_state is None
                 or enabled_now != self._last_announced_state
