@@ -13,6 +13,286 @@ from config import (
 )
 
 
+class RoleView(discord.ui.View):
+    """Vue de gestion des rôles pour le profil joueur."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    # ── Plateformes (exclusives) ─────────────────────────────────────────
+    @discord.ui.button(
+        label="PC 💻",
+        style=discord.ButtonStyle.primary,
+        custom_id="role_platform_pc",
+        row=0,
+    )
+    async def btn_platform_pc(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._set_platform_role(interaction, ROLE_PC)
+
+    @discord.ui.button(
+        label="Consoles 🎮",
+        style=discord.ButtonStyle.primary,
+        custom_id="role_platform_console",
+        row=0,
+    )
+    async def btn_platform_console(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._set_platform_role(interaction, ROLE_CONSOLE)
+
+    @discord.ui.button(
+        label="Mobile 📱",
+        style=discord.ButtonStyle.primary,
+        custom_id="role_platform_mobile",
+        row=0,
+    )
+    async def btn_platform_mobile(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._set_platform_role(interaction, ROLE_MOBILE)
+
+    # ── Intérêts (toggles) ───────────────────────────────────────────────
+    @discord.ui.button(
+        label="Notifications 🔔",
+        style=discord.ButtonStyle.success,
+        custom_id="role_interest_notifications",
+        row=1,
+    )
+    async def btn_interest_notifications(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._toggle_role(interaction, ROLE_NOTIFICATION)
+
+    @discord.ui.button(
+        label="Anthyx Community 👾",
+        style=discord.ButtonStyle.secondary,
+        custom_id="role_interest_community",
+        row=1,
+    )
+    async def btn_interest_community(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._toggle_role(interaction, ROLE_ANTHYX_COMMUNITY)
+
+    @discord.ui.button(
+        label="Paris Sportifs 🎯",
+        style=discord.ButtonStyle.secondary,
+        custom_id="role_interest_paris",
+        row=1,
+    )
+    async def btn_interest_paris(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._toggle_role(interaction, ROLE_PARIS_SPORTIFS)
+
+    # ── Reset ────────────────────────────────────────────────────────────
+    @discord.ui.button(
+        label="Tout effacer 🗑️",
+        style=discord.ButtonStyle.danger,
+        custom_id="role_reset_all",
+        row=2,
+    )
+    async def btn_reset_all(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._reset_roles(interaction)
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+    async def _ensure_permissions(
+        self, interaction: discord.Interaction
+    ) -> bool:
+        guild = interaction.guild
+        if not guild:
+            await interaction.response.send_message(
+                "❌ Action impossible en message privé.", ephemeral=True
+            )
+            return False
+        me = guild.me or guild.get_member(interaction.client.user.id)  # type: ignore[union-attr]
+        if not me:
+            await interaction.response.send_message(
+                "❌ Impossible de vérifier mes permissions.", ephemeral=True
+            )
+            return False
+        if not me.guild_permissions.manage_roles:
+            await interaction.response.send_message(
+                "❌ Je n'ai pas la permission **Gérer les rôles**.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _set_platform_role(
+        self, interaction: discord.Interaction, role_id: int
+    ) -> None:
+        """Assigne une plateforme unique et retire les autres."""
+        if not await self._ensure_permissions(interaction):
+            return
+        guild = interaction.guild
+        if not guild:
+            return
+
+        member = interaction.user
+        role = guild.get_role(role_id)
+        if not role:
+            await interaction.response.send_message(
+                "❌ Rôle introuvable.", ephemeral=True
+            )
+            return
+
+        other_platform_ids = {
+            ROLE_PC,
+            ROLE_CONSOLE,
+            ROLE_MOBILE,
+        } - {role_id}
+        other_platform_roles = [
+            guild.get_role(rid) for rid in other_platform_ids
+        ]
+        remove_list = [r for r in other_platform_roles if r and r in member.roles]
+
+        try:
+            if remove_list:
+                await member.remove_roles(
+                    *remove_list, reason="Changement de plateforme"
+                )
+            if role not in member.roles:
+                await member.add_roles(
+                    role, reason="Ajout plateforme principale"
+                )
+            await interaction.response.send_message(
+                "🔄 Ta plateforme principale est maintenant mise à jour.",
+                ephemeral=True,
+            )
+        except discord.Forbidden:
+            logging.warning(
+                "Permissions insuffisantes pour modifier la plateforme."
+            )
+            await interaction.response.send_message(
+                "❌ Permissions insuffisantes pour modifier tes rôles.",
+                ephemeral=True,
+            )
+        except discord.NotFound:
+            logging.warning("Rôle ou membre introuvable.")
+            await interaction.response.send_message(
+                "❌ Rôle ou membre introuvable.", ephemeral=True
+            )
+        except discord.HTTPException as e:
+            logging.error("Erreur HTTP lors du changement de plateforme: %s", e)
+            await interaction.response.send_message(
+                "❌ Erreur lors de la modification des rôles.",
+                ephemeral=True,
+            )
+        except Exception as e:  # pragma: no cover - cas inattendu
+            logging.exception("Erreur inattendue changement de plateforme: %s", e)
+            await interaction.response.send_message(
+                "❌ Impossible de modifier tes rôles.", ephemeral=True
+            )
+
+    async def _toggle_role(
+        self, interaction: discord.Interaction, role_id: int
+    ) -> None:
+        """Ajoute ou retire un rôle d'intérêt."""
+        if not await self._ensure_permissions(interaction):
+            return
+        guild = interaction.guild
+        if not guild:
+            return
+
+        member = interaction.user
+        role = guild.get_role(role_id)
+        if not role:
+            await interaction.response.send_message(
+                "❌ Rôle introuvable.", ephemeral=True
+            )
+            return
+        try:
+            if role in member.roles:
+                await member.remove_roles(role, reason="Retrait badge")
+                await interaction.response.send_message(
+                    "❌ Badge retiré", ephemeral=True
+                )
+            else:
+                await member.add_roles(role, reason="Ajout badge")
+                await interaction.response.send_message(
+                    "✅ Badge ajouté", ephemeral=True
+                )
+        except discord.Forbidden:
+            logging.warning("Permissions insuffisantes pour modifier un badge.")
+            await interaction.response.send_message(
+                "❌ Permissions insuffisantes pour modifier tes rôles.",
+                ephemeral=True,
+            )
+        except discord.NotFound:
+            logging.warning("Rôle ou membre introuvable pour un badge.")
+            await interaction.response.send_message(
+                "❌ Rôle ou membre introuvable.", ephemeral=True
+            )
+        except discord.HTTPException as e:
+            logging.error("Erreur HTTP lors du toggle badge: %s", e)
+            await interaction.response.send_message(
+                "❌ Erreur lors de la modification des rôles.",
+                ephemeral=True,
+            )
+        except Exception as e:  # pragma: no cover - cas inattendu
+            logging.exception("Erreur inattendue toggle badge: %s", e)
+            await interaction.response.send_message(
+                "❌ Impossible de modifier tes rôles.", ephemeral=True
+            )
+
+    async def _reset_roles(self, interaction: discord.Interaction) -> None:
+        """Retire tous les rôles de plateforme et d'intérêt."""
+        if not await self._ensure_permissions(interaction):
+            return
+        guild = interaction.guild
+        if not guild:
+            return
+
+        member = interaction.user
+        role_ids = [
+            ROLE_PC,
+            ROLE_CONSOLE,
+            ROLE_MOBILE,
+            ROLE_NOTIFICATION,
+            ROLE_ANTHYX_COMMUNITY,
+            ROLE_PARIS_SPORTIFS,
+        ]
+        roles = [guild.get_role(role_id) for role_id in role_ids]
+        remove_list = [role for role in roles if role and role in member.roles]
+
+        try:
+            if remove_list:
+                await member.remove_roles(
+                    *remove_list, reason="Reset rôles profil"
+                )
+            await interaction.response.send_message(
+                "🧹 Ton profil a été nettoyé, tous les badges sont retirés.",
+                ephemeral=True,
+            )
+        except discord.Forbidden:
+            logging.warning("Permissions insuffisantes pour reset rôles.")
+            await interaction.response.send_message(
+                "❌ Permissions insuffisantes pour modifier tes rôles.",
+                ephemeral=True,
+            )
+        except discord.NotFound:
+            logging.warning("Rôle ou membre introuvable lors du reset.")
+            await interaction.response.send_message(
+                "❌ Rôle ou membre introuvable.", ephemeral=True
+            )
+        except discord.HTTPException as e:
+            logging.error("Erreur HTTP lors du reset rôles: %s", e)
+            await interaction.response.send_message(
+                "❌ Erreur lors de la modification des rôles.",
+                ephemeral=True,
+            )
+        except Exception as e:  # pragma: no cover - cas inattendu
+            logging.exception("Erreur inattendue reset rôles: %s", e)
+            await interaction.response.send_message(
+                "❌ Impossible de modifier tes rôles.", ephemeral=True
+            )
+
+
 class PlayerTypeView(discord.ui.View):
     """Boutons de rôles :
         - Plateformes (PC/Consoles/Mobile) : exclusives entre elles
