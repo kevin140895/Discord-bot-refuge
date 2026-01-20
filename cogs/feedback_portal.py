@@ -277,8 +277,8 @@ class FeedbackPortalCog(commands.Cog):
         embed = discord.Embed(
             title=target_title,
             description=(
-                "Bienvenue sur le portail de Codex. Utilisez les boutons ci-dessous "
-                "pour interagir avec l'équipe. Tout abus sera sanctionné."
+                "Bienvenue avec l'equipe technique du refuge. Utilisez les boutons "
+                "ci-dessous pour interagir avec l'équipe. Tout abus sera sanctionné."
             ),
             color=discord.Color.gold(),
         )
