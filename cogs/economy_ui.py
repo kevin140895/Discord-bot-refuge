@@ -7,7 +7,7 @@ import typing
 import discord
 from discord.ext import commands, tasks
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from storage.economy import (
     ECONOMY_DIR,
@@ -21,7 +21,6 @@ from storage.economy import (
     transactions,
 )
 from utils import xp_adapter
-from cogs import xp as xp_cog
 import config
 
 CHANNEL_ID = 1409633293791400108
@@ -43,11 +42,17 @@ PURCHASE_LIMITS: dict[str, int] = {
 def _activate_personal_double_xp(user_id: int, duration_minutes: int) -> datetime:
     """Active ou prolonge le vrai bonus Double XP utilisé par ``award_xp``.
 
+    Le module XP est résolu au moment de l'achat, et non lors du chargement de
+    ``economy_ui``. Cela évite de conserver une référence vers une ancienne
+    instance du module si Discord charge ensuite ``cogs.xp`` comme extension.
+
     ``cogs.xp.add_xp_boost`` remplace normalement l'expiration existante. Pour
     les achats boutique, on conserve le temps restant puis on ajoute la nouvelle
     durée afin que deux achats d'une heure donnent bien deux heures de bonus au
     total au lieu de faire payer deux fois pour une seule heure.
     """
+    from cogs import xp as xp_cog
+
     now = datetime.now(timezone.utc)
     current_expiry = xp_cog.XP_BOOSTS.get(str(user_id))
     remaining_minutes = 0.0
