@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
+from config import DATA_DIR
 from storage.transaction_store import TransactionStore
 from utils.storage import load_json, save_json
 
-# Base directory for economy data files
-ECONOMY_DIR = Path(__file__).resolve().parent.parent / "data" / "economy"
+# All persistent economy files live below the configured persistent root.
+ECONOMY_DIR = Path(DATA_DIR) / "economy"
 
 # Paths for various economy files
 SHOP_FILE = ECONOMY_DIR / "shop.json"
