@@ -1,42 +1,23 @@
 from __future__ import annotations
 
-import asyncio
-import weakref
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Dict
 
-from storage.economy import TICKETS_FILE, transactions
+from storage.economy import TICKETS_FILE, get_ticket_lock, transactions
 from storage.roulette_store import RouletteStore
 from utils.storage import load_json
 from utils.persistence import atomic_write_json_async
 
 
-# ``asyncio.Lock`` instances are bound to the event loop that contends on
-# them. Keep one lock per live loop so production has a single transaction
-# boundary while tests that use separate event loops remain isolated.
-_ticket_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
-    weakref.WeakKeyDictionary()
-)
-
-
-def _get_ticket_lock() -> asyncio.Lock:
-    loop = asyncio.get_running_loop()
-    lock = _ticket_locks.get(loop)
-    if lock is None:
-        lock = asyncio.Lock()
-        _ticket_locks[loop] = lock
-    return lock
-
-
 async def consume_free_ticket(user_id: int) -> bool:
     """Consume one free ticket for ``user_id`` if available.
 
-    The read/check/decrement/write sequence is serialized so two concurrent
-    consumers cannot both spend the same ticket. Returns ``True`` only when a
-    ticket was actually consumed, then records that successful usage in the
-    transaction ledger.
+    The read/check/decrement/write sequence is serialized with purchases so two
+    concurrent operations cannot overwrite each other's ticket stock. Returns
+    ``True`` only when a ticket was actually consumed, then records that
+    successful usage in the transaction ledger.
     """
-    async with _get_ticket_lock():
+    async with get_ticket_lock():
         tickets: Dict[str, int] = load_json(TICKETS_FILE, {})
         key = str(user_id)
         count = int(tickets.get(key, 0))
