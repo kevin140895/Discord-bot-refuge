@@ -58,6 +58,13 @@ STATS_ONLINE_CHANNEL_ID = 1413712632711745648
 STATS_VOICE_CHANNEL_ID = 1406435190607184085
 
 
+# ── Salons de fonctionnalités ─────────────────────────────────
+ECONOMY_CHANNEL_ID: int = _get_int_env(
+    "ECONOMY_CHANNEL_ID", 1409633293791400108
+)
+F1_CHANNEL_ID: int = _get_int_env("F1_CHANNEL_ID", 1413708410330939485)
+
+
 # ── Rôles plateformes et notifications ────────────────────────
 ROLE_PC = 1400560541529018408
 ROLE_CONSOLE = 1400560660710162492
