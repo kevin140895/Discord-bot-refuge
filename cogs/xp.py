@@ -31,8 +31,10 @@ from utils.persistence import (
 )
 from utils.metrics import measure
 from storage.xp_store import xp_store
+from storage.season_store import season_store
 from utils.game_events import get_multiplier, record_participant
 from utils.voice_bonus import get_voice_multiplier
+from utils.seasons import should_count_xp_source
 logger = logging.getLogger(__name__)
 
 # Fichiers de persistance
@@ -137,7 +139,7 @@ async def award_xp(
     """Modifie l'XP de ``user_id`` via le :class:`XPStore`.
 
     Lorsque ``amount`` est positif et que l'utilisateur bénéficie d'un bonus
-    « Double XP », le gain est doublé automatiquement. Les montants négatifs
+    « Double XP », le gain est doublé automatiquement. Les montants négatifs
     permettent de retirer de l'XP, sans bonus.
     """
     now = datetime.now(timezone.utc)
@@ -149,9 +151,21 @@ async def award_xp(
             else:
                 XP_BOOSTS.pop(str(user_id), None)
                 asyncio.create_task(save_xp_boosts_to_disk())
-    return await xp_store.add_xp(
+    result = await xp_store.add_xp(
         user_id, amount, guild_id=guild_id, source=source
     )
+    old_level, new_level, old_xp, new_xp = result
+    delta = new_xp - old_xp
+    if should_count_xp_source(source, delta):
+        try:
+            await season_store.record(user_id, at=now, xp_earned=delta)
+        except Exception:
+            logger.exception(
+                "[season] Impossible d'enregistrer %s XP saisonnière pour %s",
+                delta,
+                user_id,
+            )
+    return result
 
 
 def add_xp_boost(user_id: int, duration_minutes: int) -> None:
