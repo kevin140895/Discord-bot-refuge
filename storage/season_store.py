@@ -5,7 +5,7 @@ import weakref
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from config import DATA_DIR
 from utils.persistence import atomic_write_json_async, read_json_safe
@@ -25,6 +25,7 @@ class SeasonStore:
         self._data: dict[str, Any] = {
             "schema_version": 1,
             "tracking_started_at": None,
+            "casino_baseline": {},
             "seasons": {},
         }
         self._locks: weakref.WeakKeyDictionary[
@@ -44,6 +45,7 @@ class SeasonStore:
             return
         raw = await asyncio.to_thread(read_json_safe, self.path, {})
         seasons: dict[str, Any] = {}
+        casino_baseline: dict[str, Any] = {}
         tracking_started_at = None
         if isinstance(raw, dict):
             raw_seasons = raw.get("seasons", {})
@@ -53,12 +55,20 @@ class SeasonStore:
                     for season_id, payload in raw_seasons.items()
                     if isinstance(payload, dict)
                 }
+            raw_baseline = raw.get("casino_baseline", {})
+            if isinstance(raw_baseline, dict):
+                casino_baseline = {
+                    str(user_id): dict(payload)
+                    for user_id, payload in raw_baseline.items()
+                    if isinstance(payload, dict)
+                }
             value = raw.get("tracking_started_at")
             if value:
                 tracking_started_at = str(value)
         self._data = {
             "schema_version": 1,
             "tracking_started_at": tracking_started_at,
+            "casino_baseline": casino_baseline,
             "seasons": seasons,
         }
         self._loaded = True
@@ -82,6 +92,31 @@ class SeasonStore:
             self._dirty = False
             return current
 
+    def _apply_increments_locked(
+        self,
+        user_id: int,
+        season_id: str,
+        timestamp: str,
+        increments: Mapping[str, int],
+    ) -> None:
+        if not self._data.get("tracking_started_at"):
+            self._data["tracking_started_at"] = timestamp
+
+        seasons = self._data["seasons"]
+        season = seasons.setdefault(
+            season_id,
+            {
+                "label": season_label(season_id),
+                "started_at": timestamp,
+                "users": {},
+            },
+        )
+        users = season.setdefault("users", {})
+        payload = users.setdefault(str(user_id), {})
+        for field, value in increments.items():
+            payload[field] = int(payload.get(field, 0)) + int(value)
+        self._dirty = True
+
     async def record(
         self,
         user_id: int,
@@ -103,30 +138,91 @@ class SeasonStore:
             return
 
         resolved_season_id = season_id or season_id_for(at)
-        now = (at or datetime.now(timezone.utc))
+        now = at or datetime.now(timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         timestamp = now.astimezone(timezone.utc).isoformat()
 
         async with self._get_lock():
             await self._load_locked()
-            if not self._data.get("tracking_started_at"):
-                self._data["tracking_started_at"] = timestamp
-
-            seasons = self._data["seasons"]
-            season = seasons.setdefault(
+            self._apply_increments_locked(
+                user_id,
                 resolved_season_id,
-                {
-                    "label": season_label(resolved_season_id),
-                    "started_at": timestamp,
-                    "users": {},
-                },
+                timestamp,
+                normalized,
             )
-            users = season.setdefault("users", {})
-            payload = users.setdefault(str(user_id), {})
-            for field, value in normalized.items():
-                payload[field] = int(payload.get(field, 0)) + value
-            self._dirty = True
+
+    async def sync_casino_totals(
+        self,
+        players: Mapping[str, Mapping[str, Any]],
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Convert cumulative casino totals into prospective seasonal deltas.
+
+        The first observation becomes a baseline only. Later observations are
+        diffed against that persisted baseline, so bot restarts do not duplicate
+        casino activity and pre-feature history is never backfilled.
+        """
+
+        now = at or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        timestamp = now.astimezone(timezone.utc).isoformat()
+        resolved_season_id = season_id_for(now)
+
+        async with self._get_lock():
+            await self._load_locked()
+            baseline = self._data.setdefault("casino_baseline", {})
+
+            for raw_user_id, payload in players.items():
+                if not isinstance(payload, Mapping):
+                    continue
+                try:
+                    user_id = int(raw_user_id)
+                    current = {
+                        "bets": max(0, int(payload.get("bets", 0))),
+                        "wagered": max(0, int(payload.get("wagered", 0))),
+                        "winnings": max(0, int(payload.get("winnings", 0))),
+                    }
+                except (TypeError, ValueError):
+                    continue
+
+                previous = baseline.get(str(user_id))
+                baseline[str(user_id)] = current
+                if not isinstance(previous, dict):
+                    self._dirty = True
+                    continue
+
+                try:
+                    delta_bets = current["bets"] - int(previous.get("bets", 0))
+                    delta_wagered = current["wagered"] - int(
+                        previous.get("wagered", 0)
+                    )
+                    delta_winnings = current["winnings"] - int(
+                        previous.get("winnings", 0)
+                    )
+                except (TypeError, ValueError):
+                    self._dirty = True
+                    continue
+
+                # A reset/corruption of the source should reset the baseline,
+                # never fabricate negative seasonal activity.
+                if delta_bets < 0 or delta_wagered < 0 or delta_winnings < 0:
+                    self._dirty = True
+                    continue
+                if delta_bets == 0 and delta_wagered == 0 and delta_winnings == 0:
+                    continue
+
+                self._apply_increments_locked(
+                    user_id,
+                    resolved_season_id,
+                    timestamp,
+                    {
+                        "casino_bets": delta_bets,
+                        "casino_net": delta_winnings - delta_wagered,
+                    },
+                )
 
     async def get_season(self, season_id: str) -> dict[str, Any] | None:
         async with self._get_lock():
