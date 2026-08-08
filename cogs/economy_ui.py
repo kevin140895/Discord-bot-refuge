@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from storage.economy import (
     ECONOMY_DIR,
     SHOP_FILE,
+    get_boost_lock,
     get_ticket_lock,
     load_boosts,
     load_tickets,
@@ -130,52 +131,58 @@ class EconomyUICog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _cleanup_boosts_once(self) -> None:
-        try:
-            boosts = load_boosts()
-        except Exception as e:
-            logger.warning("Lecture boosts.json échouée: %s", e)
-            return
+        role_removals: list[tuple[typing.Any, typing.Any, str, int]] = []
 
-        now = datetime.now(timezone.utc)
-        changed = False
-        guild = self.bot.get_guild(getattr(config, "GUILD_ID", 0))
+        async with get_boost_lock():
+            try:
+                boosts = load_boosts()
+            except Exception as e:
+                logger.warning("Lecture boosts.json échouée: %s", e)
+                return
 
-        for uid, entries in list(boosts.items()):
-            new_entries = []
-            for entry in entries:
-                until_str = entry.get("until")
-                try:
-                    until = datetime.fromisoformat(until_str)
-                except Exception:
-                    changed = True
-                    continue
-                if until <= now:
-                    changed = True
-                    role_id = int(entry.get("role_id", 0))
-                    if role_id and guild:
-                        member = guild.get_member(int(uid))
-                        role = guild.get_role(role_id)
-                        if member and role:
-                            try:
-                                await member.remove_roles(
-                                    role, reason="Boost expiré"
-                                )
-                            except Exception:  # pragma: no cover - best effort
-                                logger.warning(
-                                    "Impossible de retirer le rôle %s de %s",
-                                    role_id,
-                                    uid,
-                                    exc_info=True,
-                                )
+            now = datetime.now(timezone.utc)
+            changed = False
+            guild = self.bot.get_guild(getattr(config, "GUILD_ID", 0))
+
+            for uid, entries in list(boosts.items()):
+                new_entries = []
+                for entry in entries:
+                    until_str = entry.get("until")
+                    try:
+                        until = datetime.fromisoformat(until_str)
+                    except Exception:
+                        changed = True
+                        continue
+                    if until <= now:
+                        changed = True
+                        role_id = int(entry.get("role_id", 0))
+                        if role_id and guild:
+                            member = guild.get_member(int(uid))
+                            role = guild.get_role(role_id)
+                            if member and role:
+                                role_removals.append((member, role, uid, role_id))
+                    else:
+                        new_entries.append(entry)
+                if new_entries:
+                    boosts[uid] = new_entries
                 else:
-                    new_entries.append(entry)
-            if new_entries:
-                boosts[uid] = new_entries
-            else:
-                boosts.pop(uid, None)
+                    boosts.pop(uid, None)
 
-        if changed:
-            await save_boosts(boosts)
+            if changed:
+                await save_boosts(boosts)
+
+        # Discord calls are intentionally performed after the persisted boost
+        # state is committed and the shared boost lock has been released.
+        for member, role, uid, role_id in role_removals:
+            try:
+                await member.remove_roles(role, reason="Boost expiré")
+            except Exception:  # pragma: no cover - best effort
+                logger.warning(
+                    "Impossible de retirer le rôle %s de %s",
+                    role_id,
+                    uid,
+                    exc_info=True,
+                )
 
     async def cog_load(self) -> None:  # pragma: no cover - requires discord context
         logger.info("Chargement de l'interface économie")
@@ -240,6 +247,7 @@ class EconomyUICog(commands.Cog):
         item_key: str,
         *,
         _ticket_locked: bool = False,
+        _boost_locked: bool = False,
     ) -> None:
         shop = _load_shop()
         if not shop:
@@ -259,6 +267,16 @@ class EconomyUICog(commands.Cog):
                     interaction,
                     item_key,
                     _ticket_locked=True,
+                    _boost_locked=_boost_locked,
+                )
+            return
+        if item_key == "double_xp_1h" and not _boost_locked:
+            async with get_boost_lock():
+                await self._handle_shop_purchase(
+                    interaction,
+                    item_key,
+                    _ticket_locked=_ticket_locked,
+                    _boost_locked=True,
                 )
             return
         user_id = interaction.user.id
