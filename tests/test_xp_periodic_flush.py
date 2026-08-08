@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -31,9 +32,6 @@ async def test_successful_flush_marks_only_current_snapshot_clean(monkeypatch, t
     assert store._last_flushed_update_count == 100
     assert store._has_unflushed_updates() is False
 
-    # La maintenance ne doit plus considérer le même palier comme sale.
-    assert store._has_unflushed_updates() is False
-
     # Une nouvelle mutation rend à nouveau l'état sale.
     store.stats["total_updates"] = 101
     assert store._has_unflushed_updates() is True
@@ -61,8 +59,8 @@ async def test_older_flush_cannot_move_persisted_counter_backwards(monkeypatch, 
     store.data = {"1": {"xp": 100, "level": 1}}
     store.stats["total_updates"] = 100
 
-    write_started = pytest.importorskip("asyncio").Event()
-    release_write = pytest.importorskip("asyncio").Event()
+    write_started = asyncio.Event()
+    release_write = asyncio.Event()
 
     async def slow_write(path, data):
         write_started.set()
@@ -70,7 +68,7 @@ async def test_older_flush_cannot_move_persisted_counter_backwards(monkeypatch, 
 
     monkeypatch.setattr(xp_store_module, "atomic_write_json_async", slow_write)
 
-    first_flush = pytest.importorskip("asyncio").create_task(store.flush())
+    first_flush = asyncio.create_task(store.flush())
     await write_started.wait()
 
     # Simule qu'un flush plus récent a déjà persisté davantage d'updates.
