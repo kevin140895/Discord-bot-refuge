@@ -12,6 +12,7 @@ from discord.ext import commands, tasks
 
 from config import DATA_DIR
 from storage.xp_store import xp_store
+from storage.season_store import season_store
 from utils.persistence import (
     atomic_write_json_async,
     ensure_dir,
@@ -131,6 +132,18 @@ class FirstMessageCog(commands.Cog):
             guild_id=message.guild.id if message.guild else 0,
             source="message",
         )
+        seasonal_delta = total_xp - old_xp
+        if seasonal_delta > 0:
+            try:
+                await season_store.record(
+                    message.author.id,
+                    at=message.created_at,
+                    xp_earned=seasonal_delta,
+                )
+            except Exception:
+                logger.exception(
+                    "[season] Impossible d'enregistrer la récompense premier message"
+                )
         await message.channel.send(
             f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 400 XP !",
         )
