@@ -409,16 +409,28 @@ class XPStore:
         return user_data
 
     async def get_top_users(self, limit: int = 10) -> List[Tuple[str, XPUserData]]:
-        """Récupère le top des utilisateurs par XP."""
-        all_data = read_json_safe(self.path)
-        
-        # Trier par XP
+        """Récupère le top des utilisateurs depuis l'état XP le plus récent."""
+        disk_data = await asyncio.to_thread(read_json_safe, self.path)
+        all_data: Dict[str, XPUserData] = {}
+        if isinstance(disk_data, dict):
+            all_data = {
+                str(uid): dict(payload)
+                for uid, payload in disk_data.items()
+                if isinstance(payload, dict)
+            }
+
+        # Les mutations immédiates vivent d'abord dans ``self.data`` et ne sont
+        # persistées qu'après un flush différé. Elles doivent donc écraser le
+        # snapshot disque pour éviter un classement temporairement obsolète.
+        async with self.lock:
+            for uid, payload in self.data.items():
+                all_data[uid] = dict(payload)
+
         sorted_users = sorted(
             all_data.items(),
-            key=lambda x: x[1].get("xp", 0),
-            reverse=True
+            key=lambda x: int(x[1].get("xp", 0)),
+            reverse=True,
         )[:limit]
-        
         return sorted_users
 
     def read_json(self) -> Dict[str, XPUserData]:
