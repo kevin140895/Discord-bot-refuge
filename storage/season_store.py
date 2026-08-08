@@ -25,6 +25,7 @@ class SeasonStore:
         self._data: dict[str, Any] = {
             "schema_version": 1,
             "tracking_started_at": None,
+            "casino_baseline_initialized": False,
             "casino_baseline": {},
             "seasons": {},
         }
@@ -46,6 +47,7 @@ class SeasonStore:
         raw = await asyncio.to_thread(read_json_safe, self.path, {})
         seasons: dict[str, Any] = {}
         casino_baseline: dict[str, Any] = {}
+        casino_baseline_initialized = False
         tracking_started_at = None
         if isinstance(raw, dict):
             raw_seasons = raw.get("seasons", {})
@@ -62,12 +64,16 @@ class SeasonStore:
                     for user_id, payload in raw_baseline.items()
                     if isinstance(payload, dict)
                 }
+            casino_baseline_initialized = bool(
+                raw.get("casino_baseline_initialized", False)
+            )
             value = raw.get("tracking_started_at")
             if value:
                 tracking_started_at = str(value)
         self._data = {
             "schema_version": 1,
             "tracking_started_at": tracking_started_at,
+            "casino_baseline_initialized": casino_baseline_initialized,
             "casino_baseline": casino_baseline,
             "seasons": seasons,
         }
@@ -160,9 +166,9 @@ class SeasonStore:
     ) -> None:
         """Convert cumulative casino totals into prospective seasonal deltas.
 
-        The first observation becomes a baseline only. Later observations are
-        diffed against that persisted baseline, so bot restarts do not duplicate
-        casino activity and pre-feature history is never backfilled.
+        Exactly one global snapshot is used as the deployment baseline. After
+        that, a player appearing for the first time is treated as genuinely new
+        activity and their cumulative counters are diffed from zero.
         """
 
         now = at or datetime.now(timezone.utc)
@@ -174,6 +180,9 @@ class SeasonStore:
         async with self._get_lock():
             await self._load_locked()
             baseline = self._data.setdefault("casino_baseline", {})
+            initializing = not bool(
+                self._data.get("casino_baseline_initialized", False)
+            )
 
             for raw_user_id, payload in players.items():
                 if not isinstance(payload, Mapping):
@@ -190,9 +199,11 @@ class SeasonStore:
 
                 previous = baseline.get(str(user_id))
                 baseline[str(user_id)] = current
-                if not isinstance(previous, dict):
+                if initializing:
                     self._dirty = True
                     continue
+                if not isinstance(previous, dict):
+                    previous = {"bets": 0, "wagered": 0, "winnings": 0}
 
                 try:
                     delta_bets = current["bets"] - int(previous.get("bets", 0))
@@ -223,6 +234,10 @@ class SeasonStore:
                         "casino_net": delta_winnings - delta_wagered,
                     },
                 )
+
+            if initializing:
+                self._data["casino_baseline_initialized"] = True
+                self._dirty = True
 
     async def get_season(self, season_id: str) -> dict[str, Any] | None:
         async with self._get_lock():
