@@ -146,6 +146,8 @@ class RefugeBot(commands.Bot):
 
     async def close(self) -> None:  # type: ignore[override]
         """Ensure background helpers are stopped before shutting down."""
+        await limiter.aclose()
+        await api_meter.aclose()
         await rename_manager.aclose()
         await channel_edit_manager.aclose()
         await xp_store.aclose()
