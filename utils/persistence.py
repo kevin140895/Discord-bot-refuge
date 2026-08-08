@@ -16,6 +16,7 @@ __all__ = [
 
 _write_lock: asyncio.Lock | None = None
 _write_lock_loop: asyncio.AbstractEventLoop | None = None
+_DEFAULT_JSON_FALLBACK = object()
 
 
 def ensure_dir(path: str | os.PathLike[str]) -> None:
@@ -23,12 +24,16 @@ def ensure_dir(path: str | os.PathLike[str]) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
-def read_json_safe(path: str | os.PathLike[str]) -> dict:
-    """Read JSON data from ``path``.
+def read_json_safe(
+    path: str | os.PathLike[str], default: Any = _DEFAULT_JSON_FALLBACK
+) -> Any:
+    """Read JSON data from ``path`` with backup fallback.
 
-    If the file is missing or corrupted, attempt to read from ``path`` with
-    ``.bak`` appended. Returns an empty dict on failure.
+    If the primary file is missing or corrupted, ``path.bak`` is attempted.
+    When neither file can be read, return ``default`` when explicitly
+    provided; otherwise preserve the historical empty-dict fallback.
     """
+    fallback = {} if default is _DEFAULT_JSON_FALLBACK else default
     p = Path(path)
     try:
         return json.loads(p.read_text(encoding="utf-8"))
@@ -44,13 +49,13 @@ def read_json_safe(path: str | os.PathLike[str]) -> dict:
         return json.loads(bak.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logging.warning("Backup file %s not found", bak)
-        return {}
+        return fallback
     except json.JSONDecodeError:
         logging.warning("Backup file %s is corrupted", bak)
-        return {}
+        return fallback
     except OSError as e:
         logging.warning("Error reading backup %s: %s", bak, e)
-        return {}
+        return fallback
 
 
 def atomic_write_json(path: str | os.PathLike[str], data: Any) -> None:
@@ -135,4 +140,3 @@ async def schedule_checkpoint(
                 _checkpoint_task = None
 
         _checkpoint_task = asyncio.create_task(_run())
-
