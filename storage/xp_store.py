@@ -380,7 +380,7 @@ class XPStore:
         return True
 
     async def get_user_data(self, user_id: int) -> XPUserData:
-        """Récupère les données d'un utilisateur."""
+        """Récupère une copie des données d'un utilisateur."""
         uid = str(user_id)
         
         async with self.lock:
@@ -388,7 +388,7 @@ class XPStore:
                 self.stats["cache_hits"] += 1
                 user = self.data[uid]
                 user["last_accessed"] = datetime.utcnow().isoformat()
-                return user
+                return dict(user)
             
             self.stats["cache_misses"] += 1
             
@@ -406,7 +406,7 @@ class XPStore:
             if len(self.data) > self.cache_size * 1.2:  # 20% de marge
                 asyncio.create_task(self._cleanup_cache())
         
-        return user_data
+        return dict(user_data)
 
     async def get_top_users(self, limit: int = 10) -> List[Tuple[str, XPUserData]]:
         """Récupère le top des utilisateurs depuis l'état XP le plus récent."""
