@@ -40,6 +40,27 @@ SPINNING_GIF_URL = (
 CASINO_CLOSED_MESSAGE = "🌙 Le Casino est fermé. Horaires : 10h00 - 02h00."
 
 
+def _draw_number_for_roll(selected_number: int, roll: float) -> int:
+    """Map one casino roll to a visible number while preserving custom odds.
+
+    The casino reserves 3% for the house zero and 5% for the selected number.
+    The remaining 92% is distributed across the other 35 numbers.
+    """
+    if not 1 <= selected_number <= 36:
+        raise ValueError("selected_number must be between 1 and 36")
+    if not 0 <= roll < 1:
+        raise ValueError("roll must be in [0, 1)")
+    if roll < 0.03:
+        return 0
+    if roll < 0.08:
+        return selected_number
+
+    other_numbers = [number for number in range(1, 37) if number != selected_number]
+    position = (roll - 0.08) / 0.92
+    index = min(int(position * len(other_numbers)), len(other_numbers) - 1)
+    return other_numbers[index]
+
+
 class BetAmountModal(discord.ui.Modal):
     def __init__(self, cog: "PariXPCog", bet_type: str) -> None:
         super().__init__(title="Parier XP")
@@ -67,7 +88,7 @@ class NumberBetModal(discord.ui.Modal):
             label="Mise (XP)", placeholder=f"{PARI_XP_MIN_BET}-{PARI_XP_MAX_BET}", min_length=1, max_length=4
         )
         self.number = discord.ui.TextInput(
-            label="Numéro (0-36)", placeholder="0-36", min_length=1, max_length=2
+            label="Numéro (1-36)", placeholder="1-36", min_length=1, max_length=2
         )
         self.add_item(self.amount)
         self.add_item(self.number)
@@ -76,7 +97,7 @@ class NumberBetModal(discord.ui.Modal):
         try:
             amt = int(self.amount.value)
             num = int(self.number.value)
-            if not 0 <= num <= 36:
+            if not 1 <= num <= 36:
                 raise ValueError
         except ValueError:
             await safe_respond(interaction, "❌ Valeurs invalides.", ephemeral=True)
@@ -207,7 +228,7 @@ class PariXPCog(commands.Cog):
             "Probabilités :",
             "• Rouge/Noir : 45% → x2",
             "• Pair/Impair : 45% → x2",
-            "• Numéro : 5% → x10",
+            "• Numéro (1-36) : 5% → x10",
             "• Zéro Vert : 3% → 0x",
             "",
             f"État : {status} — {'ferme' if self.is_open else 'ouvre'} à ⏰ {next_hour}",
@@ -289,6 +310,13 @@ class PariXPCog(commands.Cog):
                     ephemeral=True,
                 )
                 return
+            if bet_type == "number" and (number is None or not 1 <= number <= 36):
+                await safe_respond(
+                    interaction,
+                    "❌ Numéro invalide (1-36).",
+                    ephemeral=True,
+                )
+                return
             data = await xp_store.get_user_data(interaction.user.id)
             balance = int(data.get("xp", 0))
             if balance < amount:
@@ -312,18 +340,21 @@ class PariXPCog(commands.Cog):
                 return
 
             roll = random.random()
-            zero_hit = roll < 0.03
-            win = False
-            multiplier = 0
-            if zero_hit:
-                win = False
-                multiplier = 0
-            elif bet_type == "number":
-                win = roll < 0.03 + 0.05
-                multiplier = 10
+            drawn_number: Optional[int] = None
+            if bet_type == "number":
+                assert number is not None
+                drawn_number = _draw_number_for_roll(number, roll)
+                zero_hit = drawn_number == 0
+                win = drawn_number == number
+                multiplier = 0 if zero_hit else 10
             else:
-                win = roll < 0.03 + 0.45
-                multiplier = 2
+                zero_hit = roll < 0.03
+                if zero_hit:
+                    win = False
+                    multiplier = 0
+                else:
+                    win = roll < 0.03 + 0.45
+                    multiplier = 2
 
             payout = amount * multiplier if win else 0
             if win:
@@ -357,6 +388,8 @@ class PariXPCog(commands.Cog):
                 msg = "❌ Perdu."
             if zero_hit:
                 outcome_line = "🟢 Zéro Vert (0) ! La maison gagne."
+            elif bet_type == "number":
+                outcome_line = f"🎯 Numéro tiré : {drawn_number} — ton choix : {number}."
             else:
                 outcome_line = "🎯 Pas de zéro vert cette fois."
             self.state["total_bets"] = self.state.get("total_bets", 0) + amount
