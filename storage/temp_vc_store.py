@@ -57,11 +57,11 @@ def load_streamer_temp_vcs() -> Dict[int, int]:
 async def save_temp_vc_ids_async(
     ids: Iterable[int], max_retries: int = 3
 ) -> None:
-    """Sauvegarde asynchrone avec retries des IDs de salons temporaires."""
+    """Sauvegarde asynchrone sérialisée avec retries des IDs temporaires."""
     payload = sorted(set(int(i) for i in ids))
     for attempt in range(max_retries):
         try:
-            await asyncio.to_thread(atomic_write_json, DATA_FILE, payload)
+            await atomic_write_json_async(DATA_FILE, payload)
             return
         except Exception as e:
             logging.error(
@@ -78,11 +78,11 @@ async def save_temp_vc_ids_async(
 async def save_last_names_cache(
     cache: Dict[int, str], max_retries: int = 3
 ) -> None:
-    """Sauvegarde asynchrone avec retries du cache des derniers noms."""
+    """Sauvegarde asynchrone sérialisée avec retries du cache des noms."""
     payload = {str(k): v for k, v in cache.items()}
     for attempt in range(max_retries):
         try:
-            await asyncio.to_thread(atomic_write_json, LAST_NAMES_FILE, payload)
+            await atomic_write_json_async(LAST_NAMES_FILE, payload)
             return
         except Exception as e:
             logging.error(
