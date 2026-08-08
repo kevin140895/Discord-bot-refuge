@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from storage.economy import (
     ECONOMY_DIR,
     SHOP_FILE,
+    get_ticket_lock,
     load_boosts,
     load_tickets,
     load_ui,
@@ -234,7 +235,11 @@ class EconomyUICog(commands.Cog):
         await self._handle_shop_purchase(interaction, item_key)
 
     async def _handle_shop_purchase(
-        self, interaction: discord.Interaction, item_key: str
+        self,
+        interaction: discord.Interaction,
+        item_key: str,
+        *,
+        _ticket_locked: bool = False,
     ) -> None:
         shop = _load_shop()
         if not shop:
@@ -247,6 +252,14 @@ class EconomyUICog(commands.Cog):
             item.get("name", "")
         ).lower():
             await interaction.response.send_message("Article inconnu.", ephemeral=True)
+            return
+        if item_key == "ticket_royal" and not _ticket_locked:
+            async with get_ticket_lock():
+                await self._handle_shop_purchase(
+                    interaction,
+                    item_key,
+                    _ticket_locked=True,
+                )
             return
         user_id = interaction.user.id
         limit = PURCHASE_LIMITS.get(item_key)
