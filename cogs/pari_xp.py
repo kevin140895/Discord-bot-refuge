@@ -22,6 +22,7 @@ from config import (
 )
 from storage.xp_store import xp_store
 from cogs.xp import award_xp
+from utils import xp_adapter
 from utils.timezones import PARIS_TZ
 from utils.persistence import atomic_write_json_async, read_json_safe
 from utils.interactions import safe_respond
@@ -277,12 +278,17 @@ class PariXPCog(commands.Cog):
                 await safe_respond(interaction, "❌ XP insuffisant.", ephemeral=True)
                 return
             try:
-                await award_xp(
+                await xp_adapter.add_xp(
                     interaction.user.id,
-                    -amount,
-                    guild_id=interaction.guild_id,
+                    amount=-amount,
+                    guild_id=interaction.guild_id or 0,
                     source="pari_xp",
                 )
+            except xp_adapter.InsufficientXPError:
+                # Une autre opération a pu consommer le solde après le
+                # pré-contrôle. Le débit atomique refuse alors proprement le pari.
+                await safe_respond(interaction, "❌ XP insuffisant.", ephemeral=True)
+                return
             except Exception as e:  # pragma: no cover - defensive
                 logger.exception("[PariXP] debit failed: %s", e)
                 await safe_respond(interaction, "❌ Erreur interne.", ephemeral=True)
