@@ -3,16 +3,16 @@ __pycache__/
 *.pyc
 venv/
 
-# Local data and JSON files
+# Local runtime data and JSON files
 data/*
 data/**/*.json
 /app/data/**/*.json
-# Allow committing Roulette Refuge data
-!data/pari_xp/
-!data/pari_xp/*.json
-# Allow committing economy UI configuration
+
+# Keep only the static economy shop catalog under data/.
 !data/economy/
-!data/economy/*.json
+data/economy/*
+!data/economy/shop.json
+
 # Allow necessary configuration files
 !config.json
 
