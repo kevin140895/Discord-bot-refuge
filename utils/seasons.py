@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable
 
 from utils.timezones import PARIS_TZ
 
@@ -145,11 +144,12 @@ def rank_rows(
             continue
         try:
             value = int(payload.get(field, 0))
+            casino_bets = int(payload.get("casino_bets", 0) or 0)
         except (TypeError, ValueError):
             continue
         if field != "casino_net" and value <= 0:
             continue
-        if field == "casino_net" and int(payload.get("casino_bets", 0) or 0) <= 0:
+        if field == "casino_net" and casino_bets <= 0:
             continue
         rows.append((str(user_id), value))
     rows.sort(key=lambda row: (row[1], row[0]), reverse=True)
