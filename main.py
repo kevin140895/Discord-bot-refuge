@@ -22,13 +22,49 @@ class DiscordCriticalHandler(logging.Handler):
         self.bot = bot
         self.channel_id = channel_id
 
+    def _get_running_loop(self) -> asyncio.AbstractEventLoop | None:
+        loop = getattr(self.bot, "loop", None)
+        if not isinstance(loop, asyncio.AbstractEventLoop):
+            return None
+        if loop.is_closed() or not loop.is_running():
+            return None
+        return loop
+
     async def _send(self, message: str) -> None:
         channel = self.bot.get_channel(self.channel_id)
         if channel:
             await channel.send(f"```{message}```")
 
+    @staticmethod
+    def _consume_send_result(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            # A logging handler must never surface delivery failures back into
+            # the application or create "Task exception was never retrieved".
+            pass
+
+    def _schedule_send(self, message: str) -> None:
+        loop = self._get_running_loop()
+        if loop is None:
+            return
+        task = loop.create_task(self._send(message))
+        task.add_done_callback(self._consume_send_result)
+
     def emit(self, record: logging.LogRecord) -> None:
-        asyncio.create_task(self._send(self.format(record)))
+        try:
+            loop = self._get_running_loop()
+            if loop is None:
+                return
+            message = self.format(record)
+            loop.call_soon_threadsafe(self._schedule_send, message)
+        except RuntimeError:
+            # The Discord loop can stop between the state check and scheduling.
+            return
+        except Exception:
+            self.handleError(record)
 
 
 def main() -> None:
