@@ -235,8 +235,10 @@ XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID: int = int(
 
 
 # ── Jeux organisés ────────────────────────────────────────────
-GAMES_DATA_DIR: str = os.getenv("GAMES_DATA_DIR", "/app/data/games")
-"""Répertoire de persistance des événements de jeu."""
+GAMES_DATA_DIR: str = os.getenv(
+    "GAMES_DATA_DIR", os.path.join(DATA_DIR, "games")
+)
+"""Répertoire de persistance des événements de jeu, sous ``DATA_DIR`` par défaut."""
 
 CHANNEL_EDIT_MIN_INTERVAL_SECONDS: int = int(
     os.getenv("CHANNEL_EDIT_MIN_INTERVAL_SECONDS", "180")
