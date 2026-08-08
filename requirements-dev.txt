@@ -1,4 +1,6 @@
+-r requirements.txt
+
+# Test dependencies
 pytest
 pytest-asyncio
 freezegun
-discord.py>=2,<3
