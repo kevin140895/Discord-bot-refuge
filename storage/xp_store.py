@@ -53,6 +53,7 @@ class XPStore:
         self._periodic_task: Optional[asyncio.Task] = None
         self._batch_updates = BatchUpdate()
         self._last_cleanup = datetime.utcnow()
+        self._last_flushed_update_count = 0
         
         # Statistiques pour monitoring
         self.stats = {
@@ -117,6 +118,10 @@ class XPStore:
                     self.cache_size,
                 )
 
+    def _has_unflushed_updates(self) -> bool:
+        """Indique si des mutations XP sont postérieures au dernier flush réussi."""
+        return self.stats["total_updates"] > self._last_flushed_update_count
+
     async def _periodic_maintenance(self) -> None:
         """Maintenance périodique: flush batch et nettoyage cache."""
         try:
@@ -132,8 +137,9 @@ class XPStore:
                     await self._cleanup_cache()
                     self._last_cleanup = now
                 
-                # Flush périodique sur disque toutes les 5 minutes
-                if self.stats["total_updates"] % 100 == 0:
+                # Filet de sécurité : n'écrire que si des mises à jour n'ont pas
+                # encore été incluses dans un flush réussi.
+                if self._has_unflushed_updates():
                     await self.flush()
                     
         except asyncio.CancelledError:
@@ -179,10 +185,16 @@ class XPStore:
     async def flush(self) -> None:
         """Écrit les données sur disque."""
         async with self.lock:
-            # Créer une copie pour l'écriture
+            # Créer une copie pour l'écriture et mémoriser le compteur exact
+            # inclus dans ce snapshot.
             data_copy = dict(self.data)
+            update_count = self.stats["total_updates"]
             
         await atomic_write_json_async(self.path, data_copy)
+        self._last_flushed_update_count = max(
+            self._last_flushed_update_count,
+            update_count,
+        )
         logger.info("XP flush: %d utilisateurs, %d updates totales", 
                    len(data_copy), self.stats["total_updates"])
 
