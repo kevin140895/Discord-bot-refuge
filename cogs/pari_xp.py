@@ -61,6 +61,12 @@ def _draw_number_for_roll(selected_number: int, roll: float) -> int:
     return other_numbers[index]
 
 
+def _build_result_description(outcome_line: str | None, result_message: str) -> str:
+    """Join only meaningful roulette result lines."""
+
+    return "\n".join(line for line in (outcome_line, result_message) if line)
+
+
 class BetAmountModal(discord.ui.Modal):
     def __init__(self, cog: "PariXPCog", bet_type: str) -> None:
         super().__init__(title="Parier XP")
@@ -387,17 +393,17 @@ class PariXPCog(commands.Cog):
             else:
                 msg = "❌ Perdu."
             if zero_hit:
-                outcome_line = "🟢 Zéro Vert (0) ! La maison gagne."
+                outcome_line: str | None = "🟢 Zéro Vert (0) ! La maison gagne."
             elif bet_type == "number":
                 outcome_line = f"🎯 Numéro tiré : {drawn_number} — ton choix : {number}."
             else:
-                outcome_line = "🎯 Pas de zéro vert cette fois."
+                outcome_line = None
             self.state["total_bets"] = self.state.get("total_bets", 0) + amount
             self._record_player_result(interaction.user.id, amount, payout)
             await self._save_state()
             result_embed = discord.Embed(
                 title="🎰 Résultat",
-                description=f"{outcome_line}\n{msg}",
+                description=_build_result_description(outcome_line, msg),
             )
             spin_embed = discord.Embed(title="La roue tourne...")
             spin_embed.set_image(url=SPINNING_GIF_URL)
