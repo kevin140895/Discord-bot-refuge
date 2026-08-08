@@ -8,10 +8,9 @@ from utils.persistence import ensure_dir, read_json_safe, atomic_write_json_asyn
 
 
 def load_json(path: Path, default: Any) -> Any:
-    """Load JSON data from ``path`` or return ``default`` if missing."""
+    """Load JSON data from ``path`` or return ``default`` if unreadable."""
     ensure_dir(path.parent)
-    data = read_json_safe(path)
-    return data if data is not None else default
+    return read_json_safe(path, default=default)
 
 
 async def save_json(path: Path, data: Any) -> None:
