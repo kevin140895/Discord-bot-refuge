@@ -1,9 +1,14 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
 import cogs.streamer_temp_vc as streamer_temp_vc
+
+
+class DummySnowflake:
+    def __init__(self, snowflake_id: int) -> None:
+        self.id = snowflake_id
 
 
 class DummyVoiceChannel:
@@ -94,11 +99,12 @@ async def test_create_channel_persists_owner_mapping(
     save_mock = AsyncMock()
     monkeypatch.setattr(streamer_temp_vc, "save_streamer_temp_vcs_async", save_mock)
     monkeypatch.setattr(streamer_temp_vc, "TEMP_VOICE_CATEGORY_ID", 0)
+    monkeypatch.setattr(streamer_temp_vc, "TRIGGER_CHANNEL_ID", 0)
 
     category = DummyCategory(321)
     trigger = SimpleNamespace(category=category)
-    role = SimpleNamespace(id=streamer_temp_vc.ALLOWED_ROLE_ID)
-    default_role = SimpleNamespace(id=1)
+    role = DummySnowflake(streamer_temp_vc.ALLOWED_ROLE_ID)
+    default_role = DummySnowflake(1)
     created = DummyVoiceChannel(99, category=category)
 
     guild = SimpleNamespace(
