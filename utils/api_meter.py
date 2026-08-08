@@ -328,21 +328,31 @@ class APIMeter:
     async def start(self, bot: Any) -> None:
         self.bot = bot
         self._load_aggregates()
-        if self.writer_task is None:
+        if self.writer_task is None or self.writer_task.done():
+            if self.writer_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    self.writer_task.result()
             self.writer_task = asyncio.create_task(self._writer_loop())
-        if self.summary_task is None:
+        if self.summary_task is None or self.summary_task.done():
+            if self.summary_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    self.summary_task.result()
             self.summary_task = asyncio.create_task(self._summary_loop())
 
     async def aclose(self) -> None:
         if self.writer_task:
-            await self.queue.put(None)
-            with contextlib.suppress(Exception):
-                await self.writer_task
+            writer_task = self.writer_task
+            if not writer_task.done():
+                await self.queue.put(None)
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await writer_task
             self.writer_task = None
         if self.summary_task:
-            self.summary_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.summary_task
+            summary_task = self.summary_task
+            if not summary_task.done():
+                summary_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await summary_task
             self.summary_task = None
         await self._save_aggregates_async()
 
