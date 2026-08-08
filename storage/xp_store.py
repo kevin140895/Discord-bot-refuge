@@ -419,17 +419,19 @@ class XPStore:
                 if isinstance(payload, dict)
             }
 
-        # ``self.data`` contient les mutations appliquées immédiatement mais pas
-        # forcément encore flushées. Il doit donc gagner face au snapshot disque.
+        # Les mutations immédiates vivent d'abord dans ``self.data`` et ne sont
+        # persistées qu'après un flush différé. Elles doivent donc écraser le
+        # snapshot disque pour éviter un classement temporairement obsolète.
         async with self.lock:
             for uid, payload in self.data.items():
                 all_data[uid] = dict(payload)
 
-        return sorted(
+        sorted_users = sorted(
             all_data.items(),
-            key=lambda item: item[1].get("xp", 0),
+            key=lambda x: int(x[1].get("xp", 0)),
             reverse=True,
         )[:limit]
+        return sorted_users
 
     def read_json(self) -> Dict[str, XPUserData]:
         """Lit le fichier JSON brut des XP."""
