@@ -303,6 +303,82 @@ class XPStore:
         
         return old_level, new_level, old_xp, new_xp
 
+    async def try_spend_xp(
+        self,
+        user_id: int,
+        amount: int,
+        *,
+        guild_id: Optional[int] = None,
+        source: str = "spend",
+    ) -> bool:
+        """Débite ``amount`` XP seulement si le solde est suffisant.
+
+        La vérification du solde et le débit sont effectués sous le même verrou
+        que les autres mises à jour immédiates du store. Deux dépenses
+        concurrentes ne peuvent donc pas consommer le même solde.
+
+        Contrairement à :meth:`add_xp` avec un montant négatif, cette méthode ne
+        rabat jamais silencieusement le solde à zéro : si l'utilisateur ne peut
+        pas payer l'intégralité du montant, aucune XP n'est retirée et ``False``
+        est retourné.
+        """
+        if amount < 0:
+            raise ValueError("amount must be non-negative")
+        if amount == 0:
+            return True
+        if amount > 10000:
+            raise ValueError("amount exceeds maximum XP transaction")
+
+        uid = str(user_id)
+        old_level = 0
+        new_level = 0
+        old_xp = 0
+        new_xp = 0
+
+        async with self.lock:
+            if uid not in self.data:
+                self.stats["cache_misses"] += 1
+                all_data = read_json_safe(self.path)
+                if uid in all_data:
+                    self.data[uid] = all_data[uid]
+                else:
+                    self.data[uid] = {"xp": 0, "level": 0}
+            else:
+                self.stats["cache_hits"] += 1
+
+            user = self.data[uid]
+            old_xp = int(user.get("xp", 0))
+            old_level = int(user.get("level", self._calc_level(old_xp)))
+
+            if old_xp < amount:
+                user["last_accessed"] = datetime.utcnow().isoformat()
+                return False
+
+            new_xp = old_xp - amount
+            new_level = self._calc_level(new_xp)
+            user["xp"] = new_xp
+            user["level"] = new_level
+            user["last_accessed"] = datetime.utcnow().isoformat()
+            self.stats["total_updates"] += 1
+
+        self._schedule_flush()
+
+        if new_level != old_level and guild_id is not None:
+            from utils.level_feed import LevelChange, emit
+            emit(
+                LevelChange(
+                    user_id=user_id,
+                    guild_id=guild_id,
+                    old_level=old_level,
+                    new_level=new_level,
+                    old_xp=old_xp,
+                    new_xp=new_xp,
+                    source=source,
+                )
+            )
+
+        return True
+
     async def get_user_data(self, user_id: int) -> XPUserData:
         """Récupère les données d'un utilisateur."""
         uid = str(user_id)

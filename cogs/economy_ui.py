@@ -284,12 +284,21 @@ class EconomyUICog(commands.Cog):
                 "Solde insuffisant.", ephemeral=True
             )
             return
-        await xp_adapter.add_xp(
-            user_id,
-            amount=-price,
-            guild_id=interaction.guild_id or 0,
-            source="shop",
-        )
+        try:
+            await xp_adapter.add_xp(
+                user_id,
+                amount=-price,
+                guild_id=interaction.guild_id or 0,
+                source="shop",
+            )
+        except xp_adapter.InsufficientXPError:
+            # Le pré-contrôle de solde est uniquement informatif. Le débit
+            # atomique reste la source de vérité si deux achats/paris arrivent
+            # simultanément pour le même utilisateur.
+            await interaction.response.send_message(
+                "Solde insuffisant.", ephemeral=True
+            )
+            return
 
         if item_key == "ticket_royal":
             tickets = load_tickets()
