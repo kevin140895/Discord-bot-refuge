@@ -1,13 +1,14 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Iterable, Set
+from typing import Dict, Iterable, Mapping, Set
 
 from config import DATA_DIR
-from utils.persistence import atomic_write_json, read_json_safe
+from utils.persistence import atomic_write_json, atomic_write_json_async, read_json_safe
 
 DATA_FILE = Path(DATA_DIR) / "temp_vc_ids.json"
 LAST_NAMES_FILE = Path(DATA_DIR) / "temp_vc_last_names.json"
+STREAMER_TEMP_VC_FILE = Path(DATA_DIR) / "streamer_temp_vc.json"
 
 
 def load_temp_vc_ids() -> Set[int]:
@@ -32,6 +33,25 @@ def load_last_names_cache() -> Dict[int, str]:
     if isinstance(data, dict):
         return {int(k): str(v) for k, v in data.items()}
     return {}
+
+
+def load_streamer_temp_vcs() -> Dict[int, int]:
+    """Charge le mapping ``channel_id -> owner_id`` des vocaux streamer."""
+    data = read_json_safe(STREAMER_TEMP_VC_FILE)
+    if not isinstance(data, dict):
+        return {}
+
+    mapping: Dict[int, int] = {}
+    for channel_id, owner_id in data.items():
+        try:
+            mapping[int(channel_id)] = int(owner_id)
+        except (TypeError, ValueError):
+            logging.warning(
+                "[temp_vc_store] Entrée streamer invalide ignorée: %r -> %r",
+                channel_id,
+                owner_id,
+            )
+    return mapping
 
 
 async def save_temp_vc_ids_async(
@@ -74,3 +94,9 @@ async def save_last_names_cache(
             )
             if attempt + 1 < max_retries:
                 await asyncio.sleep(2 ** attempt)
+
+
+async def save_streamer_temp_vcs_async(mapping: Mapping[int, int]) -> None:
+    """Persiste atomiquement les propriétaires des vocaux streamer temporaires."""
+    payload = {str(int(channel_id)): int(owner_id) for channel_id, owner_id in mapping.items()}
+    await atomic_write_json_async(STREAMER_TEMP_VC_FILE, payload)
