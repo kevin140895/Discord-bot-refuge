@@ -41,6 +41,24 @@ def get_ticket_lock() -> asyncio.Lock:
     return lock
 
 
+# Boost inventory is also mutated by both purchases and periodic cleanup.
+# Use a separate loop-aware lock so those read/check/mutate/write cycles cannot
+# overwrite one another without coupling them to unrelated ticket operations.
+_boost_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def get_boost_lock() -> asyncio.Lock:
+    """Return the shared boost transaction lock for the running event loop."""
+    loop = asyncio.get_running_loop()
+    lock = _boost_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _boost_locks[loop] = lock
+    return lock
+
+
 def load_boosts() -> Dict[str, Any]:
     """Load boosts from disk or return an empty dict."""
     return load_json(BOOSTS_FILE, {})
