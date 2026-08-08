@@ -7,7 +7,7 @@ import typing
 import discord
 from discord.ext import commands, tasks
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from storage.economy import (
     ECONOMY_DIR,
@@ -37,6 +37,30 @@ PURCHASE_LIMITS: dict[str, int] = {
     "ticket_royal": 3,
     "double_xp_1h": 2,
 }
+
+
+def _activate_personal_double_xp(user_id: int, duration_minutes: int) -> datetime:
+    """Active ou prolonge le vrai bonus Double XP utilisé par ``award_xp``.
+
+    Le module XP est résolu au moment de l'achat, et non lors du chargement de
+    ``economy_ui``. Cela évite de conserver une référence vers une ancienne
+    instance du module si Discord charge ensuite ``cogs.xp`` comme extension.
+
+    ``cogs.xp.add_xp_boost`` remplace normalement l'expiration existante. Pour
+    les achats boutique, on conserve le temps restant puis on ajoute la nouvelle
+    durée afin que deux achats d'une heure donnent bien deux heures de bonus au
+    total au lieu de faire payer deux fois pour une seule heure.
+    """
+    from cogs import xp as xp_cog
+
+    now = datetime.now(timezone.utc)
+    current_expiry = xp_cog.XP_BOOSTS.get(str(user_id))
+    remaining_minutes = 0.0
+    if current_expiry and current_expiry > now:
+        remaining_minutes = (current_expiry - now).total_seconds() / 60.0
+
+    xp_cog.add_xp_boost(user_id, duration_minutes + remaining_minutes)
+    return xp_cog.XP_BOOSTS[str(user_id)]
 
 
 def _load_shop() -> typing.Optional[dict[str, typing.Any]]:
@@ -309,8 +333,8 @@ class EconomyUICog(commands.Cog):
             boosts = load_boosts()
             key = str(user_id)
             boost_list = boosts.setdefault(key, [])
-            until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            boost_list.append({"type": "double_xp", "until": until})
+            expiry = _activate_personal_double_xp(user_id, 60)
+            boost_list.append({"type": "double_xp", "until": expiry.isoformat()})
             await save_boosts(boosts)
 
         await transactions.add(
@@ -377,4 +401,3 @@ class EconomyUICog(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - requires discord
     await bot.add_cog(EconomyUICog(bot))
-
