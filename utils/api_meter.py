@@ -210,6 +210,21 @@ class APIMeter:
             ss["dur_ms"] += ev["duration_ms"]
         return route_stats, source_stats
 
+    def get_window_totals(self, window_min: int = 10) -> Dict[str, float | int]:
+        """Return totals for every route observed inside the time window."""
+        route_stats, _ = self._calc_stats(window_min)
+        calls = sum(stats["calls"] for stats in route_stats.values())
+        errors = sum(stats["errors"] for stats in route_stats.values())
+        too_many = sum(stats["429"] for stats in route_stats.values())
+        duration_ms = sum(stats["dur_ms"] for stats in route_stats.values())
+        avg_ms = duration_ms / calls if calls else 0.0
+        return {
+            "calls": int(calls),
+            "errors": int(errors),
+            "429": int(too_many),
+            "avg_ms": avg_ms,
+        }
+
     def get_top_routes(self, window_min: int = 10, top: int = 10) -> List[Dict[str, Any]]:
         route_stats, _ = self._calc_stats(window_min)
         out: List[Dict[str, Any]] = []
@@ -261,13 +276,11 @@ class APIMeter:
             if self.current_month and month != self.current_month:
                 await self._save_aggregates_async()
                 self._load_aggregates(now)
-            routes = self.get_top_routes(10, 5)
-            total = sum(r["calls"] for r in routes)
-            errors = sum(r["errors"] for r in routes)
-            too_many = sum(r["429"] for r in routes)
-            avg = (
-                sum(r["avg_ms"] * r["calls"] for r in routes) / total if total else 0.0
-            )
+            totals = self.get_window_totals(10)
+            total = int(totals["calls"])
+            errors = int(totals["errors"])
+            too_many = int(totals["429"])
+            avg = float(totals["avg_ms"])
             usage_pct = (total / config.API_BUDGET_PER_10MIN) * 100 if config.API_BUDGET_PER_10MIN else 0
             self.logger.info(
                 "api_summary window=10min calls=%d errors=%d 429=%d avg_ms=%.1f usage=%.1f%%",
