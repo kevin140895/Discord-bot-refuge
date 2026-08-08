@@ -5,6 +5,10 @@ from storage.xp_store import xp_store
 from utils.persistence import read_json_safe
 
 
+class InsufficientXPError(ValueError):
+    """Raised when an atomic XP debit cannot be fully funded."""
+
+
 def get_balance(user_id: int) -> int:
     """Return current XP balance for ``user_id``.
 
@@ -31,5 +35,27 @@ def get_balance(user_id: int) -> int:
 
 
 async def add_xp(user_id: int, amount: int, guild_id: int, source: str) -> None:
-    """Add (or remove) XP for ``user_id`` with event metadata."""
+    """Add or spend XP for ``user_id`` with event metadata.
+
+    Positive amounts keep the historical :meth:`XPStore.add_xp` behaviour.
+    Negative amounts are treated as purchases/spends and therefore use the
+    atomic :meth:`XPStore.try_spend_xp` operation: an insufficient balance
+    raises :class:`InsufficientXPError` instead of silently clamping to zero.
+    """
+    if amount < 0:
+        spent = await xp_store.try_spend_xp(
+            user_id,
+            -amount,
+            guild_id=guild_id,
+            source=source,
+        )
+        if not spent:
+            raise InsufficientXPError(
+                f"user {user_id} cannot spend {-amount} XP"
+            )
+        return
+
     await xp_store.add_xp(user_id, amount, guild_id=guild_id, source=source)
+
+
+__all__ = ["InsufficientXPError", "get_balance", "add_xp"]
