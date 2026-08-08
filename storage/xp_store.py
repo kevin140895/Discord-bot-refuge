@@ -70,7 +70,9 @@ class XPStore:
         ensure_dir(DATA_DIR)
         self.data = read_json_safe(self.path)
         
-        # Nettoyer le cache au démarrage
+        # ``self.data`` est la source de vérité persistée, pas un cache jetable.
+        # La maintenance peut donc observer sa taille mais ne doit jamais évincer
+        # des utilisateurs tant qu'un cache séparé n'existe pas.
         await self._cleanup_cache()
         
         self._periodic_task = asyncio.create_task(self._periodic_maintenance())
@@ -94,41 +96,26 @@ class XPStore:
         logger.info("XP Store fermé (stats: %s)", self.stats)
 
     async def _cleanup_cache(self) -> None:
-        """Supprime les entrées les moins récemment utilisées."""
+        """Préserve toutes les entrées XP tant que ``data`` est la source de vérité.
+
+        Historiquement, cette méthode supprimait les utilisateurs les moins
+        récemment consultés lorsque ``len(self.data)`` dépassait ``cache_size``.
+        Or :meth:`flush` persiste directement ``self.data``. L'éviction d'une
+        entrée revenait donc à supprimer définitivement cet utilisateur du
+        fichier XP au prochain flush.
+
+        ``cache_size`` reste conservé comme paramètre de compatibilité et pourra
+        être réutilisé lorsqu'un véritable cache, distinct des données complètes,
+        sera introduit. En attendant, cette opération est volontairement un
+        no-op afin de garantir l'intégrité des données.
+        """
         async with self.lock:
-            if len(self.data) <= self.cache_size:
-                return
-            
-            # Trier par dernière utilisation
-            items = [
-                (uid, data) 
-                for uid, data in self.data.items()
-            ]
-            
-            # Parser les dates d'accès
-            def get_last_accessed(item):
-                _, data = item
-                last = data.get("last_accessed")
-                if not last:
-                    return datetime.min
-                try:
-                    return datetime.fromisoformat(last)
-                except:
-                    return datetime.min
-            
-            items.sort(key=get_last_accessed)
-            
-            # Garder seulement les N plus récents
-            to_remove = len(items) - self.cache_size
-            if to_remove > 0:
-                removed_users = [uid for uid, _ in items[:to_remove]]
-                
-                # Supprimer du cache sans déclencher de sauvegarde immédiate
-                for uid in removed_users:
-                    del self.data[uid]
-                    
-                logger.info("Cache nettoyé: %d entrées supprimées", to_remove)
-                self.stats["cache_misses"] += to_remove
+            if len(self.data) > self.cache_size:
+                logger.debug(
+                    "XP cache limit exceeded (%d > %d); preserving all users because self.data is persistent state",
+                    len(self.data),
+                    self.cache_size,
+                )
 
     async def _periodic_maintenance(self) -> None:
         """Maintenance périodique: flush batch et nettoyage cache."""
@@ -139,7 +126,7 @@ class XPStore:
                 # Traiter les mises à jour en lot
                 await self._process_batch_updates()
                 
-                # Nettoyer le cache toutes les 10 minutes
+                # Vérifier périodiquement la taille sans évincer de données.
                 now = datetime.utcnow()
                 if (now - self._last_cleanup).seconds > 600:
                     await self._cleanup_cache()
@@ -338,7 +325,8 @@ class XPStore:
             self.data[uid] = user_data
             user_data["last_accessed"] = datetime.utcnow().isoformat()
             
-            # Vérifier la taille du cache
+            # Vérifier la taille du cache. La méthode ne supprime aucune donnée
+            # tant que ``self.data`` reste la source de vérité persistée.
             if len(self.data) > self.cache_size * 1.2:  # 20% de marge
                 asyncio.create_task(self._cleanup_cache())
         
