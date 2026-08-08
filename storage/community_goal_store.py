@@ -147,23 +147,6 @@ class CommunityGoalStore:
             await atomic_write_json_async(self.path, self._data)
             return deepcopy(payload)
 
-    async def cancel_active_metric(
-        self,
-        metric_key: str,
-        *,
-        at: datetime | None = None,
-    ) -> dict[str, Any] | None:
-        active = await self.list_goals(status=ACTIVE_STATUS)
-        for goal in active:
-            if goal.get("metric_key") == metric_key:
-                return await self.finish_goal(
-                    str(goal["id"]),
-                    status="cancelled",
-                    final_progress=int(goal.get("final_progress") or 0),
-                    at=at,
-                )
-        return None
-
 
 community_goal_store = CommunityGoalStore()
 
