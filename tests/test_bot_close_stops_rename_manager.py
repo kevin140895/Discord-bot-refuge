@@ -13,9 +13,15 @@ import bot
 
 
 @pytest.mark.asyncio
-async def test_bot_close_stops_rename_manager(monkeypatch):
+async def test_bot_close_stops_background_helpers(monkeypatch):
     intents = discord.Intents.none()
     test_bot = bot.RefugeBot(command_prefix="!", intents=intents)
+
+    limiter_aclose_mock = AsyncMock()
+    monkeypatch.setattr(bot.limiter, "aclose", limiter_aclose_mock)
+
+    meter_aclose_mock = AsyncMock()
+    monkeypatch.setattr(bot.api_meter, "aclose", meter_aclose_mock)
 
     rm_aclose_mock = AsyncMock()
     monkeypatch.setattr(bot.rename_manager, "aclose", rm_aclose_mock)
@@ -33,6 +39,8 @@ async def test_bot_close_stops_rename_manager(monkeypatch):
 
     await test_bot.close()
 
+    limiter_aclose_mock.assert_awaited_once()
+    meter_aclose_mock.assert_awaited_once()
     rm_aclose_mock.assert_awaited_once()
     cem_aclose_mock.assert_awaited_once()
     store_aclose_mock.assert_awaited_once()
