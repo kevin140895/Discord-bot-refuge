@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import weakref
 from pathlib import Path
 from typing import Any, Dict
 
@@ -19,6 +21,24 @@ UI_FILE = ECONOMY_DIR / "ui.json"
 
 # Append-only transaction ledger
 transactions = TransactionStore(TRANSACTIONS_FILE)
+
+
+# Ticket stock uses read/check/mutate/write transactions from multiple modules.
+# Keep one shared lock per live event loop so purchases and consumptions cannot
+# overwrite each other while tests that create separate loops stay isolated.
+_ticket_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def get_ticket_lock() -> asyncio.Lock:
+    """Return the shared ticket transaction lock for the running event loop."""
+    loop = asyncio.get_running_loop()
+    lock = _ticket_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _ticket_locks[loop] = lock
+    return lock
 
 
 def load_boosts() -> Dict[str, Any]:
