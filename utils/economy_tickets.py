@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import weakref
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Dict
 
@@ -9,34 +11,53 @@ from utils.storage import load_json
 from utils.persistence import atomic_write_json_async
 
 
+# ``asyncio.Lock`` instances are bound to the event loop that contends on
+# them. Keep one lock per live loop so production has a single transaction
+# boundary while tests that use separate event loops remain isolated.
+_ticket_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _get_ticket_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _ticket_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _ticket_locks[loop] = lock
+    return lock
+
+
 async def consume_free_ticket(user_id: int) -> bool:
     """Consume one free ticket for ``user_id`` if available.
 
-    Returns ``True`` if a ticket was consumed.
-    Updates ``data/economy/tickets.json`` and logs the usage in
-    ``transactions.json``.
+    The read/check/decrement/write sequence is serialized so two concurrent
+    consumers cannot both spend the same ticket. Returns ``True`` only when a
+    ticket was actually consumed, then records that successful usage in the
+    transaction ledger.
     """
-    tickets: Dict[str, int] = load_json(TICKETS_FILE, {})
-    key = str(user_id)
-    count = int(tickets.get(key, 0))
-    if count <= 0:
-        return False
+    async with _get_ticket_lock():
+        tickets: Dict[str, int] = load_json(TICKETS_FILE, {})
+        key = str(user_id)
+        count = int(tickets.get(key, 0))
+        if count <= 0:
+            return False
 
-    count -= 1
-    if count:
-        tickets[key] = count
-    else:
-        tickets.pop(key, None)
-    await atomic_write_json_async(TICKETS_FILE, tickets)
+        count -= 1
+        if count:
+            tickets[key] = count
+        else:
+            tickets.pop(key, None)
+        await atomic_write_json_async(TICKETS_FILE, tickets)
 
-    await transactions.add(
-        {
-            "type": "ticket_usage",
-            "user_id": user_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-    )
-    return True
+        await transactions.add(
+            {
+                "type": "ticket_usage",
+                "user_id": user_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return True
 
 
 async def consume_any_ticket(
