@@ -146,6 +146,28 @@ def test_profile_view_rejects_unknown_page() -> None:
 
 
 @pytest.mark.asyncio
+async def test_navigation_button_edits_the_same_message() -> None:
+    class FakeResponse:
+        def __init__(self) -> None:
+            self.edited_view = None
+
+        async def edit_message(self, *, view) -> None:
+            self.edited_view = view
+
+    view = ProfileView(_snapshot(), display_name="Kevin", owner_user_id=99)
+    row = view.children[0].children[-1]
+    achievements_button = row.children[0]
+    response = FakeResponse()
+    interaction = SimpleNamespace(response=response)
+
+    await achievements_button.callback(interaction)
+
+    assert view.current_page == "achievements"
+    assert response.edited_view is view
+    assert "SUCCÈS" in _container_text(view)
+
+
+@pytest.mark.asyncio
 async def test_profile_navigation_is_restricted_to_command_author() -> None:
     class FakeResponse:
         def __init__(self) -> None:
