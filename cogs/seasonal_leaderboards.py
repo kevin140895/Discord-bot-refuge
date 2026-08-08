@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from config import DATA_DIR
 from storage.season_store import season_store
+from utils.persistence import read_json_safe
 from utils.seasons import (
     SEASON_METRICS,
     SEASON_METRICS_BY_KEY,
@@ -20,6 +24,22 @@ from utils.seasons import (
 )
 
 
+CASINO_STATE_FILE = Path(DATA_DIR) / "pari_xp_state.json"
+
+
+def _casino_players_from_raw(raw: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+    players = raw.get("players", {})
+    if not isinstance(players, dict):
+        return {}
+    return {
+        str(user_id): dict(payload)
+        for user_id, payload in players.items()
+        if isinstance(payload, dict)
+    }
+
+
 class SeasonalLeaderboardsCog(commands.Cog):
     """Monthly activity leaderboards that never reset global bot data."""
 
@@ -27,8 +47,16 @@ class SeasonalLeaderboardsCog(commands.Cog):
         self.bot = bot
         self._voice_sessions: dict[int, datetime] = {}
 
+    async def _sync_casino(self) -> None:
+        raw = await asyncio.to_thread(read_json_safe, CASINO_STATE_FILE, {})
+        await season_store.sync_casino_totals(_casino_players_from_raw(raw))
+
     async def cog_load(self) -> None:
         await season_store.ensure_tracking_started()
+        # First observation is baseline-only: no pre-feature casino history is
+        # injected into the current season.
+        await self._sync_casino()
+        await season_store.flush()
         self.flush_season_stats.start()
 
     def cog_unload(self) -> None:
@@ -93,6 +121,7 @@ class SeasonalLeaderboardsCog(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def flush_season_stats(self) -> None:
+        await self._sync_casino()
         await season_store.flush()
 
     @flush_season_stats.before_loop
@@ -155,8 +184,8 @@ class SeasonalLeaderboardsCog(commands.Cog):
             users = {}
         rows = rank_rows(users, metric.field)
 
-        lines: list[str] = []
-        for rank, (user_id, value) in enumerate(rows[:10], start=1):
+        visible_rows: list[tuple[str, int, str]] = []
+        for user_id, value in rows:
             display = f"<@{user_id}>"
             if interaction.guild is not None:
                 try:
@@ -167,6 +196,12 @@ class SeasonalLeaderboardsCog(commands.Cog):
                     if member.bot:
                         continue
                     display = member.display_name
+            visible_rows.append((user_id, value, display))
+            if len(visible_rows) >= 10:
+                break
+
+        lines: list[str] = []
+        for rank, (_user_id, value, display) in enumerate(visible_rows, start=1):
             medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"**#{rank}**")
             lines.append(
                 f"{medal} {display} — **{format_metric_value(metric.key, value)}**"
