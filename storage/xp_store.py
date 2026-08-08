@@ -380,7 +380,7 @@ class XPStore:
         return True
 
     async def get_user_data(self, user_id: int) -> XPUserData:
-        """Récupère les données d'un utilisateur."""
+        """Récupère une copie des données d'un utilisateur."""
         uid = str(user_id)
         
         async with self.lock:
@@ -388,7 +388,7 @@ class XPStore:
                 self.stats["cache_hits"] += 1
                 user = self.data[uid]
                 user["last_accessed"] = datetime.utcnow().isoformat()
-                return user
+                return dict(user)
             
             self.stats["cache_misses"] += 1
             
@@ -406,7 +406,7 @@ class XPStore:
             if len(self.data) > self.cache_size * 1.2:  # 20% de marge
                 asyncio.create_task(self._cleanup_cache())
         
-        return user_data
+        return dict(user_data)
 
     async def get_top_users(self, limit: int = 10) -> List[Tuple[str, XPUserData]]:
         """Récupère le top des utilisateurs depuis l'état XP le plus récent."""
@@ -419,19 +419,17 @@ class XPStore:
                 if isinstance(payload, dict)
             }
 
-        # Les mutations immédiates vivent d'abord dans ``self.data`` et ne sont
-        # persistées qu'après un flush différé. Elles doivent donc écraser le
-        # snapshot disque pour éviter un classement temporairement obsolète.
+        # ``self.data`` contient les mutations appliquées immédiatement mais pas
+        # forcément encore flushées. Il doit donc gagner face au snapshot disque.
         async with self.lock:
             for uid, payload in self.data.items():
                 all_data[uid] = dict(payload)
 
-        sorted_users = sorted(
+        return sorted(
             all_data.items(),
-            key=lambda x: int(x[1].get("xp", 0)),
+            key=lambda item: item[1].get("xp", 0),
             reverse=True,
         )[:limit]
-        return sorted_users
 
     def read_json(self) -> Dict[str, XPUserData]:
         """Lit le fichier JSON brut des XP."""
