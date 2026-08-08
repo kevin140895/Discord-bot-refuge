@@ -1,4 +1,5 @@
 import asyncio  # required for asynchronous rate limiting
+import contextlib
 import logging
 import os
 import time
@@ -83,9 +84,20 @@ class GlobalRateLimiter:
             self.logger.debug("Rate limiter waited %.3fs for bucket %s", elapsed, bucket)
 
     def start(self) -> None:
-        if self.strict and self._task is None:
+        if self.strict and (self._task is None or self._task.done()):
             loop = asyncio.get_running_loop()
             self._task = loop.create_task(self._log_loop())
+
+    async def aclose(self) -> None:
+        """Stop the background logging task, if one is running."""
+        task = self._task
+        self._task = None
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     async def _log_loop(self) -> None:
         while True:
