@@ -136,6 +136,7 @@ class PariXPCog(commands.Cog):
         self.state.setdefault("is_open", False)
         self.state.setdefault("total_bets", 0)
         self.state.setdefault("total_winnings", 0)
+        self.state.setdefault("players", {})
         self.is_open: bool = bool(self.state.get("is_open"))
         self._message_id: Optional[int] = self.state.get("message_id")
         self._last_announced_state: Optional[bool] = None
@@ -253,6 +254,22 @@ class PariXPCog(commands.Cog):
             self.state["message_id"] = sent.id
             await self._save_state()
 
+    def _record_player_result(self, user_id: int, bet_amount: int, payout: int) -> None:
+        players = self.state.setdefault("players", {})
+        if not isinstance(players, dict):
+            players = {}
+            self.state["players"] = players
+
+        user_key = str(user_id)
+        stats = players.get(user_key)
+        if not isinstance(stats, dict):
+            stats = {}
+            players[user_key] = stats
+
+        stats["bets"] = int(stats.get("bets", 0)) + 1
+        stats["wagered"] = int(stats.get("wagered", 0)) + bet_amount
+        stats["winnings"] = int(stats.get("winnings", 0)) + payout
+
     # ── Betting logic ──
     async def _handle_bet(
         self,
@@ -307,11 +324,13 @@ class PariXPCog(commands.Cog):
             else:
                 win = roll < 0.03 + 0.45
                 multiplier = 2
+
+            payout = amount * multiplier if win else 0
             if win:
                 try:
                     await award_xp(
                         interaction.user.id,
-                        amount * multiplier,
+                        payout,
                         guild_id=interaction.guild_id,
                         source="pari_xp",
                     )
@@ -319,11 +338,11 @@ class PariXPCog(commands.Cog):
                     logger.exception("[PariXP] credit failed: %s", e)
                     await safe_respond(interaction, "❌ Erreur interne.", ephemeral=True)
                     return
-                msg = f"🎉 Gagné ! Tu remportes {amount * multiplier} XP."
-                self.state["total_winnings"] = self.state.get("total_winnings", 0) + amount * multiplier
+                msg = f"🎉 Gagné ! Tu remportes {payout} XP."
+                self.state["total_winnings"] = self.state.get("total_winnings", 0) + payout
                 self.state["last_winner"] = {
                     "user_id": interaction.user.id,
-                    "amount": amount * multiplier,
+                    "amount": payout,
                     "timestamp": datetime.now(self.tz).isoformat(),
                 }
                 if PARI_XP_ROLE_ID and interaction.guild:
@@ -341,6 +360,7 @@ class PariXPCog(commands.Cog):
             else:
                 outcome_line = "🎯 Pas de zéro vert cette fois."
             self.state["total_bets"] = self.state.get("total_bets", 0) + amount
+            self._record_player_result(interaction.user.id, amount, payout)
             await self._save_state()
             result_embed = discord.Embed(
                 title="🎰 Résultat",
@@ -355,40 +375,77 @@ class PariXPCog(commands.Cog):
 
     @app_commands.command(
         name="top_casino",
-        description="Afficher le top 10 des joueurs XP du casino",
+        description="Afficher le top 10 des performances au casino",
     )
     async def top_casino(self, interaction: discord.Interaction) -> None:
-        data = xp_store.read_json()
-        if not data:
+        players = self.state.get("players", {})
+        if not isinstance(players, dict):
+            players = {}
+
+        leaderboard = []
+        for user_id, payload in players.items():
+            if not isinstance(payload, dict):
+                continue
+            try:
+                bets = int(payload.get("bets", 0))
+                wagered = int(payload.get("wagered", 0))
+                winnings = int(payload.get("winnings", 0))
+            except (TypeError, ValueError):
+                continue
+            if bets <= 0:
+                continue
+            net = winnings - wagered
+            leaderboard.append((str(user_id), net, winnings, wagered, bets))
+
+        if not leaderboard:
             embed = discord.Embed(
                 title="🏆 Top Casino",
-                description="Aucune donnée XP disponible pour le moment.",
+                description="Aucune activité casino enregistrée pour le moment.",
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        leaderboard = sorted(
-            data.items(),
-            key=lambda item: item[1].get("xp", 0) if isinstance(item[1], dict) else item[1],
+
+        leaderboard.sort(
+            key=lambda item: (item[1], item[2], -item[3]),
             reverse=True,
-        )[:10]
+        )
         lines = []
-        for idx, (user_id, payload) in enumerate(leaderboard, start=1):
-            xp_amount = payload.get("xp", 0) if isinstance(payload, dict) else payload
+        for idx, (user_id, net, winnings, wagered, bets) in enumerate(
+            leaderboard[:10],
+            start=1,
+        ):
             member = None
-            if interaction.guild:
-                member = interaction.guild.get_member(int(user_id))
+            numeric_user_id: Optional[int] = None
+            try:
+                numeric_user_id = int(user_id)
+            except (TypeError, ValueError):
+                pass
+
+            if interaction.guild and numeric_user_id is not None:
+                member = interaction.guild.get_member(numeric_user_id)
             if member:
                 display_name = member.display_name
-            else:
+            elif numeric_user_id is not None:
                 try:
-                    user = await self.bot.fetch_user(int(user_id))
+                    user = await self.bot.fetch_user(numeric_user_id)
                     display_name = user.display_name
                 except discord.HTTPException:
                     display_name = f"Utilisateur {user_id}"
-            lines.append(f"**#{idx}** {display_name} — {xp_amount} XP")
+            else:
+                display_name = f"Utilisateur {user_id}"
+
+            bet_label = "pari" if bets == 1 else "paris"
+            lines.append(
+                f"**#{idx}** {display_name} — **{net:+d} XP net** · "
+                f"{bets} {bet_label} · {wagered} misés · {winnings} gagnés"
+            )
+
         embed = discord.Embed(
             title="🏆 Top Casino",
-            description="\n".join(lines),
+            description=(
+                "Classement par résultat net (gains - mises).\n\n"
+                + "\n".join(lines)
+            ),
         )
         await interaction.response.send_message(embed=embed)
 
