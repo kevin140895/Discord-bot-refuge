@@ -38,6 +38,11 @@ def _resolve_data_dir() -> str:
 # ── Informations globales ──────────────────────────────────────
 GUILD_ID: int = int(os.getenv("GUILD_ID", "0"))
 
+# Fonctionnalités conservées dans le dépôt mais retirées du serveur actuel.
+# Le chargeur automatique ignore ces cogs afin qu'ils ne démarrent aucune
+# tâche de fond ni appel API tant qu'ils ne sont pas explicitement réactivés.
+DISABLED_COGS: frozenset[str] = frozenset({"f1_standings", "nhl_notifications"})
+
 TZ: str = os.getenv("TZ", "Europe/Paris")
 os.environ["TZ"] = TZ
 try:
@@ -56,6 +61,13 @@ CASINO_SCHEDULE_LABEL = f"{CASINO_OPEN_HOUR:02d}h00 - {CASINO_CLOSE_HOUR:02d}h00
 STATS_MEMBERS_CHANNEL_ID = 1406435185813098537
 STATS_ONLINE_CHANNEL_ID = 1413712632711745648
 STATS_VOICE_CHANNEL_ID = 1406435190607184085
+
+
+# ── Salons de fonctionnalités ─────────────────────────────────
+ECONOMY_CHANNEL_ID: int = _get_int_env(
+    "ECONOMY_CHANNEL_ID", 1409633293791400108
+)
+F1_CHANNEL_ID: int = _get_int_env("F1_CHANNEL_ID", 0)
 
 
 # ── Rôles plateformes et notifications ────────────────────────

@@ -17,13 +17,12 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from config import DATA_DIR
+from config import DATA_DIR, F1_CHANNEL_ID
 from utils.persistence import read_json_safe, atomic_write_json, ensure_dir
 
 logger = logging.getLogger(__name__)
 
 # Constants
-F1_CHANNEL_ID: int = 1413708410330939485
 OPENF1_API = "https://api.openf1.org/v1"
 F1_DATA_DIR = os.path.join(DATA_DIR, "f1")
 F1_STATE_FILE = os.path.join(F1_DATA_DIR, "f1_state.json")

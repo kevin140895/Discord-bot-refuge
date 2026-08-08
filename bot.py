@@ -15,7 +15,7 @@ from typing import Final
 import discord
 from discord.ext import commands
 
-from config import GUILD_ID, LEVEL_FEED_CHANNEL_ID
+from config import DISABLED_COGS, GUILD_ID, LEVEL_FEED_CHANNEL_ID
 import cogs
 
 from storage.xp_store import xp_store
@@ -55,12 +55,16 @@ class RefugeBot(commands.Bot):
         await reset_http_error_counter()
         level_feed.setup(self)
 
-        # Load all cogs from the ``cogs`` package so every slash command is
-        # registered when the bot starts. ``load_extension`` is patched to an
-        # ``AsyncMock`` in the tests, so awaiting is safe.
+        # Load active cogs from the ``cogs`` package so every enabled slash
+        # command is registered when the bot starts. Retired/disabled modules
+        # stay in the repository for reference but must not start background
+        # tasks or register commands.
         discovered = list(pkgutil.iter_modules(cogs.__path__))
         loaded_names = set()
         for module in discovered:
+            if module.name in DISABLED_COGS:
+                logger.info("Skipping disabled cog: %s", module.name)
+                continue
             await self.load_extension(f"{cogs.__name__}.{module.name}")
             loaded_names.add(module.name)
 

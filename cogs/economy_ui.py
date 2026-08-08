@@ -24,7 +24,7 @@ from storage.economy import (
 from utils import xp_adapter
 import config
 
-CHANNEL_ID = 1409633293791400108
+CHANNEL_ID = config.ECONOMY_CHANNEL_ID
 
 logger = logging.getLogger(__name__)
 
