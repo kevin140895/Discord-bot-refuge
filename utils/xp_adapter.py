@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from storage.xp_store import xp_store
 from utils.persistence import read_json_safe
+from utils.refuge_casino_observer import observe_casino_xp_transaction
 
 
 class InsufficientXPError(ValueError):
@@ -56,9 +57,27 @@ async def add_xp(user_id: int, amount: int, guild_id: int, source: str) -> None:
             raise InsufficientXPError(
                 f"user {user_id} cannot spend {-amount} XP"
             )
+        observe_casino_xp_transaction(
+            user_id=user_id,
+            source=source,
+            requested_amount=amount,
+            applied_delta=amount,
+        )
         return
 
-    await xp_store.add_xp(user_id, amount, guild_id=guild_id, source=source)
+    result = await xp_store.add_xp(
+        user_id,
+        amount,
+        guild_id=guild_id,
+        source=source,
+    )
+    _old_level, _new_level, old_xp, new_xp = result
+    observe_casino_xp_transaction(
+        user_id=user_id,
+        source=source,
+        requested_amount=amount,
+        applied_delta=new_xp - old_xp,
+    )
 
 
 __all__ = ["InsufficientXPError", "get_balance", "add_xp"]
