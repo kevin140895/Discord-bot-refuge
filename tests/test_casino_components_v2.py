@@ -1,9 +1,13 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import discord
+import pytest
 
 import cogs.pari_xp as pari_xp
+import cogs.machine_a_sous.machine_a_sous as machine_a_sous
 from cogs.machine_a_sous.machine_a_sous import (
+    MachineASousCog,
     MachineASousView,
     _is_machine_poster_message,
     _poster_has_play_button,
@@ -84,3 +88,54 @@ def test_slot_poster_detection_distinguishes_legacy_and_components_v2() -> None:
     assert _is_machine_poster_message(legacy_message)
     assert not _poster_is_components_v2(legacy_message)
     assert not _poster_has_play_button(legacy_message)
+
+
+@pytest.mark.asyncio
+async def test_discovered_legacy_slot_poster_is_registered_before_replacement(
+    monkeypatch,
+) -> None:
+    class FakeTextChannel:
+        id = machine_a_sous.CHANNEL_ID
+
+        async def history(self, *, limit: int):
+            assert limit == 20
+            yield legacy_message
+
+    class FakeThread:
+        pass
+
+    channel = FakeTextChannel()
+    legacy_message = SimpleNamespace(
+        id=321,
+        author=SimpleNamespace(id=999),
+        channel=channel,
+        embeds=[SimpleNamespace(title="🎰 Machine à sous")],
+        components=[],
+    )
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=999),
+        get_channel=lambda channel_id: channel,
+    )
+    store = SimpleNamespace(
+        get_poster=Mock(return_value=None),
+        set_poster=Mock(),
+    )
+    cog = object.__new__(MachineASousCog)
+    cog.bot = bot
+    cog.store = store
+    cog.current_view_enabled = True
+
+    async def replace_after_registration() -> None:
+        store.set_poster.assert_called_once_with(
+            channel_id=str(channel.id),
+            message_id=str(legacy_message.id),
+        )
+
+    cog._replace_poster_message = AsyncMock(side_effect=replace_after_registration)
+
+    monkeypatch.setattr(machine_a_sous.discord, "TextChannel", FakeTextChannel)
+    monkeypatch.setattr(machine_a_sous.discord, "Thread", FakeThread)
+
+    await MachineASousCog._ensure_poster_message(cog)
+
+    cog._replace_poster_message.assert_awaited_once()
