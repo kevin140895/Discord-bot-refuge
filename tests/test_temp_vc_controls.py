@@ -19,10 +19,18 @@ class DummyOverwrite:
 
 
 class DummyVoiceChannel:
-    def __init__(self, channel_id: int, *, name: str = "PC • Fortnite", members=None):
+    def __init__(
+        self,
+        channel_id: int,
+        *,
+        name: str = "PC • Fortnite",
+        members=None,
+        category_id: int = 500,
+    ):
         self.id = channel_id
         self.name = name
         self.members = list(members or [])
+        self.category_id = category_id
         self.user_limit = 0
         self.set_permissions = AsyncMock()
         self.edit = AsyncMock()
@@ -65,8 +73,8 @@ def discord_types(monkeypatch):
 async def test_standard_lobby_move_records_owner_without_touching_name(
     monkeypatch, discord_types
 ):
-    monkeypatch.setattr(controls, "TEMP_VC_IDS", {99})
     monkeypatch.setattr(controls, "LOBBY_VC_ID", 10)
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {})
     save = AsyncMock()
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", save)
@@ -90,8 +98,8 @@ async def test_standard_lobby_move_records_owner_without_touching_name(
 async def test_non_lobby_join_does_not_claim_unowned_channel(
     monkeypatch, discord_types
 ):
-    monkeypatch.setattr(controls, "TEMP_VC_IDS", {99})
     monkeypatch.setattr(controls, "LOBBY_VC_ID", 10)
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {})
     save = AsyncMock()
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", save)
@@ -114,7 +122,7 @@ async def test_non_lobby_join_does_not_claim_unowned_channel(
 async def test_lock_changes_permissions_not_dynamic_name(
     monkeypatch, discord_types
 ):
-    monkeypatch.setattr(controls, "TEMP_VC_IDS", {99})
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {99: 7})
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", AsyncMock())
 
@@ -142,7 +150,7 @@ async def test_lock_changes_permissions_not_dynamic_name(
 async def test_limit_updates_only_user_limit(
     monkeypatch, discord_types
 ):
-    monkeypatch.setattr(controls, "TEMP_VC_IDS", {99})
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {99: 7})
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", AsyncMock())
 
@@ -167,7 +175,7 @@ async def test_limit_updates_only_user_limit(
 async def test_claim_rejected_while_owner_is_present(
     monkeypatch, discord_types
 ):
-    monkeypatch.setattr(controls, "TEMP_VC_IDS", {99})
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {99: 7})
     save = AsyncMock()
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", save)
@@ -194,7 +202,7 @@ async def test_claim_rejected_while_owner_is_present(
 async def test_claim_succeeds_after_owner_leaves(
     monkeypatch, discord_types
 ):
-    monkeypatch.setattr(controls, "TEMP_VC_IDS", {99})
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {99: 7})
     save = AsyncMock()
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", save)
@@ -219,7 +227,7 @@ async def test_claim_succeeds_after_owner_leaves(
 async def test_transfer_requires_target_in_same_channel(
     monkeypatch, discord_types
 ):
-    monkeypatch.setattr(controls, "TEMP_VC_IDS", {99})
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {99: 7})
     save = AsyncMock()
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", save)
@@ -245,6 +253,7 @@ async def test_transfer_requires_target_in_same_channel(
 async def test_deleted_channel_cleans_owner_mapping(
     monkeypatch, discord_types
 ):
+    monkeypatch.setattr(controls, "TEMP_VC_CATEGORY", 500)
     monkeypatch.setattr(controls, "load_temp_vc_owners", lambda: {99: 7})
     save = AsyncMock()
     monkeypatch.setattr(controls, "save_temp_vc_owners_async", save)
