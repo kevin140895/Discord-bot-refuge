@@ -151,13 +151,8 @@ async def test_uncertain_message_lookup_never_creates_replacement_panel():
 
 
 def _http_exception(exc_type, *, status: int):
-    error = object.__new__(exc_type)
-    Exception.__init__(error, "temporary Discord failure")
-    error.status = status
-    error.reason = "temporary"
-    error.code = 0
-    error.text = "temporary"
-    return error
+    response = SimpleNamespace(status=status, reason="temporary")
+    return exc_type(response, "temporary Discord failure")
 
 
 class _PanelStateStore:
