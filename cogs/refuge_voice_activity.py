@@ -29,9 +29,10 @@ class RefugeVoiceActivityCog(commands.Cog):
     def cog_unload(self) -> None:
         self.checkpoint_community_voice.cancel()
         try:
-            asyncio.create_task(self.tracker.checkpoint())
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass
+            return
+        loop.create_task(self.tracker.checkpoint())
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -50,6 +51,10 @@ class RefugeVoiceActivityCog(commands.Cog):
             channels,
             excluded_channel_ids=excluded_channel_ids,
             at=datetime.now(timezone.utc),
+        )
+        logger.info(
+            "[refuge] Suivi vocal communautaire prêt (%d salon(s) actif(s))",
+            len(self.tracker.active_channel_ids),
         )
 
     @commands.Cog.listener()
@@ -87,11 +92,25 @@ class RefugeVoiceActivityCog(commands.Cog):
 
         now = datetime.now(timezone.utc)
         for channel in affected.values():
+            was_active = channel.id in self.tracker.active_channel_ids
             await self.tracker.reconcile_channel(
                 channel.id,
                 tuple(channel.members),
                 at=now,
             )
+            is_active = channel.id in self.tracker.active_channel_ids
+            if not was_active and is_active:
+                logger.info(
+                    "[refuge] Temps vocal communautaire démarré dans #%s (%s)",
+                    channel.name,
+                    channel.id,
+                )
+            elif was_active and not is_active:
+                logger.info(
+                    "[refuge] Temps vocal communautaire arrêté dans #%s (%s)",
+                    channel.name,
+                    channel.id,
+                )
 
     @tasks.loop(seconds=CHECKPOINT_SECONDS)
     async def checkpoint_community_voice(self) -> None:
