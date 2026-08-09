@@ -11,6 +11,10 @@ from discord.ext import commands, tasks
 
 from config import DATA_DIR
 from storage.season_store import season_store
+from ui.season_leaderboard_view import (
+    SeasonLeaderboardEntry,
+    SeasonLeaderboardView,
+)
 from utils.persistence import read_json_safe
 from utils.seasons import (
     SEASON_METRICS,
@@ -200,33 +204,37 @@ class SeasonalLeaderboardsCog(commands.Cog):
             if len(visible_rows) >= 10:
                 break
 
-        lines: list[str] = []
-        for rank, (_user_id, value, display) in enumerate(visible_rows, start=1):
-            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"**#{rank}**")
-            lines.append(
-                f"{medal} {display} — **{format_metric_value(metric.key, value)}**"
+        entries = tuple(
+            SeasonLeaderboardEntry(
+                rank=rank,
+                display_name=display,
+                value=format_metric_value(metric.key, value),
             )
-
-        if not lines:
-            lines.append("Aucune activité enregistrée dans cette catégorie.")
+            for rank, (_user_id, value, display) in enumerate(
+                visible_rows,
+                start=1,
+            )
+        )
 
         started_at = payload.get("started_at")
-        tracking_note = ""
+        tracking_note: str | None = None
         if started_at:
             try:
                 started = datetime.fromisoformat(str(started_at))
-                tracking_note = f"\nSuivi de cette saison depuis <t:{int(started.timestamp())}:d>."
+                tracking_note = (
+                    f"Suivi de cette saison depuis <t:{int(started.timestamp())}:d>."
+                )
             except ValueError:
                 pass
 
-        embed = discord.Embed(
-            title=f"🏆 {metric.label} — {season_label(season_id)}",
-            description="\n".join(lines) + tracking_note,
+        await interaction.response.send_message(
+            view=SeasonLeaderboardView(
+                metric_label=metric.label,
+                season_label_text=season_label(season_id),
+                entries=entries,
+                tracking_note=tracking_note,
+            )
         )
-        embed.set_footer(
-            text="Saisons mensuelles · Europe/Paris · historique conservé"
-        )
-        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot) -> None:
