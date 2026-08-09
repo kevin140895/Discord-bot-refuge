@@ -20,14 +20,16 @@ REFUGE_WORLD_FILE = Path(DATA_DIR) / "refuge_world.json"
 
 
 class RefugeWorldSchemaError(ValueError):
-    """Raised when persisted Refuge data uses an unsupported schema."""
+    """Raised when persisted Refuge data is unsupported or unsafe to load."""
 
 
 def _migrate_payload(raw: Any) -> tuple[dict[str, Any], bool]:
     if not isinstance(raw, Mapping):
-        return RefugeWorldState().to_dict(), False
+        raise RefugeWorldSchemaError("refuge world root must be a JSON object")
 
     payload = {str(key): value for key, value in raw.items()}
+    if not payload:
+        raise RefugeWorldSchemaError("refuge world persistence is an empty JSON object")
     try:
         version = int(payload.get("schema_version", 0))
     except (TypeError, ValueError):
@@ -95,8 +97,20 @@ class RefugeWorldStore:
         if self._loaded:
             return
 
+        # A missing primary + missing backup means a genuinely new Refuge.
+        # Any existing persistence artifact that cannot be decoded must never
+        # be mistaken for an empty world: the Refuge is permanent and a
+        # silent reset would be irreversible once a new save rotates backups.
+        backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+        primary_exists = self.path.exists()
+        backup_exists = backup_path.exists()
         raw = await asyncio.to_thread(read_json_safe, self.path, None)
         if raw is None:
+            if primary_exists or backup_exists:
+                raise RefugeWorldSchemaError(
+                    "refuge world persistence is unreadable; refusing to reset "
+                    "the permanent world"
+                )
             self._state = RefugeWorldState()
             self._loaded = True
             return

@@ -4,10 +4,25 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Mapping, Sequence
+from typing import Final, Mapping, Sequence
 
 from models.refuge_world import RefugeBuildingState, RefugeHistoricalEvent, RefugeWorldState
 from storage.refuge_world_store import RefugeWorldStore, refuge_world_store
+
+
+# These keys persist orchestration/history metadata only. They do not affect
+# any current V1 renderer. Unknown state keys remain render-relevant by
+# default so future visual features cannot accidentally become invisible to
+# panel refreshes.
+_NON_VISUAL_WORLD_STATE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "refuge_timeline",
+        "refuge_secrets",
+        "construction_enabled_at",
+        "construction_pending_goals",
+        "construction_consumed_goal_ids",
+    }
+)
 
 
 def _utc_iso(at: datetime | None = None) -> str:
@@ -66,6 +81,14 @@ def level_for_metric(
     return level
 
 
+def _render_relevant_world_state(state: RefugeWorldState) -> dict[str, object]:
+    return {
+        str(key): value
+        for key, value in state.state.items()
+        if str(key) not in _NON_VISUAL_WORLD_STATE_KEYS
+    }
+
+
 def world_render_signature(state: RefugeWorldState) -> str:
     """Hash only fields that can affect the rendered current world."""
 
@@ -86,7 +109,7 @@ def world_render_signature(state: RefugeWorldState) -> str:
             if state.active_construction is not None
             else None
         ),
-        "state": state.state,
+        "state": _render_relevant_world_state(state),
     }
     canonical = json.dumps(
         payload,
