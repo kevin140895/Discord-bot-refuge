@@ -1,6 +1,8 @@
 discord.py[voice]>=2.7,<3
 python-dotenv>=1.0,<2
 Pillow>=10.0,<13
-yt-dlp[default]>=2025.11.12
+# Pinned to an upstream revision that includes YouTube player-client maintenance
+# from yt-dlp commit 69ea200 (visionos, android_vr, web defaults).
+yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp/archive/5d6b8c8cd19785c3086ae3a9ec618c45e25eb3bc.tar.gz
 imageio-ffmpeg>=0.4,<1
 aiohttp>=3.8,<4
