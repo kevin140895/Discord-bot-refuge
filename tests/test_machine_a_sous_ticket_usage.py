@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from pathlib import Path
 import os
 
+import discord
 import pytest
 
 import sys
@@ -17,7 +18,7 @@ from storage.roulette_store import RouletteStore
 async def test_ticket_can_be_used_before_daily_spin(monkeypatch, tmp_path):
     # Ensure machine is considered open and use a temp data dir
     monkeypatch.setattr(
-        "cogs.machine_a_sous.machine_a_sous.is_open_now", lambda *a, **k: True
+        "cogs.machine_a_sous.machine_a_sous._is_casino_open", lambda *a, **k: True
     )
     monkeypatch.setattr(
         "cogs.machine_a_sous.machine_a_sous.DATA_DIR", str(tmp_path)
@@ -63,9 +64,12 @@ async def test_ticket_can_be_used_before_daily_spin(monkeypatch, tmp_path):
         followup=DummyFollowup(),
     )
 
-    # Trigger the button callback
+    # Trigger the same persistent button, now nested in the V2 container/action row.
     button = next(
-        child for child in view.children if getattr(child, "custom_id", None) == "machineasous:play"
+        child
+        for child in view.walk_children()
+        if isinstance(child, discord.ui.Button)
+        and child.custom_id == "machineasous:play"
     )
     await button.callback(interaction)
 

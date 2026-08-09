@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import discord
 import pytest
 
 import cogs.pari_xp as pari_xp
@@ -14,7 +15,16 @@ def _make_cog(*, is_open: bool = True):
     cog.is_open = is_open
     cog._message_id = None
     cog._last_announced_state = None
+    cog._last_panel_signature = None
     return cog
+
+
+def _view_text(view: discord.ui.LayoutView) -> str:
+    return "\n".join(
+        item.content
+        for item in view.walk_children()
+        if isinstance(item, discord.ui.TextDisplay)
+    )
 
 
 def test_is_open_now_respects_overnight_schedule(monkeypatch):
@@ -28,7 +38,7 @@ def test_is_open_now_respects_overnight_schedule(monkeypatch):
     assert not cog._is_open_now(pari_xp.datetime(2026, 8, 9, 2, 0, tzinfo=pari_xp.PARIS_TZ))
 
 
-def test_build_embed_reflects_active_state(monkeypatch):
+def test_roulette_v2_reflects_active_state(monkeypatch):
     monkeypatch.setattr(pari_xp, "CASINO_OPEN_HOUR", 10)
     monkeypatch.setattr(pari_xp, "CASINO_CLOSE_HOUR", 2)
     monkeypatch.setattr(pari_xp, "CASINO_SCHEDULE_LABEL", "10h00 - 02h00")
@@ -36,14 +46,28 @@ def test_build_embed_reflects_active_state(monkeypatch):
     cog.state["total_bets"] = 250
     cog.state["total_winnings"] = 100
 
-    embed = cog._build_embed()
-    description = embed.description or ""
+    view = pari_xp.RouletteXPView(cog)
+    text = _view_text(view)
 
-    assert embed.title == "🎰 Pari XP"
-    assert "🟢 Ouvert" in description
-    assert "ferme à ⏰ 02:00" in description
-    assert "Total misés : 250 XP" in description
-    assert "Total gagnés : 100 XP" in description
+    assert isinstance(view, discord.ui.LayoutView)
+    assert "🎰 Pari XP" in text
+    assert "🟢 **Ouvert**" in text
+    assert "ferme à **02:00**" in text
+    assert "XP misés : **250**" in text
+    assert "XP gagnés : **100**" in text
+
+    custom_ids = {
+        item.custom_id
+        for item in view.walk_children()
+        if isinstance(item, discord.ui.Button)
+    }
+    assert custom_ids == {
+        "pari_xp:red",
+        "pari_xp:black",
+        "pari_xp:even",
+        "pari_xp:odd",
+        "pari_xp:number",
+    }
 
 
 @pytest.mark.asyncio

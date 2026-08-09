@@ -56,9 +56,10 @@ async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None
 async def safe_message_edit(message: discord.Message, **kwargs) -> discord.Message | None:
     """Safely edit a message.
 
-    Skips edits when content and embeds are unchanged and throttles requests
-    using the shared rate limiter.  Returns the original message when no update
-    is performed.
+    Skips edits when content and embeds are unchanged and no component view is
+    supplied, then throttles requests using the shared rate limiter.  A view
+    update is always forwarded because component state is not represented by
+    ``Message.content`` or ``Message.embeds``.
     """
     same_content = "content" not in kwargs or kwargs["content"] == getattr(message, "content", None)
 
@@ -82,10 +83,10 @@ async def safe_message_edit(message: discord.Message, **kwargs) -> discord.Messa
             m.to_dict() == n.to_dict() for m, n in zip(current_embeds, new_embeds)
         )
 
-    if same_content and same_embed:
+    same_view = "view" not in kwargs
+    if same_content and same_embed and same_view:
         return message
 
     channel_id = getattr(getattr(message, "channel", None), "id", 0)
     await limiter.acquire(bucket=f"channel:{channel_id}")
     return await message.edit(**kwargs)
-
