@@ -39,3 +39,17 @@ class RadioStore:
     def clear_radio_message(self) -> None:
         self.data.pop("message", None)
         self._save()
+
+    def set_music_message(self, channel_id: int | str, message_id: int | str) -> None:
+        self.data["music_message"] = {
+            "channel_id": str(channel_id),
+            "message_id": str(message_id),
+        }
+        self._save()
+
+    def get_music_message(self) -> Optional[dict]:
+        return self.data.get("music_message")
+
+    def clear_music_message(self) -> None:
+        self.data.pop("music_message", None)
+        self._save()
