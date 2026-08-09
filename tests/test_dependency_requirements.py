@@ -38,17 +38,13 @@ def test_runtime_dependencies_have_breaking_change_guards():
     assert "aiohttp>=3.8,<4" in runtime
 
 
-def test_yt_dlp_uses_maintained_upstream_revision():
-    runtime = _requirements("requirements.txt")
-
-    assert any(line.startswith("yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp/archive/") for line in runtime)
-
-
-def test_youtube_po_token_provider_versions_stay_aligned():
+def test_music2_uses_known_good_youtube_runtime():
     runtime = set(_requirements("requirements.txt"))
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "bgutil-ytdlp-pot-provider==1.3.1" in runtime
-    assert "ARG BGUTIL_POT_PROVIDER_VERSION=1.3.1" in dockerfile
-    assert "/root/bgutil-ytdlp-pot-provider/server" in dockerfile
-    assert "deno install --allow-scripts=npm:canvas --frozen" in dockerfile
+    assert "yt-dlp[default]>=2025.11.12" in runtime
+    assert not any(line.startswith("bgutil-ytdlp-pot-provider") for line in runtime)
+    assert "DENO_INSTALL=/usr/local" in dockerfile
+    assert "deno --version" in dockerfile
+    assert 'CMD ["python", "main.py"]' in dockerfile
+    assert "bgutil-ytdlp-pot-provider" not in dockerfile
