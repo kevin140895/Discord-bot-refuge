@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import discord
-import pytest
 
 from models.refuge_world import RefugeWorldState
 from rendering.refuge_world import RefugeRenderContext
@@ -86,17 +85,13 @@ def test_callback_registration_view_is_persistent_and_has_same_custom_ids():
     ]
 
 
-def test_only_timeline_remains_pending_after_refuge_010():
-    view = RefugePendingActionView("timeline")
-    assert isinstance(view, discord.ui.LayoutView)
-    assert view.timeout == 120
-    text = "\n".join(
-        item.content
-        for item in view.walk_children()
-        if isinstance(item, discord.ui.TextDisplay)
-    )
-    assert "Chronologie" in text
-
-    for action in ("explore", "footprint", "construction"):
-        with pytest.raises(ValueError):
-            RefugePendingActionView(action)
+def test_no_panel_action_is_described_as_future_after_refuge_011():
+    for action in ("explore", "footprint", "timeline", "construction"):
+        view = RefugePendingActionView(action)
+        text = "\n".join(
+            item.content
+            for item in view.walk_children()
+            if isinstance(item, discord.ui.TextDisplay)
+        )
+        assert "désormais disponible" in text
+        assert "sera" not in text
