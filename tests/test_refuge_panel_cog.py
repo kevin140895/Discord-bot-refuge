@@ -1,4 +1,8 @@
-from cogs.refuge_panel import panel_refresh_action
+from cogs.refuge_panel import (
+    panel_reference_needs_retirement,
+    panel_refresh_action,
+)
+from models.refuge_world import RefugePanelState
 
 
 def test_refresh_creates_when_message_is_missing():
@@ -49,3 +53,13 @@ def test_identical_state_does_nothing():
         visual_signature="v1",
         summary_signature="s1",
     ) == "none"
+
+
+def test_panel_reference_is_retired_only_when_configured_channel_moves():
+    panel = RefugePanelState(channel_id=123, message_id=456)
+    assert panel_reference_needs_retirement(panel, target_channel_id=789) is True
+    assert panel_reference_needs_retirement(panel, target_channel_id=123) is False
+    assert panel_reference_needs_retirement(
+        RefugePanelState(channel_id=123, message_id=None),
+        target_channel_id=789,
+    ) is False
