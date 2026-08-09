@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import discord
 import pytest
 
 from cogs.machine_a_sous.machine_a_sous import MachineASousCog, MachineASousView
@@ -14,7 +15,7 @@ from utils.storage import load_json
 
 @pytest.mark.asyncio
 async def test_free_ticket_prioritized_over_store(tmp_path, monkeypatch):
-    monkeypatch.setattr("cogs.machine_a_sous.machine_a_sous.is_open_now", lambda *a, **k: True)
+    monkeypatch.setattr("cogs.machine_a_sous.machine_a_sous._is_casino_open", lambda *a, **k: True)
     monkeypatch.setattr("cogs.machine_a_sous.machine_a_sous.DATA_DIR", str(tmp_path))
 
     ticket_path = tmp_path / "tickets.json"
@@ -60,7 +61,12 @@ async def test_free_ticket_prioritized_over_store(tmp_path, monkeypatch):
         followup=DummyFollowup(),
     )
 
-    button = next(child for child in view.children if getattr(child, "custom_id", None) == "machineasous:play")
+    button = next(
+        child
+        for child in view.walk_children()
+        if isinstance(child, discord.ui.Button)
+        and child.custom_id == "machineasous:play"
+    )
     await button.callback(interaction)
     await asyncio.sleep(0)
 
