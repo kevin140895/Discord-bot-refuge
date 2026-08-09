@@ -141,6 +141,9 @@ class Music2ListenTogetherCog(commands.Cog):
                 and getattr(member, "id", None) is not None
             )
         )
+        if not listener_ids:
+            return None
+
         queue = getattr(music, "queue", ())
         try:
             queue_size = len(queue)
