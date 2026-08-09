@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import discord
 import pytest
 
 import cogs.pari_xp as pari_xp
+from ui.casino_views import CasinoLeaderboardView
 
 
 def _make_cog(state: dict):
@@ -14,7 +16,16 @@ def _make_cog(state: dict):
     cog.is_open = True
     cog._message_id = None
     cog._last_announced_state = None
+    cog._last_panel_signature = None
     return cog
+
+
+def _view_text(view: discord.ui.LayoutView) -> str:
+    return "\n".join(
+        item.content
+        for item in view.walk_children()
+        if isinstance(item, discord.ui.TextDisplay)
+    )
 
 
 @pytest.mark.asyncio
@@ -115,11 +126,15 @@ async def test_top_casino_ranks_net_casino_result_not_global_xp(monkeypatch):
 
     await pari_xp.PariXPCog.top_casino.callback(cog, interaction)
 
-    embed = interaction.response.send_message.await_args.kwargs["embed"]
-    description = embed.description or ""
+    kwargs = interaction.response.send_message.await_args.kwargs
+    view = kwargs["view"]
+    assert isinstance(view, CasinoLeaderboardView)
+    assert "embed" not in kwargs
+
+    description = _view_text(view)
     assert description.index("Bob") < description.index("Charlie") < description.index("Alice")
     assert "**+90 XP net**" in description
-    assert "Classement par résultat net" in description
+    assert "Classement par **résultat net**" in description
 
 
 @pytest.mark.asyncio
@@ -137,7 +152,8 @@ async def test_top_casino_does_not_fallback_to_global_xp(monkeypatch):
 
     await pari_xp.PariXPCog.top_casino.callback(cog, interaction)
 
-    embed = interaction.response.send_message.await_args.kwargs["embed"]
-    assert embed.title == "🏆 Top Casino"
-    assert embed.description == "Aucune activité casino enregistrée pour le moment."
-    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    kwargs = interaction.response.send_message.await_args.kwargs
+    view = kwargs["view"]
+    assert isinstance(view, CasinoLeaderboardView)
+    assert "Aucune activité casino enregistrée pour le moment." in _view_text(view)
+    assert kwargs["ephemeral"] is True
