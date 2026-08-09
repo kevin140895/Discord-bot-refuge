@@ -70,12 +70,12 @@ def test_slot_poster_detection_uses_components_v2_contract() -> None:
     assert _is_machine_poster_message(v2_message)
     assert _poster_has_play_button(v2_message)
 
-    legacy_embed = SimpleNamespace(
+    embed_only_message = SimpleNamespace(
         embeds=[SimpleNamespace(title="🎰 Machine à sous")],
         components=[],
     )
-    assert not _is_machine_poster_message(legacy_embed)
-    assert not _poster_has_play_button(legacy_embed)
+    assert not _is_machine_poster_message(embed_only_message)
+    assert not _poster_has_play_button(embed_only_message)
 
 
 @pytest.mark.asyncio
