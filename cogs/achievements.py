@@ -12,6 +12,11 @@ from discord.ext import commands, tasks
 from config import DATA_DIR
 from storage.achievement_store import achievement_store
 from storage.xp_store import xp_store
+from ui.achievements_view import (
+    AchievementCategoryDisplay,
+    AchievementDisplay,
+    AchievementsView,
+)
 from utils.achievements import (
     ACHIEVEMENTS,
     CATEGORY_LABELS,
@@ -175,39 +180,48 @@ class AchievementsCog(commands.Cog):
         metrics, newly_unlocked = await self._sync_member(target)
         unlocked = await achievement_store.get_user_achievements(target.id)
 
-        embed = discord.Embed(
-            title=f"🏅 Succès de {target.display_name}",
-            description=(
-                f"**{len(unlocked)}/{len(ACHIEVEMENTS)}** badges débloqués."
-            ),
-        )
-        if newly_unlocked:
-            embed.description += (
-                f"\n✨ **{len(newly_unlocked)} nouveau(x) succès** reconnu(s) maintenant."
-            )
-
+        categories: list[AchievementCategoryDisplay] = []
         for category, label in CATEGORY_LABELS.items():
-            lines: list[str] = []
+            achievements: list[AchievementDisplay] = []
             for achievement in ACHIEVEMENTS:
                 if achievement.category != category:
                     continue
                 if achievement.id in unlocked:
-                    lines.append(
-                        f"✅ {achievement.emoji} **{achievement.name}** — {achievement.description}"
-                    )
+                    detail = achievement.description
+                    status = "✅"
                 else:
                     current, target_value = achievement_progress(achievement, metrics)
-                    progress = _format_progress(
+                    detail = _format_progress(
                         achievement.metric,
                         current,
                         target_value,
                     )
-                    lines.append(
-                        f"🔒 {achievement.emoji} **{achievement.name}** — {progress}"
+                    status = "🔒"
+                achievements.append(
+                    AchievementDisplay(
+                        status=status,
+                        emoji=achievement.emoji,
+                        name=achievement.name,
+                        detail=detail,
                     )
-            embed.add_field(name=label, value="\n".join(lines), inline=False)
+                )
+            if achievements:
+                categories.append(
+                    AchievementCategoryDisplay(
+                        label=label,
+                        achievements=tuple(achievements),
+                    )
+                )
 
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(
+            view=AchievementsView(
+                display_name=target.display_name,
+                unlocked_count=len(unlocked),
+                total_count=len(ACHIEVEMENTS),
+                categories=tuple(categories),
+                newly_unlocked_count=len(newly_unlocked),
+            )
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
