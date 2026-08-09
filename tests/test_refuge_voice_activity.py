@@ -121,15 +121,15 @@ async def test_checkpoint_persists_without_resetting_fractional_time(tmp_path):
     start = datetime(2026, 8, 9, 10, 0, 0, 500000, tzinfo=timezone.utc)
 
     await tracker.reconcile_channel(100, [member(), member()], at=start)
-    await tracker.checkpoint(at=start + timedelta(seconds=30.7))
-    assert await store.get_total_seconds() == 30
+    await tracker.checkpoint(at=start + timedelta(seconds=60.7))
+    assert await store.get_total_seconds() == 60
 
-    await tracker.stop_all(at=start + timedelta(seconds=61.2))
+    await tracker.stop_all(at=start + timedelta(seconds=121.2))
     # Fractional remainder from the first checkpoint carries into the second.
-    assert await store.get_total_seconds() == 61
+    assert await store.get_total_seconds() == 121
 
     restarted = RefugeActivityStore(tmp_path / "refuge_activity.json")
-    assert await restarted.get_total_seconds() == 61
+    assert await restarted.get_total_seconds() == 121
 
 
 @pytest.mark.asyncio
