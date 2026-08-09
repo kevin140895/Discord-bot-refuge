@@ -38,7 +38,7 @@ PARI_XP_MAX_BET = int(os.getenv("PARI_XP_MAX_BET", "500"))
 SPINNING_GIF_URL = (
     "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGpxaXd6ZDZhaGlvbXhjOTJtdDA5MTl5cGo2N2oxbHB2aXZpNjJtZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26uflBhaGt5lQsaCA/giphy.gif"
 )
-CASINO_CLOSED_MESSAGE = "🌙 Le Casino est fermé. Horaires : 10h00 - 02h00."
+CASINO_CLOSED_MESSAGE = f"🌙 Le Casino est fermé. Horaires : {CASINO_SCHEDULE_LABEL}."
 
 
 def _draw_number_for_roll(selected_number: int, roll: float) -> int:
@@ -203,14 +203,16 @@ class RouletteXPView(discord.ui.LayoutView):
         super().__init__(timeout=None)
         self.cog = cog
 
-        next_hour = (
-            f"{CASINO_CLOSE_HOUR:02d}:00"
-            if cog.is_open
-            else f"{CASINO_OPEN_HOUR:02d}:00"
-        )
-        status = "🟢 **Ouvert**" if cog.is_open else "🔴 **Fermé**"
-        action = "ferme" if cog.is_open else "ouvre"
-        accent = discord.Colour.green() if cog.is_open else discord.Colour.red()
+        if not cog.is_open:
+            container = discord.ui.Container(accent_colour=discord.Colour.red())
+            container.add_item(discord.ui.TextDisplay("🔴 **Casino fermé**"))
+            self.add_item(container)
+            return
+
+        next_hour = f"{CASINO_CLOSE_HOUR:02d}:00"
+        status = "🟢 **Ouvert**"
+        action = "ferme"
+        accent = discord.Colour.green()
 
         container = discord.ui.Container(accent_colour=accent)
         container.add_item(

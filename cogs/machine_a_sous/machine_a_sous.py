@@ -46,7 +46,7 @@ REWARDS = [
 WEIGHTS = [250, 230, 150, 80, 40, 15, 5, 80, 80, 70]
 SPIN_GIF_URL = "https://media.tenor.com/2roX3zvclxkAAAAC/slot-machine.gif"
 WIN_GIF_URL = "https://media.tenor.com/XwI-iYdkfVIAAAAi/lottery-winner.gif"
-CASINO_CLOSED_MESSAGE = "🌙 Le Casino est fermé. Horaires : 10h00 - 02h00."
+CASINO_CLOSED_MESSAGE = f"🌙 Le Casino est fermé. Horaires : {CASINO_SCHEDULE_LABEL}."
 
 
 def _fmt(dt: datetime) -> str:

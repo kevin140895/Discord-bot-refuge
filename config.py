@@ -53,7 +53,7 @@ except AttributeError:
 
 # ── Horaires du casino ────────────────────────────────────────
 CASINO_OPEN_HOUR: int = int(os.getenv("CASINO_OPEN_HOUR", "10"))
-CASINO_CLOSE_HOUR: int = int(os.getenv("CASINO_CLOSE_HOUR", "2"))
+CASINO_CLOSE_HOUR: int = int(os.getenv("CASINO_CLOSE_HOUR", "6"))
 CASINO_SCHEDULE_LABEL = f"{CASINO_OPEN_HOUR:02d}h00 - {CASINO_CLOSE_HOUR:02d}h00"
 
 

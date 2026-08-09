@@ -43,21 +43,12 @@ def _roulette_cog(*, is_open: bool) -> pari_xp.PariXPCog:
     return cog
 
 
-def test_roulette_v2_closed_state_disables_all_existing_bet_buttons() -> None:
+def test_roulette_v2_closed_state_hides_all_bet_buttons() -> None:
     view = pari_xp.RouletteXPView(_roulette_cog(is_open=False), disabled=True)
 
     assert isinstance(view, discord.ui.LayoutView)
-    assert "🔴 **Fermé**" in _text(view)
-
-    buttons = _buttons(view)
-    assert [button.custom_id for button in buttons] == [
-        "pari_xp:red",
-        "pari_xp:black",
-        "pari_xp:even",
-        "pari_xp:odd",
-        "pari_xp:number",
-    ]
-    assert all(button.disabled for button in buttons)
+    assert _text(view) == "🔴 **Casino fermé**"
+    assert _buttons(view) == []
 
 
 def test_slot_machine_v2_open_and_closed_posters_keep_same_play_contract() -> None:
