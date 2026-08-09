@@ -102,7 +102,6 @@ class DummyBot:
         return self.get_channel(channel_id)
 
 
-
 def make_active_session(*, title: str = "Du Ferme", listeners: int = 2, queued: int = 1):
     track = SimpleNamespace(
         title=title,
@@ -175,6 +174,21 @@ async def test_announcement_is_deleted_when_custom_music_ends() -> None:
     await cog._sync_announcement()
     music.current = None
     radio.stream_url = "https://radio.example/live"
+
+    await cog._sync_announcement()
+
+    text_channel.message.delete.assert_awaited_once()
+    assert cog._message is None
+
+
+@pytest.mark.asyncio
+async def test_announcement_is_deleted_when_last_human_listener_leaves() -> None:
+    bot, music, radio, text_channel, voice_channel = make_active_session(listeners=1)
+    cog = listen_together.Music2ListenTogetherCog(bot)
+    cog._initial_cleanup_done = True
+
+    await cog._sync_announcement()
+    voice_channel.members = [DummyMember(5000, bot=True)]
 
     await cog._sync_announcement()
 
