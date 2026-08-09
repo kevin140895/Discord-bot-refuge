@@ -496,6 +496,12 @@ class MachineASousCog(commands.Cog):
                 not _poster_is_components_v2(existing)
                 or has_button != self.current_view_enabled
             ):
+                # Persist the discovered legacy/stale poster first so the
+                # replacement path deletes that exact message before sending V2.
+                self.store.set_poster(
+                    channel_id=str(existing.channel.id),
+                    message_id=str(existing.id),
+                )
                 await self._replace_poster_message()
             else:
                 self.store.set_poster(
