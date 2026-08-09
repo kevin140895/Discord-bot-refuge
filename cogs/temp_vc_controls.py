@@ -7,8 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import LOBBY_VC_ID
-from cogs.temp_vc import TEMP_VC_IDS
+from config import LOBBY_VC_ID, TEMP_VC_CATEGORY
 from storage.temp_vc_control_store import (
     load_temp_vc_owners,
     save_temp_vc_owners_async,
@@ -332,6 +331,14 @@ class TempVCControlsCog(commands.Cog):
             return False
         return any(member.id == owner_id for member in channel.members)
 
+    def _is_standard_temp_channel(self, channel: discord.VoiceChannel) -> bool:
+        """Return whether the channel belongs to the existing standard temp category."""
+        category_id = getattr(channel, "category_id", None)
+        if category_id is None:
+            category = getattr(channel, "category", None)
+            category_id = getattr(category, "id", None)
+        return category_id == TEMP_VC_CATEGORY
+
     async def require_control_channel(
         self,
         interaction: discord.Interaction,
@@ -350,7 +357,7 @@ class TempVCControlsCog(commands.Cog):
         channel = voice.channel if voice else None
         if (
             not isinstance(channel, discord.VoiceChannel)
-            or channel.id not in TEMP_VC_IDS
+            or not self._is_standard_temp_channel(channel)
             or channel.id not in self._owners
         ):
             await interaction.response.send_message(
@@ -393,7 +400,7 @@ class TempVCControlsCog(commands.Cog):
             channel = self.bot.get_channel(channel_id)
             if (
                 not isinstance(channel, discord.VoiceChannel)
-                or channel_id not in TEMP_VC_IDS
+                or not self._is_standard_temp_channel(channel)
             ):
                 self._owners.pop(channel_id, None)
                 self._panel_posted.discard(channel_id)
@@ -411,7 +418,7 @@ class TempVCControlsCog(commands.Cog):
         channel = after.channel
         if not isinstance(channel, discord.VoiceChannel):
             return
-        if channel.id not in TEMP_VC_IDS:
+        if not self._is_standard_temp_channel(channel):
             return
 
         before_channel = before.channel
