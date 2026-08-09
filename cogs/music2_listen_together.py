@@ -2,30 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any
 
 import discord
 from discord.ext import commands, tasks
 
-from config import LOBBY_TEXT_CHANNEL, RADIO_VC_ID
+from config import RADIO_VC_ID
 
 
 logger = logging.getLogger(__name__)
 
 
-def _env_channel_id(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-
-
-LISTEN_TOGETHER_CHANNEL_ID = _env_channel_id(
-    "MUSIC_LISTEN_TOGETHER_CHANNEL_ID",
-    LOBBY_TEXT_CHANNEL,
-)
+LISTEN_TOGETHER_CHANNEL_ID = 1400552164979507263
 LISTEN_TOGETHER_CUSTOM_ID = "music2_listen_together_join"
 LISTEN_TOGETHER_TITLE = "🎧 Écoute ensemble"
 
