@@ -129,6 +129,17 @@ async def test_non_object_world_payload_is_rejected_without_overwrite(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_empty_object_world_payload_is_rejected_without_overwrite(tmp_path):
+    path = tmp_path / "refuge_world.json"
+    path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(RefugeWorldSchemaError, match="empty JSON object"):
+        await RefugeWorldStore(path).get_state()
+
+    assert path.read_text(encoding="utf-8") == "{}"
+
+
+@pytest.mark.asyncio
 async def test_unversioned_payload_migrates_to_schema_v1(tmp_path):
     path = tmp_path / "refuge_world.json"
     path.write_text(
