@@ -38,6 +38,21 @@ class _Timeline:
         return None
 
 
+class _Secrets:
+    def __init__(self, state, *, changed=False):
+        self.state = state
+        self.changed = changed
+        self.calls = []
+
+    async def sync_under_world_lock(self, *, at=None):
+        self.calls.append(at)
+        return SimpleNamespace(
+            state=self.state,
+            changed=self.changed,
+            discoveries=(),
+        )
+
+
 class _Renderer:
     def __init__(self):
         self.calls = []
@@ -59,12 +74,23 @@ def _status(state, **kwargs):
 
 
 @pytest.mark.asyncio
-async def test_panel_service_archives_then_evaluates_systems_sequentially():
+async def test_panel_service_archives_then_evaluates_systems_and_secrets_sequentially():
     at = datetime(2026, 8, 9, 14, 0, tzinfo=timezone.utc)
     base = RefugeWorldState(created_at="2026-08-09T00:00:00+00:00")
     fire_state = replace(base, state={"stage": "fire"})
     hall_state = replace(base, state={"stage": "hall"})
-    final_state = replace(base, state={"stage": "casino"})
+    casino_state = replace(base, state={"stage": "casino"})
+    secret_event = RefugeHistoricalEvent(
+        event_id="fire:secret:first_visitor",
+        event_type="fire_secret_discovered",
+        occurred_at="2026-08-09T14:00:00+00:00",
+        data={"name": "Le Premier Visiteur"},
+    )
+    final_state = replace(
+        casino_state,
+        state={"stage": "secrets"},
+        events=(secret_event,),
+    )
 
     fire = _Service(
         _status(
@@ -72,7 +98,7 @@ async def test_panel_service_archives_then_evaluates_systems_sequentially():
             level=2,
             level_name="Le Campement",
             intensity="normal",
-            changed=True,
+            changed=False,
         )
     )
     hall = _Service(
@@ -84,7 +110,7 @@ async def test_panel_service_archives_then_evaluates_systems_sequentially():
     )
     casino = _Service(
         _status(
-            final_state,
+            casino_state,
             level=1,
             level_name="Baraque de Jeux",
             fortune="stable",
@@ -93,12 +119,14 @@ async def test_panel_service_archives_then_evaluates_systems_sequentially():
         )
     )
     timeline = _Timeline()
+    secrets = _Secrets(final_state, changed=True)
     renderer = _Renderer()
     service = RefugePanelService(
         fire_service=fire,
         hall_service=hall,
         casino_service=casino,
         timeline_service=timeline,
+        secrets_service=secrets,
         renderer=renderer,
     )
 
@@ -113,9 +141,16 @@ async def test_panel_service_archives_then_evaluates_systems_sequentially():
     assert snapshot.casino_fortune_name == "Stable"
     assert snapshot.casino_is_open is True
     assert snapshot.construction_label == "Aucun chantier actif"
+    assert snapshot.latest_event_label == "Le Premier Visiteur"
     assert snapshot.changed is True
-    assert len(timeline.calls) == 1
-    assert timeline.calls[0] == fire.calls[0] == hall.calls[0] == casino.calls[0]
+    assert len(timeline.calls) == len(secrets.calls) == 1
+    assert (
+        timeline.calls[0]
+        == fire.calls[0]
+        == hall.calls[0]
+        == casino.calls[0]
+        == secrets.calls[0]
+    )
 
     assert await service.render_png(snapshot) == b"PNG"
     assert renderer.calls[0][0] == final_state
