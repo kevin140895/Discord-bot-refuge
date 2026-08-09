@@ -432,6 +432,7 @@ class RefugeConstructionService:
         data["project_name"] = project.name
         data["project_description"] = project.description
         data["building_id"] = project.building_id
+        data["visual_stage"] = 0
 
         active = replace(
             construction,
@@ -607,7 +608,21 @@ class RefugeConstructionService:
 
             if construction.status == CONSTRUCTION_STATUS_BUILDING:
                 completes_at = _parse_timestamp(construction.completes_at)
-                if completes_at is None or now < completes_at:
+                if completes_at is None:
+                    return state, changed
+                if now < completes_at:
+                    progress = _construction_progress(construction, now)
+                    visual_stage = min(3, max(0, progress // 25))
+                    try:
+                        previous_stage = int(construction.data.get("visual_stage", 0))
+                    except (TypeError, ValueError):
+                        previous_stage = 0
+                    if visual_stage != previous_stage:
+                        data = dict(construction.data)
+                        data["visual_stage"] = visual_stage
+                        construction = replace(construction, data=data)
+                        state = replace(state, active_construction=construction)
+                        changed = True
                     return state, changed
                 state = self._complete_building(state, construction, now=now)
                 changed = True
