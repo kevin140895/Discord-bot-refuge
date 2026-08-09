@@ -22,6 +22,7 @@ from config import (
 )
 from storage.radio_store import RadioStore
 from utils.voice import ensure_voice, play_stream
+from view import RadioView
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class AddMusicModal(discord.ui.Modal, title="Ajouter une musique"):
 
 
 class Music2View(discord.ui.View):
-    """Contrôleur combiné radio + musique à la demande."""
+    """Contrôleur dédié à la musique personnalisée."""
 
     def __init__(self, cog: "Music2Cog") -> None:
         super().__init__(timeout=None)
@@ -68,72 +69,12 @@ class Music2View(discord.ui.View):
         )
         return False
 
-    async def _dispatch_radio(self, interaction: discord.Interaction, method: str) -> None:
-        radio = interaction.client.get_cog("RadioCog")
-        if radio is None:
-            await interaction.response.send_message(
-                "❌ Radio indisponible.", ephemeral=True
-            )
-            return
-        callback = getattr(radio, method, None)
-        if callback is None:
-            await interaction.response.send_message(
-                "❌ Station indisponible.", ephemeral=True
-            )
-            return
-        await callback(interaction)
-        await self.cog.refresh_panel()
-
-    @discord.ui.button(
-        label="Rap FR",
-        style=discord.ButtonStyle.primary,
-        custom_id="radio_rap_fr",
-        row=0,
-    )
-    async def radio_rap_fr(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._dispatch_radio(interaction, "radio_rap_fr")
-
-    @discord.ui.button(
-        label="Rap US",
-        style=discord.ButtonStyle.primary,
-        custom_id="radio_rap",
-        row=0,
-    )
-    async def radio_rap(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._dispatch_radio(interaction, "radio_rap")
-
-    @discord.ui.button(
-        label="Rock",
-        style=discord.ButtonStyle.primary,
-        custom_id="radio_rock",
-        row=0,
-    )
-    async def radio_rock(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._dispatch_radio(interaction, "radio_rock")
-
-    @discord.ui.button(
-        label="Radio Hip-Hop",
-        style=discord.ButtonStyle.primary,
-        custom_id="radio_hiphop",
-        row=0,
-    )
-    async def radio_hiphop(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._dispatch_radio(interaction, "radio_hiphop")
-
     @discord.ui.button(
         label="Ajouter",
         emoji="➕",
         style=discord.ButtonStyle.success,
         custom_id="music2_add",
-        row=1,
+        row=0,
     )
     async def add_music(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -147,7 +88,7 @@ class Music2View(discord.ui.View):
         emoji="⏯️",
         style=discord.ButtonStyle.secondary,
         custom_id="music2_pause_resume",
-        row=1,
+        row=0,
     )
     async def pause_resume(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -159,7 +100,7 @@ class Music2View(discord.ui.View):
         emoji="⏭️",
         style=discord.ButtonStyle.secondary,
         custom_id="music2_next",
-        row=1,
+        row=0,
     )
     async def next_track(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -171,7 +112,7 @@ class Music2View(discord.ui.View):
         emoji="📃",
         style=discord.ButtonStyle.secondary,
         custom_id="music2_queue",
-        row=1,
+        row=0,
     )
     async def queue(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -183,7 +124,7 @@ class Music2View(discord.ui.View):
         emoji="🎵",
         style=discord.ButtonStyle.secondary,
         custom_id="music2_now_playing",
-        row=1,
+        row=0,
     )
     async def now_playing(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -228,11 +169,11 @@ class Music2Cog(commands.Cog):
 
     def build_panel_embed(self) -> discord.Embed:
         embed = discord.Embed(
-            title="🎵 Refuge Music 2.0",
+            title="🎵 Musique personnalisée",
             description=(
-                "Les radios existantes restent disponibles. "
-                "Une musique ajoutée suspend temporairement la radio, "
-                "qui reprend automatiquement à la fin de la file."
+                "Ajoute un titre ou un lien pour lancer une musique à la demande. "
+                "La radio active est suspendue pendant la file puis reprend "
+                "automatiquement quand elle est terminée."
             ),
         )
         if self.current is not None:
@@ -251,16 +192,14 @@ class Music2Cog(commands.Cog):
                 inline=True,
             )
         else:
-            radio = self._radio_cog()
-            stream_url = getattr(radio, "stream_url", RADIO_STREAM_URL) if radio else RADIO_STREAM_URL
             embed.add_field(
-                name="Lecture en cours",
-                value=f"📻 Radio **{self._station_label(stream_url)}**",
+                name="Lecture personnalisée",
+                value="Aucun titre en cours.",
                 inline=False,
             )
             embed.add_field(name="File d'attente", value="Vide", inline=True)
         embed.set_footer(
-            text="Ajoute un titre ou un lien depuis le bouton ➕ Ajouter."
+            text="Les stations radio prédéfinies sont disponibles sur le panneau séparé."
         )
         return embed
 
@@ -281,40 +220,109 @@ class Music2Cog(commands.Cog):
             return False
         return True
 
-    async def _ensure_panel(self) -> None:
-        text_channel = self.bot.get_channel(RADIO_TEXT_CHANNEL_ID)
-        if not isinstance(text_channel, discord.abc.Messageable):
-            return
+    async def _restore_radio_panel(self, text_channel: discord.abc.Messageable) -> None:
+        radio = self._radio_cog()
+        ensure = getattr(radio, "_ensure_radio_message", None) if radio else None
+        if callable(ensure):
+            await ensure(text_channel)
 
         stored = self.store.get_radio_message()
-        if not stored:
-            radio = self._radio_cog()
-            ensure = getattr(radio, "_ensure_radio_message", None) if radio else None
-            if callable(ensure):
-                await ensure(text_channel)
-                stored = self.store.get_radio_message()
-
         if not stored or int(stored.get("channel_id", 0)) != RADIO_TEXT_CHANNEL_ID:
             return
 
         fetch = getattr(text_channel, "fetch_message", None)
         if not callable(fetch):
             return
+
         try:
             message = await fetch(int(stored.get("message_id", 0)))
+            await message.edit(
+                content=(
+                    "📻 Sélectionne ta radio !\n"
+                    "Clique sur un bouton ci-dessous pour changer de station."
+                ),
+                embed=None,
+                view=RadioView(),
+            )
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
-            logger.warning("[music2] panneau radio existant introuvable")
+            logger.exception("[music2] restauration du panneau radio impossible")
+
+    @staticmethod
+    def _is_music_panel(message: discord.Message) -> bool:
+        return any(
+            getattr(component, "custom_id", "") == "music2_add"
+            for row in getattr(message, "components", [])
+            for component in getattr(row, "children", [])
+        ) and not any(
+            getattr(component, "custom_id", "") == "radio_hiphop"
+            for row in getattr(message, "components", [])
+            for component in getattr(row, "children", [])
+        )
+
+    async def _ensure_panel(self) -> None:
+        text_channel = self.bot.get_channel(RADIO_TEXT_CHANNEL_ID)
+        if not isinstance(text_channel, discord.abc.Messageable):
             return
 
-        self._panel_message = message
+        await self._restore_radio_panel(text_channel)
+
+        stored = self.store.get_music_message()
+        fetch = getattr(text_channel, "fetch_message", None)
+        if stored and int(stored.get("channel_id", 0)) == RADIO_TEXT_CHANNEL_ID and callable(fetch):
+            try:
+                message = await fetch(int(stored.get("message_id", 0)))
+                if self._is_music_panel(message):
+                    self._panel_message = message
+                    await message.edit(
+                        content=None,
+                        embed=self.build_panel_embed(),
+                        view=self.view,
+                    )
+                    return
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
+                self.store.clear_music_message()
+
+        found: discord.Message | None = None
         try:
-            await message.edit(
-                content=None,
-                embed=self.build_panel_embed(),
-                view=self.view,
-            )
+            history = getattr(text_channel, "history", None)
+            if callable(history):
+                async for message in history(limit=100):
+                    if message.author.id != self.bot.user.id:
+                        continue
+                    if not self._is_music_panel(message):
+                        continue
+                    if found is None:
+                        found = message
+                    else:
+                        try:
+                            await message.delete()
+                        except (discord.Forbidden, discord.HTTPException):
+                            logger.debug("[music2] doublon de panneau impossible à supprimer")
         except (discord.Forbidden, discord.HTTPException):
-            logger.exception("[music2] impossible de mettre à niveau le panneau radio")
+            logger.warning("[music2] historique du salon inaccessible")
+
+        if found is None:
+            try:
+                found = await text_channel.send(
+                    embed=self.build_panel_embed(),
+                    view=self.view,
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.exception("[music2] création du panneau personnalisé impossible")
+                return
+        else:
+            try:
+                await found.edit(
+                    content=None,
+                    embed=self.build_panel_embed(),
+                    view=self.view,
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.exception("[music2] mise à jour du panneau personnalisé impossible")
+                return
+
+        self._panel_message = found
+        self.store.set_music_message(RADIO_TEXT_CHANNEL_ID, found.id)
 
     async def refresh_panel(self) -> None:
         message = self._panel_message
@@ -331,6 +339,7 @@ class Music2Cog(commands.Cog):
             )
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             self._panel_message = None
+            self.store.clear_music_message()
             logger.exception("[music2] rafraîchissement panneau impossible")
 
     @commands.Cog.listener()
@@ -339,7 +348,7 @@ class Music2Cog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction) -> None:
-        """Keep the upgraded panel in sync when the legacy RadioView handles a click."""
+        """Synchronise le panneau personnalisé après un changement de station."""
         data = interaction.data if isinstance(interaction.data, dict) else {}
         custom_id = data.get("custom_id")
         if (
@@ -349,8 +358,6 @@ class Music2Cog(commands.Cog):
         ):
             return
 
-        # The legacy persistent RadioView is registered after extensions during
-        # setup_hook. Give its callback a short window to update RadioCog first.
         await asyncio.sleep(0.25)
         radio = self._radio_cog()
         if self.current is not None and radio is not None:
@@ -543,9 +550,6 @@ class Music2Cog(commands.Cog):
             logger.warning("[music2] fin de piste avec erreur: %s", error)
 
         radio = self._radio_cog()
-        # Pendant Music 2.0, RadioCog.stream_url reste à None. Si une station
-        # a été sélectionnée manuellement, RadioCog l'a déjà remise à une URL:
-        # la radio prend alors la main et la file à la demande est annulée.
         if radio is not None and getattr(radio, "stream_url", None):
             self.current = None
             self.queue.clear()
@@ -647,7 +651,10 @@ class Music2Cog(commands.Cog):
         else:
             radio = self._radio_cog()
             stream_url = getattr(radio, "stream_url", RADIO_STREAM_URL) if radio else RADIO_STREAM_URL
-            description = f"📻 Radio **{self._station_label(stream_url)}**"
+            description = (
+                "🎵 Aucune musique personnalisée en cours.\n"
+                f"📻 Radio **{self._station_label(stream_url)}** active."
+            )
         await interaction.response.send_message(description, ephemeral=True)
 
 
