@@ -28,3 +28,21 @@ async def test_safe_message_edit_removes_embed(monkeypatch):
 
     message.edit.assert_awaited_once_with(embed=None)
     limiter.acquire.assert_awaited_once_with(bucket="channel:123")
+
+
+@pytest.mark.asyncio
+async def test_safe_message_edit_forwards_view_only_change(monkeypatch):
+    view = object()
+    message = SimpleNamespace(
+        content="",
+        embeds=[],
+        edit=AsyncMock(),
+        channel=SimpleNamespace(id=456),
+    )
+    limiter = SimpleNamespace(acquire=AsyncMock())
+    monkeypatch.setattr("utils.discord_utils.limiter", limiter)
+
+    await safe_message_edit(message, view=view)
+
+    message.edit.assert_awaited_once_with(view=view)
+    limiter.acquire.assert_awaited_once_with(bucket="channel:456")
