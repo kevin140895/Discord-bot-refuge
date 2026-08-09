@@ -28,6 +28,8 @@ def _migrate_payload(raw: Any) -> tuple[dict[str, Any], bool]:
         raise RefugeWorldSchemaError("refuge world root must be a JSON object")
 
     payload = {str(key): value for key, value in raw.items()}
+    if not payload:
+        raise RefugeWorldSchemaError("refuge world persistence is an empty JSON object")
     try:
         version = int(payload.get("schema_version", 0))
     except (TypeError, ValueError):
