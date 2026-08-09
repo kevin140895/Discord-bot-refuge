@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
@@ -8,15 +7,16 @@ from datetime import datetime, timezone
 from typing import Final, Mapping
 
 from models.refuge_world import RefugeHistoricalEvent, RefugeWorldState
-from rendering.refuge_casino import (
-    RefugeCasinoRenderer,
-    casino_scene_signature,
-    refuge_casino_renderer,
+from rendering.refuge_construction import (
+    RefugeConstructionRenderer,
+    construction_scene_signature,
+    refuge_construction_renderer,
 )
 from rendering.refuge_world import RefugeRenderContext
 from services.refuge_casino import RefugeCasinoService, refuge_casino_service
 from services.refuge_fire import RefugeFireService, refuge_fire_service
 from services.refuge_hall import RefugeHallService, refuge_hall_service
+from services.refuge_world_coordination import refuge_world_mutation_lock
 from utils.seasons import season_id_for, season_label
 
 
@@ -133,6 +133,14 @@ def event_label(event: RefugeHistoricalEvent | None) -> str | None:
         return "Une nouvelle trace est entrée au Hall"
     if event.event_type.endswith("secret_discovered"):
         return "Un mystère du Refuge a été découvert"
+    if event.event_type == "construction_vote_opened":
+        return "Un nouveau chantier s’est ouvert"
+    if event.event_type == "construction_vote_tied":
+        return "Le vote du chantier est à égalité"
+    if event.event_type == "construction_started":
+        return "Une construction a commencé"
+    if event.event_type == "construction_completed":
+        return "Un monument a été inauguré"
     return "Un nouvel événement a marqué le Refuge"
 
 
@@ -155,17 +163,16 @@ class RefugePanelService:
         fire_service: RefugeFireService = refuge_fire_service,
         hall_service: RefugeHallService = refuge_hall_service,
         casino_service: RefugeCasinoService = refuge_casino_service,
-        renderer: RefugeCasinoRenderer = refuge_casino_renderer,
+        renderer: RefugeConstructionRenderer = refuge_construction_renderer,
     ) -> None:
         self.fire_service = fire_service
         self.hall_service = hall_service
         self.casino_service = casino_service
         self.renderer = renderer
-        self._lock = asyncio.Lock()
 
     async def evaluate(self, *, at: datetime | None = None) -> RefugePanelSnapshot:
         now = _aware_utc(at)
-        async with self._lock:
+        async with refuge_world_mutation_lock():
             # Sequential evaluation is intentional: all three services share
             # RefugeWorldStore and each stage must observe the previous write.
             fire = await self.fire_service.evaluate(at=now)
@@ -182,7 +189,7 @@ class RefugePanelService:
                 fire.intensity,
                 fire.intensity.capitalize(),
             )
-            visual_signature = casino_scene_signature(state, context)
+            visual_signature = construction_scene_signature(state, context)
             summary_payload = {
                 "season_id": current_season,
                 "fire_level": fire.level,

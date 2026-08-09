@@ -5,8 +5,10 @@ from typing import Final, Literal
 
 import discord
 
-from services.refuge_exploration import refuge_exploration_service
+from services.refuge_construction import refuge_construction_service
+from services.refuge_exploration_runtime import refuge_exploration_runtime_service
 from services.refuge_panel import RefugePanelSnapshot
+from ui.refuge_construction_view import RefugeConstructionView
 from ui.refuge_exploration_view import (
     RefugeExplorerView,
     RefugeFootprintView,
@@ -25,11 +27,6 @@ _ACTION_COPY: Final[dict[str, tuple[str, str, str]]] = {
         "Les archives mensuelles du Refuge seront consultables depuis ce bouton.",
         "Les saisons passées deviendront des chapitres permanents de son histoire.",
     ),
-    "construction": (
-        "🏗️ Chantier",
-        "Les votes et le suivi des constructions apparaîtront ici lorsqu’un chantier sera ouvert.",
-        "Aucune action artificielle ne sera nécessaire pour accélérer une construction.",
-    ),
 }
 
 
@@ -39,7 +36,7 @@ def _roman(level: int) -> str:
 
 
 class RefugePendingActionView(discord.ui.LayoutView):
-    """Small ephemeral V2 response for actions scheduled after REFUGE-009."""
+    """Small ephemeral V2 response for actions scheduled after REFUGE-010."""
 
     def __init__(self, action: RefugePanelAction) -> None:
         super().__init__(timeout=120)
@@ -74,7 +71,7 @@ class RefugePanelButton(discord.ui.Button):
         self.action = action
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if self.action not in {"explore", "footprint"}:
+        if self.action == "timeline":
             await interaction.response.send_message(
                 view=RefugePendingActionView(self.action),
                 ephemeral=True,
@@ -84,13 +81,13 @@ class RefugePanelButton(discord.ui.Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             if self.action == "explore":
-                snapshot = await refuge_exploration_service.get_explorer()
+                snapshot = await refuge_exploration_runtime_service.get_explorer()
                 view: discord.ui.LayoutView = RefugeExplorerView(
                     snapshot,
                     owner_user_id=interaction.user.id,
                 )
-            else:
-                snapshot = await refuge_exploration_service.get_footprint(
+            elif self.action == "footprint":
+                snapshot = await refuge_exploration_runtime_service.get_footprint(
                     interaction.user.id
                 )
                 avatar = getattr(interaction.user, "display_avatar", None)
@@ -110,6 +107,14 @@ class RefugePanelButton(discord.ui.Button):
                     snapshot,
                     display_name=display_name,
                     avatar_url=avatar_url,
+                )
+            else:
+                snapshot = await refuge_construction_service.get_snapshot(
+                    interaction.user.id
+                )
+                view = RefugeConstructionView(
+                    snapshot,
+                    owner_user_id=interaction.user.id,
                 )
         except Exception:
             logger.exception(
