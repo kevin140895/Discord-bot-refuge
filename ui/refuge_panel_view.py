@@ -24,22 +24,6 @@ REFUGE_MAP_FILENAME: Final[str] = "refuge-map.png"
 RefugePanelAction = Literal["explore", "footprint", "timeline", "construction"]
 
 
-class RefugePendingActionView(discord.ui.LayoutView):
-    """Compatibility shell retained after all REFUGE V1 panel actions became active."""
-
-    def __init__(self, action: RefugePanelAction) -> None:
-        super().__init__(timeout=120)
-        container = discord.ui.Container(accent_colour=REFUGE_PANEL_ACCENT)
-        container.add_item(discord.ui.TextDisplay("## 🏕️ Le Refuge"))
-        container.add_item(discord.ui.Separator())
-        container.add_item(
-            discord.ui.TextDisplay(
-                f"L’action **{action}** est désormais disponible depuis le panneau principal."
-            )
-        )
-        self.add_item(container)
-
-
 class RefugePanelButton(discord.ui.Button):
     """Persistent public control dispatching to private Refuge surfaces."""
 
@@ -222,7 +206,6 @@ __all__ = [
     "REFUGE_MAP_FILENAME",
     "REFUGE_PANEL_ACCENT",
     "RefugePanelButton",
-    "RefugePendingActionView",
     "RefugePublicControlsView",
     "RefugePublicPanelView",
     "refuge_controls_row",
