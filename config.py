@@ -53,7 +53,7 @@ except AttributeError:
 
 # ── Horaires du casino ────────────────────────────────────────
 CASINO_OPEN_HOUR: int = int(os.getenv("CASINO_OPEN_HOUR", "10"))
-CASINO_CLOSE_HOUR: int = int(os.getenv("CASINO_CLOSE_HOUR", "2"))
+CASINO_CLOSE_HOUR: int = int(os.getenv("CASINO_CLOSE_HOUR", "6"))
 CASINO_SCHEDULE_LABEL = f"{CASINO_OPEN_HOUR:02d}h00 - {CASINO_CLOSE_HOUR:02d}h00"
 
 
@@ -138,9 +138,9 @@ ROCK_RADIO_STREAM_URL = os.getenv(
 
 
 # ── Divers ────────────────────────────────────────────────────
-XP_VIEWER_ROLE_ID = 1403510368340410550
+XP_VIEWER_ROLE_ID = 1403510366340410550
 TOP_MSG_ROLE_ID = 1406412171965104208
-TOP_VC_ROLE_ID = 1406412383878119485
+TOP_VC_ROLE_ID = 1406412383878111985
 MVP_ROLE_ID = 1406412507433795595
 
 ANNOUNCE_CHANNEL_ID: int = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
