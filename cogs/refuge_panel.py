@@ -58,6 +58,20 @@ def panel_refresh_action(
     return "none"
 
 
+def panel_reference_needs_retirement(
+    panel: RefugePanelState,
+    *,
+    target_channel_id: int,
+) -> bool:
+    """Whether a stored Refuge panel points at another configured channel."""
+
+    return (
+        panel.channel_id is not None
+        and panel.message_id is not None
+        and panel.channel_id != int(target_channel_id)
+    )
+
+
 class RefugePanelCog(commands.Cog):
     """Maintain exactly one low-churn public panel for the living Refuge."""
 
@@ -111,6 +125,47 @@ class RefugePanelCog(commands.Cog):
             return None
         return channel
 
+    async def _retire_previous_panel_if_moved(
+        self,
+        *,
+        target_channel_id: int,
+    ) -> None:
+        """Best-effort removal of the previously owned panel after channel moves."""
+
+        state = await self.world_store.get_state()
+        panel = state.panel
+        if not panel_reference_needs_retirement(
+            panel,
+            target_channel_id=target_channel_id,
+        ):
+            return
+
+        assert panel.channel_id is not None
+        assert panel.message_id is not None
+        old_channel = self.bot.get_channel(panel.channel_id)
+        if old_channel is None:
+            try:
+                old_channel = await self.bot.fetch_channel(panel.channel_id)
+            except discord.HTTPException:
+                logger.warning(
+                    "[refuge] Ancien salon du panneau inaccessible: %s",
+                    panel.channel_id,
+                )
+                return
+        if not isinstance(old_channel, (discord.TextChannel, discord.Thread)):
+            return
+        try:
+            old_message = await old_channel.fetch_message(panel.message_id)
+            await old_message.delete()
+        except discord.NotFound:
+            return
+        except discord.HTTPException:
+            logger.warning(
+                "[refuge] Impossible de retirer l'ancien panneau %s/%s",
+                panel.channel_id,
+                panel.message_id,
+            )
+
     async def _fetch_stored_message(
         self,
         channel: discord.TextChannel | discord.Thread,
@@ -156,6 +211,9 @@ class RefugePanelCog(commands.Cog):
             if channel is None:
                 return
 
+            await self._retire_previous_panel_if_moved(
+                target_channel_id=channel.id,
+            )
             message = await self._fetch_stored_message(channel)
             snapshot = await self.panel_service.evaluate()
             action = panel_refresh_action(
@@ -230,5 +288,6 @@ __all__ = [
     "REFUGE_PANEL_CHANNEL_ID",
     "REFUGE_PANEL_REFRESH_SECONDS",
     "RefugePanelCog",
+    "panel_reference_needs_retirement",
     "panel_refresh_action",
 ]
