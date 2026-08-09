@@ -185,7 +185,7 @@ async def test_service_keeps_unrelated_buildings_and_world_state(tmp_path):
     assert result.state.state == {"season_visual": "summer"}
 
 
-def test_render_signature_ignores_history_and_panel_but_tracks_visual_state():
+def test_render_signature_ignores_history_panel_and_orchestration_metadata():
     started = "2026-08-09T04:45:00+00:00"
     fire = RefugeBuildingState(
         building_id="fire",
@@ -213,11 +213,30 @@ def test_render_signature_ignores_history_and_panel_but_tracks_visual_state():
                 data={},
             ),
         ),
+        state={
+            "season_visual": "summer",
+            "refuge_timeline": {
+                "active_season_id": "2026-08",
+                "last_archived_season_id": None,
+            },
+            "refuge_secrets": {"enabled_at": started},
+            "construction_enabled_at": started,
+            "construction_pending_goals": [{"id": "goal-2"}],
+            "construction_consumed_goal_ids": ["goal-1"],
+        },
     )
     assert world_render_signature(metadata_only) == signature
 
     visual_change = replace(state, state={"season_visual": "autumn"})
     assert world_render_signature(visual_change) != signature
+
+    secret_visual_change = replace(
+        state,
+        buildings=(
+            replace(fire, state={"intensity": "normal", "secret_events": ["full_circle"]}),
+        ),
+    )
+    assert world_render_signature(secret_visual_change) != signature
 
 
 @pytest.mark.asyncio
