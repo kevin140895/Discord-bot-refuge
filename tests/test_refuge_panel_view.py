@@ -86,22 +86,17 @@ def test_callback_registration_view_is_persistent_and_has_same_custom_ids():
     ]
 
 
-def test_only_timeline_and_construction_remain_pending_after_refuge_009():
-    for action, expected in (
-        ("timeline", "Chronologie"),
-        ("construction", "Chantier"),
-    ):
-        view = RefugePendingActionView(action)
-        assert isinstance(view, discord.ui.LayoutView)
-        assert view.timeout == 120
-        text = "\n".join(
-            item.content
-            for item in view.walk_children()
-            if isinstance(item, discord.ui.TextDisplay)
-        )
-        assert expected in text
+def test_only_timeline_remains_pending_after_refuge_010():
+    view = RefugePendingActionView("timeline")
+    assert isinstance(view, discord.ui.LayoutView)
+    assert view.timeout == 120
+    text = "\n".join(
+        item.content
+        for item in view.walk_children()
+        if isinstance(item, discord.ui.TextDisplay)
+    )
+    assert "Chronologie" in text
 
-    with pytest.raises(ValueError):
-        RefugePendingActionView("explore")
-    with pytest.raises(ValueError):
-        RefugePendingActionView("footprint")
+    for action in ("explore", "footprint", "construction"):
+        with pytest.raises(ValueError):
+            RefugePendingActionView(action)
