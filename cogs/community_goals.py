@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from config import ANNOUNCE_CHANNEL_ID
+from services.community_goal_automation import community_goal_automation_service
 from storage.community_goal_store import ACTIVE_STATUS, community_goal_store
 from storage.season_store import season_store
 from ui.community_goals_view import CommunityGoalDisplay, CommunityGoalsView
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class CommunityGoalsCog(commands.Cog):
-    """Staff-created collective objectives backed by seasonal activity data."""
+    """Collective objectives backed by real seasonal activity data."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -58,20 +59,26 @@ class CommunityGoalsCog(commands.Cog):
             int(goal.get("target", 0)),
         )
 
-    async def _announce_completion(
-        self,
-        goal: dict[str, Any],
-        progress: int,
-    ) -> None:
+    async def _announcement_channel(self) -> discord.TextChannel | discord.Thread | None:
         if ANNOUNCE_CHANNEL_ID <= 0:
-            return
+            return None
         channel = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(ANNOUNCE_CHANNEL_ID)
             except discord.HTTPException:
-                return
+                return None
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return None
+        return channel
+
+    async def _announce_completion(
+        self,
+        goal: dict[str, Any],
+        progress: int,
+    ) -> None:
+        channel = await self._announcement_channel()
+        if channel is None:
             return
 
         metric = COMMUNITY_GOAL_METRICS_BY_KEY.get(str(goal.get("metric_key", "")))
@@ -92,6 +99,38 @@ class CommunityGoalsCog(commands.Cog):
             await channel.send(embed=embed)
         except discord.HTTPException:
             logger.warning("Impossible d'annoncer l'objectif communautaire atteint")
+
+    async def _announce_automatic_goal(self, goal: dict[str, Any]) -> None:
+        channel = await self._announcement_channel()
+        if channel is None:
+            return
+        metric = COMMUNITY_GOAL_METRICS_BY_KEY.get(str(goal.get("metric_key", "")))
+        if metric is None:
+            return
+
+        metadata = goal.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        difficulty = str(metadata.get("difficulty_label") or "Variable")
+        try:
+            duration_days = max(1, int(metadata.get("duration_days", 1)))
+        except (TypeError, ValueError):
+            duration_days = 1
+        target = max(1, int(goal.get("target", 1)))
+        title = str(goal.get("title") or metric.label)
+        embed = discord.Embed(
+            title="🎯 Un nouvel objectif apparaît au Refuge",
+            description=(
+                f"### {metric.emoji} {title}\n"
+                f"Cible : **{format_goal_value(metric.key, target)}**\n"
+                f"Difficulté : **{difficulty}** · Durée : **{duration_days} jour(s)**\n\n"
+                "-# La cible a été calibrée sur l'activité réelle de la saison actuelle."
+            ),
+        )
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            logger.warning("Impossible d'annoncer l'objectif communautaire automatique")
 
     async def _evaluate_goals(self) -> None:
         active_goals = await community_goal_store.list_goals(status=ACTIVE_STATUS)
@@ -142,6 +181,9 @@ class CommunityGoalsCog(commands.Cog):
     async def evaluate_community_goals(self) -> None:
         try:
             await self._evaluate_goals()
+            automation = await community_goal_automation_service.sync()
+            if automation.created_goal is not None:
+                await self._announce_automatic_goal(automation.created_goal)
         except Exception:
             logger.exception("Erreur pendant l'évaluation des objectifs communautaires")
 
@@ -255,6 +297,7 @@ class CommunityGoalsCog(commands.Cog):
                 ends_at=now + timedelta(days=int(duree_jours)),
                 title=titre,
                 reward_text=recompense,
+                source="manual",
             )
         except ValueError as exc:
             if "already exists" in str(exc):
