@@ -5,7 +5,12 @@ from typing import Callable, Optional
 
 import discord
 
-from utils.audio import FFMPEG_BEFORE, FFMPEG_OPTIONS
+from utils.audio import (
+    FFMPEG_BEFORE,
+    FFMPEG_OPTIONS,
+    FFMPEG_VOD_BEFORE,
+    FFMPEG_VOD_OPTIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,16 +83,28 @@ def play_stream(
     after: Optional[Callable[[Optional[Exception]], None]] = None,
     headers: Optional[str] = None,
 ) -> None:
-    """Lance la lecture du flux ``stream_url`` si rien n'est joué."""
+    """Lance la lecture du flux ``stream_url`` si rien n'est joué.
+
+    Les radios live conservent le profil faible latence historique. Les flux
+    à la demande résolus par yt-dlp fournissent des en-têtes HTTP ; ils utilisent
+    alors un profil FFmpeg séparé avec buffering normal et reconnexion réseau.
+    """
     if voice and not voice.is_playing():
         if shutil.which("ffmpeg") is None:
             logger.warning("FFmpeg introuvable: impossible de lire le flux %s", stream_url)
             return
-        before_options = FFMPEG_BEFORE
+
         header_value = headers.strip() if headers else ""
+        is_on_demand = bool(header_value)
+        before_options = FFMPEG_VOD_BEFORE if is_on_demand else FFMPEG_BEFORE
+        ffmpeg_options = FFMPEG_VOD_OPTIONS if is_on_demand else FFMPEG_OPTIONS
+
         if header_value:
             before_options = f"{before_options} -headers {shlex.quote(header_value)}"
+
         source = discord.FFmpegPCMAudio(
-            stream_url, before_options=before_options, options=FFMPEG_OPTIONS
+            stream_url,
+            before_options=before_options,
+            options=ffmpeg_options,
         )
         voice.play(source, after=after)
