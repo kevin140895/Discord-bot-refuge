@@ -29,19 +29,19 @@ def _view_text(view: discord.ui.LayoutView) -> str:
 
 def test_is_open_now_respects_overnight_schedule(monkeypatch):
     monkeypatch.setattr(pari_xp, "CASINO_OPEN_HOUR", 10)
-    monkeypatch.setattr(pari_xp, "CASINO_CLOSE_HOUR", 2)
+    monkeypatch.setattr(pari_xp, "CASINO_CLOSE_HOUR", 6)
     cog = _make_cog()
 
     assert cog._is_open_now(pari_xp.datetime(2026, 8, 8, 10, 0, tzinfo=pari_xp.PARIS_TZ))
-    assert cog._is_open_now(pari_xp.datetime(2026, 8, 9, 1, 59, tzinfo=pari_xp.PARIS_TZ))
+    assert cog._is_open_now(pari_xp.datetime(2026, 8, 9, 5, 59, tzinfo=pari_xp.PARIS_TZ))
     assert not cog._is_open_now(pari_xp.datetime(2026, 8, 8, 9, 59, tzinfo=pari_xp.PARIS_TZ))
-    assert not cog._is_open_now(pari_xp.datetime(2026, 8, 9, 2, 0, tzinfo=pari_xp.PARIS_TZ))
+    assert not cog._is_open_now(pari_xp.datetime(2026, 8, 9, 6, 0, tzinfo=pari_xp.PARIS_TZ))
 
 
 def test_roulette_v2_reflects_active_state(monkeypatch):
     monkeypatch.setattr(pari_xp, "CASINO_OPEN_HOUR", 10)
-    monkeypatch.setattr(pari_xp, "CASINO_CLOSE_HOUR", 2)
-    monkeypatch.setattr(pari_xp, "CASINO_SCHEDULE_LABEL", "10h00 - 02h00")
+    monkeypatch.setattr(pari_xp, "CASINO_CLOSE_HOUR", 6)
+    monkeypatch.setattr(pari_xp, "CASINO_SCHEDULE_LABEL", "10h00 - 06h00")
     cog = _make_cog(is_open=True)
     cog.state["total_bets"] = 250
     cog.state["total_winnings"] = 100
@@ -52,7 +52,7 @@ def test_roulette_v2_reflects_active_state(monkeypatch):
     assert isinstance(view, discord.ui.LayoutView)
     assert "🎰 Pari XP" in text
     assert "🟢 **Ouvert**" in text
-    assert "ferme à **02:00**" in text
+    assert "ferme à **06:00**" in text
     assert "XP misés : **250**" in text
     assert "XP gagnés : **100**" in text
 
