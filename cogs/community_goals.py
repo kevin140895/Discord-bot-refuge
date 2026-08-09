@@ -199,6 +199,7 @@ class CommunityGoalsCog(commands.Cog):
         await self._evaluate_goals()
         active_goals = await community_goal_store.list_goals(status=ACTIVE_STATUS)
         completed = await community_goal_store.list_goals(status="completed")
+        automation_state = await community_goal_store.get_automation_state()
 
         display_goals: list[CommunityGoalDisplay] = []
         for goal in active_goals:
@@ -217,6 +218,16 @@ class CommunityGoalsCog(commands.Cog):
             except (TypeError, ValueError):
                 deadline = "échéance inconnue"
 
+            automation_note = None
+            if goal.get("source") == "automatic":
+                metadata = goal.get("metadata", {})
+                difficulty = (
+                    str(metadata.get("difficulty_label") or "Variable")
+                    if isinstance(metadata, dict)
+                    else "Variable"
+                )
+                automation_note = f"🤖 Objectif automatique · difficulté **{difficulty}**"
+
             display_goals.append(
                 CommunityGoalDisplay(
                     title=str(goal.get("title") or metric.label),
@@ -231,6 +242,7 @@ class CommunityGoalsCog(commands.Cog):
                         if goal.get("reward_text")
                         else None
                     ),
+                    automation_note=automation_note,
                 )
             )
 
@@ -243,9 +255,26 @@ class CommunityGoalsCog(commands.Cog):
                 continue
             recent_completed.append(str(goal.get("title") or metric.label))
 
+        if active_goals:
+            automation_status = "🤖 Automatisation en pause tant qu’un objectif est actif."
+        else:
+            next_goal_at = automation_state.get("next_goal_at")
+            try:
+                parsed = datetime.fromisoformat(str(next_goal_at))
+                next_timestamp = int(parsed.timestamp())
+            except (TypeError, ValueError):
+                next_timestamp = 0
+            if next_timestamp > 0:
+                automation_status = (
+                    f"🤖 Prochain tirage automatique : <t:{next_timestamp}:R>."
+                )
+            else:
+                automation_status = "🤖 Automatisation prête pour le prochain tirage."
+
         view = CommunityGoalsView(
             active_goals=tuple(display_goals),
             completed_titles=tuple(recent_completed),
+            automation_status=automation_status,
         )
         await interaction.response.send_message(view=view)
 
