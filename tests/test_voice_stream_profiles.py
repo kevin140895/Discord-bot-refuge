@@ -1,5 +1,3 @@
-from unittest.mock import Mock
-
 import utils.voice as voice_utils
 from utils.audio import (
     FFMPEG_BEFORE,
