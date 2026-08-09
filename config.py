@@ -138,9 +138,9 @@ ROCK_RADIO_STREAM_URL = os.getenv(
 
 
 # ── Divers ────────────────────────────────────────────────────
-XP_VIEWER_ROLE_ID = 1403510366340410550
+XP_VIEWER_ROLE_ID = 1403510368340410550
 TOP_MSG_ROLE_ID = 1406412171965104208
-TOP_VC_ROLE_ID = 1406412383878111985
+TOP_VC_ROLE_ID = 1406412383878119485
 MVP_ROLE_ID = 1406412507433795595
 
 ANNOUNCE_CHANNEL_ID: int = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
@@ -277,7 +277,7 @@ CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL: int = int(
 CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = int(
     os.getenv("CHANNEL_RENAME_MIN_INTERVAL_GLOBAL", "2")
 )
-"""Intervalle minimal global entre les renommages de salons."""
+"""Intervalle minimal global entre les éditions de salons."""
 
 CHANNEL_RENAME_DEBOUNCE_SECONDS: int = int(
     os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "2")
