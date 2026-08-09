@@ -277,7 +277,7 @@ CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL: int = int(
 CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = int(
     os.getenv("CHANNEL_RENAME_MIN_INTERVAL_GLOBAL", "2")
 )
-"""Intervalle minimal global entre les éditions de salons."""
+"""Intervalle minimal global entre les renommages de salons."""
 
 CHANNEL_RENAME_DEBOUNCE_SECONDS: int = int(
     os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "2")
