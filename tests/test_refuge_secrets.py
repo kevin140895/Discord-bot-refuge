@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -147,14 +146,17 @@ async def test_hall_secrets_use_post_activation_achievement_history(tmp_path):
     assert by_category
 
     users = {"42": {}, "99": {}}
+    base_time = datetime(2026, 8, 9, 10, 0, tzinfo=timezone.utc)
     for index, achievement_id in enumerate(by_category.values()):
         user = "42" if index % 2 == 0 else "99"
-        users[user][achievement_id] = f"2026-08-09T{10 + index:02d}:00:00+00:00"
+        users[user][achievement_id] = (base_time + timedelta(minutes=index)).isoformat()
     if not users["99"]:
-        # Keep the rarity rule meaningful even if the catalogue ever collapses
-        # to one category.
-        extra_id = next(iter(ACHIEVEMENT_BY_ID))
-        users["99"][extra_id] = "2026-08-09T20:00:00+00:00"
+        used = set(users["42"])
+        extra_id = next(
+            (item for item in ACHIEVEMENT_BY_ID if item not in used),
+            next(iter(ACHIEVEMENT_BY_ID)),
+        )
+        users["99"][extra_id] = (base_time + timedelta(hours=1)).isoformat()
     achievements.snapshot = {"users": users}
 
     result = await service.sync(
@@ -179,9 +181,8 @@ async def test_casino_regular_and_secret_markers_are_separate_and_idempotent(tmp
     service, world_store, _voice, _achievements, casino = await _service(tmp_path)
     await service.sync(at=datetime(2026, 8, 8, 0, 0, tzinfo=timezone.utc))
 
-    # 23:00 local: observed night activity, players ahead of the house, and
-    # both prospective jackpot tiers. Exact conditions remain internal to the
-    # engine; Discord only sees discoveries once persisted.
+    # 23:00 local provides real night activity. The jackpot timestamps are
+    # deliberately inside the configured closed window (07:00 local).
     casino.snapshot = {
         "recent_buckets": {
             "2026-08-09T21:00:00+00:00": {
@@ -196,13 +197,13 @@ async def test_casino_regular_and_secret_markers_are_separate_and_idempotent(tmp
                 "event_id": "j500",
                 "user_id": 42,
                 "tier": 500,
-                "occurred_at": "2026-08-09T21:00:00+00:00",
+                "occurred_at": "2026-08-09T05:00:00+00:00",
             },
             {
                 "event_id": "j1000",
                 "user_id": 99,
                 "tier": 1000,
-                "occurred_at": "2026-08-09T21:01:00+00:00",
+                "occurred_at": "2026-08-09T05:01:00+00:00",
             },
         ],
     }
@@ -219,6 +220,10 @@ async def test_casino_regular_and_secret_markers_are_separate_and_idempotent(tmp
         set(casino_building.state["secret_events"])
     )
     assert any(item.marker_id == "diamond" for item in first.discoveries)
+    for event in state.events:
+        if event.event_type.endswith("secret_discovered"):
+            assert "condition" not in event.data
+            assert "trigger" not in event.data
 
     again = await service.sync(
         at=datetime(2026, 8, 9, 21, 6, tzinfo=timezone.utc)
