@@ -11,6 +11,7 @@ from discord.ext import commands, tasks
 from config import ANNOUNCE_CHANNEL_ID
 from storage.community_goal_store import ACTIVE_STATUS, community_goal_store
 from storage.season_store import season_store
+from ui.community_goals_view import CommunityGoalDisplay, CommunityGoalsView
 from utils.community_goals import (
     COMMUNITY_GOAL_METRICS,
     COMMUNITY_GOAL_METRICS_BY_KEY,
@@ -157,57 +158,54 @@ class CommunityGoalsCog(commands.Cog):
         active_goals = await community_goal_store.list_goals(status=ACTIVE_STATUS)
         completed = await community_goal_store.list_goals(status="completed")
 
-        embed = discord.Embed(title="🎯 Objectifs communautaires")
-        if not active_goals:
-            embed.description = "Aucun objectif communautaire actif pour le moment."
-        else:
-            for goal in active_goals:
-                metric = COMMUNITY_GOAL_METRICS_BY_KEY.get(
-                    str(goal.get("metric_key", ""))
-                )
-                if metric is None:
-                    continue
-                progress = await self._goal_progress(goal)
-                target = int(goal.get("target", 0))
-                percent = progress_percent(progress, target)
-                try:
-                    ends_at = datetime.fromisoformat(str(goal.get("ends_at")))
-                    end_timestamp = int(ends_at.timestamp())
-                    deadline = f"<t:{end_timestamp}:R>"
-                except (TypeError, ValueError):
-                    deadline = "échéance inconnue"
+        display_goals: list[CommunityGoalDisplay] = []
+        for goal in active_goals:
+            metric = COMMUNITY_GOAL_METRICS_BY_KEY.get(
+                str(goal.get("metric_key", ""))
+            )
+            if metric is None:
+                continue
+            progress = await self._goal_progress(goal)
+            target = int(goal.get("target", 0))
+            percent = progress_percent(progress, target)
+            try:
+                ends_at = datetime.fromisoformat(str(goal.get("ends_at")))
+                end_timestamp = int(ends_at.timestamp())
+                deadline = f"<t:{end_timestamp}:R>"
+            except (TypeError, ValueError):
+                deadline = "échéance inconnue"
 
-                title = str(goal.get("title") or metric.label)
-                value = (
-                    f"{progress_bar(progress, target)} **{percent}%**\n"
-                    f"{metric.emoji} {format_goal_value(metric.key, progress)} / "
-                    f"{format_goal_value(metric.key, target)}\n"
-                    f"⏳ Fin {deadline}"
+            display_goals.append(
+                CommunityGoalDisplay(
+                    title=str(goal.get("title") or metric.label),
+                    metric_emoji=metric.emoji,
+                    progress_value=format_goal_value(metric.key, progress),
+                    target_value=format_goal_value(metric.key, target),
+                    percent=percent,
+                    progress_bar=progress_bar(progress, target),
+                    deadline=deadline,
+                    reward_text=(
+                        str(goal["reward_text"])
+                        if goal.get("reward_text")
+                        else None
+                    ),
                 )
-                if goal.get("reward_text"):
-                    value += f"\n🎁 Récompense prévue : {goal['reward_text']}"
-                embed.add_field(name=title, value=value, inline=False)
+            )
 
-        if completed:
-            recent = completed[:3]
-            lines = []
-            for goal in recent:
-                metric = COMMUNITY_GOAL_METRICS_BY_KEY.get(
-                    str(goal.get("metric_key", ""))
-                )
-                if metric is None:
-                    continue
-                title = str(goal.get("title") or metric.label)
-                lines.append(f"✅ {title}")
-            if lines:
-                embed.add_field(
-                    name="Derniers objectifs réussis",
-                    value="\n".join(lines),
-                    inline=False,
-                )
+        recent_completed: list[str] = []
+        for goal in completed[:3]:
+            metric = COMMUNITY_GOAL_METRICS_BY_KEY.get(
+                str(goal.get("metric_key", ""))
+            )
+            if metric is None:
+                continue
+            recent_completed.append(str(goal.get("title") or metric.label))
 
-        embed.set_footer(text="Progression calculée depuis la création de chaque objectif")
-        await interaction.response.send_message(embed=embed)
+        view = CommunityGoalsView(
+            active_goals=tuple(display_goals),
+            completed_titles=tuple(recent_completed),
+        )
+        await interaction.response.send_message(view=view)
 
     @app_commands.command(
         name="objectif_creer",
