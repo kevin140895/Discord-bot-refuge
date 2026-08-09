@@ -11,7 +11,6 @@ from cogs.machine_a_sous.machine_a_sous import (
     MachineASousView,
     _is_machine_poster_message,
     _poster_has_play_button,
-    _poster_is_components_v2,
 )
 
 
@@ -64,25 +63,23 @@ def test_slot_machine_v2_open_and_closed_posters_keep_same_play_contract() -> No
     assert _buttons(closed) == []
 
 
-def test_slot_poster_detection_distinguishes_legacy_and_components_v2() -> None:
+def test_slot_poster_detection_uses_components_v2_contract() -> None:
     v2_view = MachineASousView(enabled=True)
     v2_message = SimpleNamespace(embeds=[], components=v2_view.children)
 
     assert _is_machine_poster_message(v2_message)
-    assert _poster_is_components_v2(v2_message)
     assert _poster_has_play_button(v2_message)
 
-    legacy_message = SimpleNamespace(
+    legacy_embed = SimpleNamespace(
         embeds=[SimpleNamespace(title="🎰 Machine à sous")],
         components=[],
     )
-    assert _is_machine_poster_message(legacy_message)
-    assert not _poster_is_components_v2(legacy_message)
-    assert not _poster_has_play_button(legacy_message)
+    assert not _is_machine_poster_message(legacy_embed)
+    assert not _poster_has_play_button(legacy_embed)
 
 
 @pytest.mark.asyncio
-async def test_discovered_legacy_slot_poster_is_registered_before_replacement(
+async def test_discovered_v2_slot_poster_is_registered_without_replacement(
     monkeypatch,
 ) -> None:
     class FakeTextChannel:
@@ -90,18 +87,19 @@ async def test_discovered_legacy_slot_poster_is_registered_before_replacement(
 
         async def history(self, *, limit: int):
             assert limit == 20
-            yield legacy_message
+            yield existing_message
 
     class FakeThread:
         pass
 
     channel = FakeTextChannel()
-    legacy_message = SimpleNamespace(
+    v2_view = MachineASousView(enabled=True)
+    existing_message = SimpleNamespace(
         id=321,
         author=SimpleNamespace(id=999),
         channel=channel,
-        embeds=[SimpleNamespace(title="🎰 Machine à sous")],
-        components=[],
+        embeds=[],
+        components=v2_view.children,
     )
     bot = SimpleNamespace(
         user=SimpleNamespace(id=999),
@@ -115,18 +113,15 @@ async def test_discovered_legacy_slot_poster_is_registered_before_replacement(
     cog.bot = bot
     cog.store = store
     cog.current_view_enabled = True
-
-    async def replace_after_registration() -> None:
-        store.set_poster.assert_called_once_with(
-            channel_id=str(channel.id),
-            message_id=str(legacy_message.id),
-        )
-
-    cog._replace_poster_message = AsyncMock(side_effect=replace_after_registration)
+    cog._replace_poster_message = AsyncMock()
 
     monkeypatch.setattr(machine_a_sous.discord, "TextChannel", FakeTextChannel)
     monkeypatch.setattr(machine_a_sous.discord, "Thread", FakeThread)
 
     await MachineASousCog._ensure_poster_message(cog)
 
-    cog._replace_poster_message.assert_awaited_once()
+    store.set_poster.assert_called_once_with(
+        channel_id=str(channel.id),
+        message_id=str(existing_message.id),
+    )
+    cog._replace_poster_message.assert_not_awaited()
