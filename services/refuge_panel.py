@@ -16,6 +16,7 @@ from rendering.refuge_world import RefugeRenderContext
 from services.refuge_casino import RefugeCasinoService, refuge_casino_service
 from services.refuge_fire import RefugeFireService, refuge_fire_service
 from services.refuge_hall import RefugeHallService, refuge_hall_service
+from services.refuge_timeline import RefugeTimelineService, refuge_timeline_service
 from services.refuge_world_coordination import refuge_world_mutation_lock
 from utils.seasons import season_id_for, season_label
 
@@ -163,16 +164,22 @@ class RefugePanelService:
         fire_service: RefugeFireService = refuge_fire_service,
         hall_service: RefugeHallService = refuge_hall_service,
         casino_service: RefugeCasinoService = refuge_casino_service,
+        timeline_service: RefugeTimelineService = refuge_timeline_service,
         renderer: RefugeConstructionRenderer = refuge_construction_renderer,
     ) -> None:
         self.fire_service = fire_service
         self.hall_service = hall_service
         self.casino_service = casino_service
+        self.timeline_service = timeline_service
         self.renderer = renderer
 
     async def evaluate(self, *, at: datetime | None = None) -> RefugePanelSnapshot:
         now = _aware_utc(at)
         async with refuge_world_mutation_lock():
+            # REFUGE-011 must archive the previous Paris calendar month before
+            # any current-month progression can mutate the shared world state.
+            await self.timeline_service.sync_under_world_lock(at=now)
+
             # Sequential evaluation is intentional: all three services share
             # RefugeWorldStore and each stage must observe the previous write.
             fire = await self.fire_service.evaluate(at=now)
