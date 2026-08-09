@@ -7,7 +7,6 @@ from rendering.refuge_world import RefugeRenderContext
 from services.refuge_panel import RefugePanelSnapshot
 from ui.refuge_panel_view import (
     REFUGE_MAP_FILENAME,
-    RefugePendingActionView,
     RefugePublicControlsView,
     RefugePublicPanelView,
 )
@@ -85,13 +84,11 @@ def test_callback_registration_view_is_persistent_and_has_same_custom_ids():
     ]
 
 
-def test_no_panel_action_is_described_as_future_after_refuge_011():
-    for action in ("explore", "footprint", "timeline", "construction"):
-        view = RefugePendingActionView(action)
-        text = "\n".join(
-            item.content
-            for item in view.walk_children()
-            if isinstance(item, discord.ui.TextDisplay)
-        )
-        assert "désormais disponible" in text
-        assert "sera" not in text
+def test_refuge_011_keeps_all_four_public_actions_registered():
+    controls = RefugePublicControlsView()
+    assert {button.custom_id for button in _buttons(controls)} == {
+        "refuge:panel:explore",
+        "refuge:panel:footprint",
+        "refuge:panel:timeline",
+        "refuge:panel:construction",
+    }
