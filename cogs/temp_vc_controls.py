@@ -339,6 +339,37 @@ class TempVCControlsCog(commands.Cog):
             category_id = getattr(category, "id", None)
         return category_id == TEMP_VC_CATEGORY
 
+    async def _ensure_owner_access(
+        self,
+        channel: discord.VoiceChannel,
+        owner: discord.Member,
+    ) -> None:
+        """Keep the owner able to see and rejoin a locked/hidden channel."""
+        overwrite = channel.overwrites_for(owner)
+        overwrite.view_channel = True
+        overwrite.connect = True
+        overwrite.speak = True
+        await channel.set_permissions(
+            owner,
+            overwrite=overwrite,
+            reason="Protection accès propriétaire Temp VC",
+        )
+
+    async def _ensure_current_owner_access(
+        self,
+        channel: discord.VoiceChannel,
+        guild: discord.Guild,
+    ) -> None:
+        owner_id = self._owners.get(channel.id)
+        if owner_id is None:
+            return
+        getter = getattr(guild, "get_member", None)
+        if not callable(getter):
+            return
+        owner = getter(owner_id)
+        if isinstance(owner, discord.Member):
+            await self._ensure_owner_access(channel, owner)
+
     async def require_control_channel(
         self,
         interaction: discord.Interaction,
@@ -446,6 +477,7 @@ class TempVCControlsCog(commands.Cog):
         if channel is None or interaction.guild is None:
             return
 
+        await self._ensure_current_owner_access(channel, interaction.guild)
         overwrite = channel.overwrites_for(interaction.guild.default_role)
         overwrite.connect = False if locked else None
         await channel.set_permissions(
@@ -467,6 +499,7 @@ class TempVCControlsCog(commands.Cog):
         if channel is None or interaction.guild is None:
             return
 
+        await self._ensure_current_owner_access(channel, interaction.guild)
         overwrite = channel.overwrites_for(interaction.guild.default_role)
         overwrite.view_channel = False if hidden else None
         await channel.set_permissions(
@@ -506,6 +539,7 @@ class TempVCControlsCog(commands.Cog):
             return
 
         await self._set_owner(channel.id, member.id)
+        await self._ensure_owner_access(channel, member)
         await interaction.response.send_message(
             "👑 Tu es maintenant propriétaire du salon.",
             ephemeral=True,
@@ -708,6 +742,7 @@ class TempVCControlsCog(commands.Cog):
             return
 
         await self._set_owner(channel.id, target.id)
+        await self._ensure_owner_access(channel, target)
         await interaction.response.send_message(
             f"🔁 {target.mention} est maintenant propriétaire du salon.",
             ephemeral=True,
