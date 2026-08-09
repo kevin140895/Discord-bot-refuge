@@ -1,8 +1,13 @@
 from cogs.refuge_panel import (
+    DEFAULT_REFUGE_PANEL_CHANNEL_ID,
     panel_reference_needs_retirement,
     panel_refresh_action,
 )
 from models.refuge_world import RefugePanelState
+
+
+def test_default_public_panel_channel_is_refuge_channel():
+    assert DEFAULT_REFUGE_PANEL_CHANNEL_ID == 1536027732071161987
 
 
 def test_refresh_creates_when_message_is_missing():

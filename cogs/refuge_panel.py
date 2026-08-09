@@ -30,7 +30,11 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-REFUGE_PANEL_CHANNEL_ID = max(0, _env_int("REFUGE_PANEL_CHANNEL_ID", 0))
+DEFAULT_REFUGE_PANEL_CHANNEL_ID = 1536027732071161987
+REFUGE_PANEL_CHANNEL_ID = max(
+    0,
+    _env_int("REFUGE_PANEL_CHANNEL_ID", DEFAULT_REFUGE_PANEL_CHANNEL_ID),
+)
 REFUGE_PANEL_REFRESH_SECONDS = max(
     30,
     _env_int("REFUGE_PANEL_REFRESH_SECONDS", 60),
@@ -285,6 +289,7 @@ async def setup(bot: commands.Bot) -> None:
 
 
 __all__ = [
+    "DEFAULT_REFUGE_PANEL_CHANNEL_ID",
     "REFUGE_PANEL_CHANNEL_ID",
     "REFUGE_PANEL_REFRESH_SECONDS",
     "RefugePanelCog",
