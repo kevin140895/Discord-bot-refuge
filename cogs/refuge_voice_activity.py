@@ -12,7 +12,7 @@ from storage.refuge_activity_store import refuge_activity_store
 
 
 logger = logging.getLogger(__name__)
-CHECKPOINT_SECONDS = 30
+CHECKPOINT_SECONDS = 60
 
 
 class RefugeVoiceActivityCog(commands.Cog):
