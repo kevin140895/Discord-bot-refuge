@@ -48,6 +48,7 @@ SPIN_GIF_URL = "https://media.tenor.com/2roX3zvclxkAAAAC/slot-machine.gif"
 WIN_GIF_URL = "https://media.tenor.com/XwI-iYdkfVIAAAAi/lottery-winner.gif"
 CASINO_CLOSED_MESSAGE = "🌙 Le Casino est fermé. Horaires : 10h00 - 02h00."
 
+
 def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -61,9 +62,101 @@ def _is_casino_open(now: Optional[datetime] = None) -> bool:
     return hour >= CASINO_OPEN_HOUR or hour < CASINO_CLOSE_HOUR
 
 
-class MachineASousView(discord.ui.View):
-    def __init__(self):
+def _poster_component_metadata(message: discord.Message) -> tuple[list[str], list[str]]:
+    """Extract text and custom IDs from legacy or V2 message components."""
+
+    texts: list[str] = []
+    custom_ids: list[str] = []
+    stack = list(getattr(message, "components", []) or [])
+    while stack:
+        component = stack.pop()
+        content = getattr(component, "content", None)
+        if content:
+            texts.append(str(content))
+        custom_id = getattr(component, "custom_id", None)
+        if custom_id:
+            custom_ids.append(str(custom_id))
+        stack.extend(list(getattr(component, "children", []) or []))
+    return texts, custom_ids
+
+
+def _is_machine_poster_message(message: discord.Message) -> bool:
+    embeds = list(getattr(message, "embeds", []) or [])
+    if embeds and getattr(embeds[0], "title", None) == "🎰 Machine à sous":
+        return True
+    texts, _ = _poster_component_metadata(message)
+    return any("🎰 Machine à sous" in text for text in texts)
+
+
+def _poster_has_play_button(message: discord.Message) -> bool:
+    _, custom_ids = _poster_component_metadata(message)
+    return "machineasous:play" in custom_ids
+
+
+def _poster_is_components_v2(message: discord.Message) -> bool:
+    return not bool(getattr(message, "embeds", [])) and bool(
+        getattr(message, "components", [])
+    )
+
+
+class MachineASousActionRow(discord.ui.ActionRow):
+    @discord.ui.button(
+        label="🎰 Machine à sous",
+        style=discord.ButtonStyle.success,
+        custom_id="machineasous:play",
+    )
+    async def play_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        view = self.view
+        if not isinstance(view, MachineASousView):
+            return await interaction.response.send_message(
+                "❌ Fonction Machine à sous indisponible.",
+                ephemeral=True,
+            )
+        await view.handle_play(interaction)
+
+
+class MachineASousView(discord.ui.LayoutView):
+    def __init__(self, *, enabled: bool = True):
         super().__init__(timeout=None)
+        self.enabled = enabled
+
+        if enabled:
+            state = f"✅ **Ouverte** de {CASINO_SCHEDULE_LABEL} (Europe/Paris)"
+            accent = discord.Colour.green()
+        else:
+            state = f"⛔ **Fermée** ({CASINO_SCHEDULE_LABEL})"
+            accent = discord.Colour.red()
+
+        container = discord.ui.Container(accent_colour=accent)
+        container.add_item(
+            discord.ui.TextDisplay(
+                "## 🎰 Machine à sous\n"
+                f"{state}"
+            )
+        )
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.TextDisplay(
+                "### Gains possibles\n"
+                "0 / 5 / 20 / 50 / 100 / 500 / **1000 XP**\n"
+                "🎟️ Ticket gratuit · ⚡ Double XP (1h) · 🤝 XP partagé"
+            )
+        )
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.TextDisplay(
+                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant **24h** "
+                "si tu gagnes le **Super Jackpot**.\n"
+                "🗓️ **Une seule tentative par jour.**"
+            )
+        )
+        if enabled:
+            container.add_item(MachineASousActionRow())
+        self.add_item(container)
 
     async def _reward_ticket(
         self,
@@ -267,16 +360,7 @@ class MachineASousView(discord.ui.View):
         if gain == "ticket":
             await self._single_spin(interaction, cog, free=True)
 
-    @discord.ui.button(
-        label="🎰 Machine à sous",
-        style=discord.ButtonStyle.success,
-        custom_id="machineasous:play",
-    )
-    async def play_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ) -> None:
+    async def handle_play(self, interaction: discord.Interaction) -> None:
         cog: Optional["MachineASousCog"] = interaction.client.get_cog(
             "MachineASousCog",
         )  # type: ignore
@@ -333,27 +417,6 @@ class MachineASousCog(commands.Cog):
         self.current_view_enabled = _is_casino_open()
         self._last_announced_state: Optional[bool] = None
 
-    def _poster_embed(self) -> discord.Embed:
-        """Create the poster embed describing rewards and open state."""
-        if self.current_view_enabled:
-            desc_state = f"✅ **Ouverte** de {CASINO_SCHEDULE_LABEL} (Europe/Paris)"
-            color = 0x2ECC71
-        else:
-            desc_state = f"⛔ **Fermée** ({CASINO_SCHEDULE_LABEL})"
-            color = 0xED4245
-        return discord.Embed(
-            title="🎰 Machine à sous",
-            description=(
-                f"{desc_state}\n\n"
-                "0 / 5 / 20 / 50 / 100 / 500 / **1000** XP\n"
-                "🎟️ Ticket gratuit • ⚡ Double XP (1h) • 🤝 XP partagé\n"
-                f"✨ Le rôle **{WINNER_ROLE_NAME}** est attribué pendant "
-                "**24h** si tu gagnes le **Super Jackpot**.\n"
-                "🗓️ **Une seule tentative par jour.**"
-            ),
-            color=color,
-        )
-
     async def _delete_old_poster_message(self):
         """Delete the previously stored poster message if present."""
         poster = self.store.get_poster()
@@ -371,7 +434,7 @@ class MachineASousCog(commands.Cog):
         self.store.clear_poster()
 
     async def _replace_poster_message(self):
-        """Publish a fresh poster message in the slot machine channel."""
+        """Publish a fresh Components V2 poster in the slot machine channel."""
         await self.bot.wait_until_ready()
         await self._delete_old_poster_message()
         ch = self.bot.get_channel(CHANNEL_ID)
@@ -379,13 +442,9 @@ class MachineASousCog(commands.Cog):
             logger.warning("[MachineASous] Salon machine à sous introuvable.")
             return
         try:
-            if self.current_view_enabled:
-                msg = await ch.send(
-                    embed=self._poster_embed(),
-                    view=MachineASousView(),
-                )
-            else:
-                msg = await ch.send(embed=self._poster_embed())
+            msg = await ch.send(
+                view=MachineASousView(enabled=self.current_view_enabled),
+            )
             self.store.set_poster(
                 channel_id=str(ch.id),
                 message_id=str(msg.id),
@@ -402,14 +461,10 @@ class MachineASousCog(commands.Cog):
             return None
         try:
             async for msg in ch.history(limit=20):
-                if (
-                    msg.author.id == self.bot.user.id
-                    and msg.embeds
-                    and msg.embeds[0].title == "🎰 Machine à sous"
-                ):
+                if msg.author.id == self.bot.user.id and _is_machine_poster_message(msg):
                     return msg
         except Exception as e:
-            logger.debug("Failed to find existing poster: %s", e)
+            logger.debug("Failed to find existing poster message: %s", e)
         return None
 
     async def _ensure_poster_message(self):
@@ -417,22 +472,30 @@ class MachineASousCog(commands.Cog):
         if poster:
             stored_ch_id = int(poster.get("channel_id", 0))
             if stored_ch_id != CHANNEL_ID:
-                # L'ID configuré a changé : supprimer l'ancien message
+                # L'ID configuré a changé : supprimer l'ancien message.
                 await self._delete_old_poster_message()
             else:
                 ch = self.bot.get_channel(stored_ch_id)
                 if isinstance(ch, (discord.TextChannel, discord.Thread)):
                     try:
                         msg = await ch.fetch_message(int(poster.get("message_id", 0)))
-                        has_view = bool(msg.components)
-                        if has_view != self.current_view_enabled:
+                        has_button = _poster_has_play_button(msg)
+                        if (
+                            not _poster_is_components_v2(msg)
+                            or not _is_machine_poster_message(msg)
+                            or has_button != self.current_view_enabled
+                        ):
                             await self._replace_poster_message()
                         return
                     except discord.NotFound as e:
                         logger.debug("Poster message missing: %s", e)
         existing = await self._find_existing_poster()
         if existing:
-            if bool(existing.components) != self.current_view_enabled:
+            has_button = _poster_has_play_button(existing)
+            if (
+                not _poster_is_components_v2(existing)
+                or has_button != self.current_view_enabled
+            ):
                 await self._replace_poster_message()
             else:
                 self.store.set_poster(
@@ -652,7 +715,7 @@ class MachineASousCog(commands.Cog):
 
     async def cog_load(self):
         try:
-            self.bot.add_view(MachineASousView())
+            self.bot.add_view(MachineASousView(enabled=True))
         except Exception as e:
             logger.error("[MachineASous] add_view échoué: %s", e)
         asyncio.create_task(self._init_after_ready())
