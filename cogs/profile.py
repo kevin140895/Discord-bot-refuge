@@ -58,6 +58,7 @@ class ProfileCog(commands.Cog):
             snapshot,
             display_name=target.display_name,
             avatar_url=avatar_url,
+            owner_user_id=interaction.user.id,
         )
         await interaction.response.send_message(view=view)
 
