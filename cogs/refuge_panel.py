@@ -11,6 +11,7 @@ from discord.ext import commands, tasks
 
 from models.refuge_world import RefugePanelState
 from services.refuge_panel import RefugePanelService, refuge_panel_service
+from services.refuge_world_coordination import refuge_world_mutation_lock
 from storage.refuge_world_store import RefugeWorldStore, refuge_world_store
 from ui.refuge_panel_view import (
     REFUGE_MAP_FILENAME,
@@ -133,8 +134,13 @@ class RefugePanelCog(commands.Cog):
         self,
         *,
         target_channel_id: int,
-    ) -> None:
-        """Best-effort removal of the previously owned panel after channel moves."""
+    ) -> bool:
+        """Retire the previous panel before allowing a panel in a new channel.
+
+        ``True`` means the old panel is definitively gone (or never existed).
+        A transient Discord failure returns ``False`` so the caller preserves
+        the stored reference and retries later instead of creating a duplicate.
+        """
 
         state = await self.world_store.get_state()
         panel = state.panel
@@ -142,7 +148,7 @@ class RefugePanelCog(commands.Cog):
             panel,
             target_channel_id=target_channel_id,
         ):
-            return
+            return True
 
         assert panel.channel_id is not None
         assert panel.message_id is not None
@@ -150,55 +156,76 @@ class RefugePanelCog(commands.Cog):
         if old_channel is None:
             try:
                 old_channel = await self.bot.fetch_channel(panel.channel_id)
+            except discord.NotFound:
+                # The whole old channel is gone, so its panel is definitively gone.
+                return True
             except discord.HTTPException:
                 logger.warning(
-                    "[refuge] Ancien salon du panneau inaccessible: %s",
+                    "[refuge] Ancien salon du panneau temporairement inaccessible: %s",
                     panel.channel_id,
                 )
-                return
+                return False
         if not isinstance(old_channel, (discord.TextChannel, discord.Thread)):
-            return
+            logger.warning(
+                "[refuge] Ancienne référence panneau non résolue vers un salon texte: %s",
+                panel.channel_id,
+            )
+            return False
         try:
             old_message = await old_channel.fetch_message(panel.message_id)
             await old_message.delete()
         except discord.NotFound:
-            return
+            return True
         except discord.HTTPException:
             logger.warning(
-                "[refuge] Impossible de retirer l'ancien panneau %s/%s",
+                "[refuge] Impossible de retirer temporairement l'ancien panneau %s/%s",
                 panel.channel_id,
                 panel.message_id,
             )
+            return False
+        return True
 
     async def _fetch_stored_message(
         self,
         channel: discord.TextChannel | discord.Thread,
-    ) -> discord.Message | None:
+    ) -> tuple[discord.Message | None, bool]:
+        """Return ``(message, definitive)`` for the current stored panel.
+
+        ``definitive=False`` means Discord could not confirm whether the
+        message exists. The caller must not create a replacement in that case.
+        """
+
         state = await self.world_store.get_state()
         panel = state.panel
         if panel.channel_id != channel.id or panel.message_id is None:
-            return None
+            return None, True
         try:
-            return await channel.fetch_message(panel.message_id)
+            return await channel.fetch_message(panel.message_id), True
         except discord.NotFound:
-            return None
+            return None, True
         except discord.HTTPException:
             logger.warning(
-                "[refuge] Impossible de récupérer le panneau %s/%s",
+                "[refuge] État du panneau %s/%s temporairement inconnu; "
+                "aucun duplicata ne sera créé",
                 channel.id,
                 panel.message_id,
             )
-            return None
+            return None, False
 
     async def _persist_panel_reference(self, message: discord.Message) -> None:
-        state = await self.world_store.get_state()
         desired = RefugePanelState(
             channel_id=message.channel.id,
             message_id=message.id,
         )
-        if state.panel == desired:
-            return
-        await self.world_store.save_state(replace(state, panel=desired))
+        # Panel ownership is part of RefugeWorldState. The full read-modify-
+        # write must share the same mutation lock as Timeline, Construction and
+        # Secrets, otherwise a concurrent world mutation can be overwritten by
+        # a stale panel-only save.
+        async with refuge_world_mutation_lock():
+            state = await self.world_store.get_state()
+            if state.panel == desired:
+                return
+            await self.world_store.save_state(replace(state, panel=desired))
 
     async def _render_file(self, snapshot) -> discord.File:
         png = await self.panel_service.render_png(snapshot)
@@ -215,10 +242,16 @@ class RefugePanelCog(commands.Cog):
             if channel is None:
                 return
 
-            await self._retire_previous_panel_if_moved(
+            retired = await self._retire_previous_panel_if_moved(
                 target_channel_id=channel.id,
             )
-            message = await self._fetch_stored_message(channel)
+            if not retired:
+                return
+
+            message, lookup_definitive = await self._fetch_stored_message(channel)
+            if not lookup_definitive:
+                return
+
             snapshot = await self.panel_service.evaluate()
             action = panel_refresh_action(
                 message_exists=message is not None,
