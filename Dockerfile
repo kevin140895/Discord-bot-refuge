@@ -11,6 +11,7 @@ RUN apt-get update && \
     curl \
     ca-certificates \
     unzip \
+    git \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp requiert désormais un runtime JavaScript externe pour une prise en
@@ -18,6 +19,19 @@ RUN apt-get update && \
 # défaut par yt-dlp.
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
     deno --version
+
+# Installe le générateur de Proof-of-Origin tokens utilisé par le plugin
+# bgutil-ytdlp-pot-provider. Le mode script est adapté au volume du bot et
+# évite d'exposer un service HTTP supplémentaire. Le checkout doit rester à la
+# même version que le paquet Python déclaré dans requirements.txt.
+ARG BGUTIL_POT_PROVIDER_VERSION=1.3.1
+RUN git clone --depth 1 --single-branch \
+        --branch "${BGUTIL_POT_PROVIDER_VERSION}" \
+        https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
+        /root/bgutil-ytdlp-pot-provider && \
+    cd /root/bgutil-ytdlp-pot-provider/server && \
+    deno install --allow-scripts=npm:canvas --frozen && \
+    rm -rf /root/bgutil-ytdlp-pot-provider/.git
 
 # Répertoire de travail dans le conteneur
 WORKDIR /app
