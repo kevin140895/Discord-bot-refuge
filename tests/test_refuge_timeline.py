@@ -8,7 +8,6 @@ import pytest
 from models.refuge_world import (
     RefugeBuildingState,
     RefugeHistoricalEvent,
-    RefugeWorldState,
 )
 from services.refuge_timeline import (
     TIMELINE_STATE_KEY,
@@ -80,7 +79,8 @@ async def test_paris_month_rollover_freezes_previous_world_state(tmp_path):
     assert len(result.state.snapshots) == 1
     snapshot = result.state.snapshots[0]
     assert snapshot.season_id == "2026-08"
-    assert [building.level for building in snapshot.buildings] == [1, 3, 2]
+    levels = {building.building_id: building.level for building in snapshot.buildings}
+    assert levels == {"fire": 3, "hall": 2, "casino": 1}
     assert snapshot.event_ids == ("aug-event",)
     assert snapshot.state["permanent_marker"] == "august"
     assert result.state.state[TIMELINE_STATE_KEY]["active_season_id"] == "2026-09"
