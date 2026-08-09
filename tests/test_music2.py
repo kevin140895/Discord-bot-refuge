@@ -21,38 +21,36 @@ class DummyBot:
 
 
 @pytest.mark.asyncio
-async def test_music2_view_keeps_existing_radio_buttons_and_adds_music_controls():
+async def test_music2_view_contains_only_custom_music_controls():
     cog = music2.Music2Cog(DummyBot())
 
     custom_ids = {
         item.custom_id for item in cog.view.children if getattr(item, "custom_id", None)
     }
 
-    assert {
-        "radio_rap_fr",
-        "radio_rap",
-        "radio_rock",
-        "radio_hiphop",
-    }.issubset(custom_ids)
-    assert {
+    assert custom_ids == {
         "music2_add",
         "music2_pause_resume",
         "music2_next",
         "music2_queue",
         "music2_now_playing",
-    }.issubset(custom_ids)
+    }
+    assert not custom_ids.intersection(
+        {"radio_rap_fr", "radio_rap", "radio_rock", "radio_hiphop"}
+    )
 
 
 @pytest.mark.asyncio
-async def test_idle_panel_reports_current_radio_station():
+async def test_idle_panel_is_dedicated_to_custom_music():
     radio = SimpleNamespace(stream_url=music2.ROCK_RADIO_STREAM_URL)
     cog = music2.Music2Cog(DummyBot(radio))
 
     embed = cog.build_panel_embed()
 
-    assert embed.title == "🎵 Refuge Music 2.0"
-    assert "Radio **Rock**" in embed.fields[0].value
+    assert embed.title == "🎵 Musique personnalisée"
+    assert embed.fields[0].value == "Aucun titre en cours."
     assert embed.fields[1].value == "Vide"
+    assert "panneau séparé" in embed.footer.text
 
 
 @pytest.mark.asyncio
