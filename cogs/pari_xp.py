@@ -353,8 +353,7 @@ class PariXPCog(commands.Cog):
                 message = None
 
         if message:
-            is_legacy = bool(getattr(message, "embeds", []))
-            if self._last_panel_signature == signature and not is_legacy:
+            if self._last_panel_signature == signature:
                 return
             await safe_message_edit(
                 message,
