@@ -21,9 +21,10 @@ RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
     deno --version
 
 # Installe le générateur de Proof-of-Origin tokens utilisé par le plugin
-# bgutil-ytdlp-pot-provider. Le mode script est adapté au volume du bot et
-# évite d'exposer un service HTTP supplémentaire. Le checkout doit rester à la
-# même version que le paquet Python déclaré dans requirements.txt.
+# bgutil-ytdlp-pot-provider. Le serveur HTTP local est lancé avec le bot par
+# docker-entrypoint.sh ; yt-dlp le détecte automatiquement sur 127.0.0.1:4416.
+# Le checkout doit rester à la même version que le paquet Python déclaré dans
+# requirements.txt.
 ARG BGUTIL_POT_PROVIDER_VERSION=1.3.1
 RUN git clone --depth 1 --single-branch \
         --branch "${BGUTIL_POT_PROVIDER_VERSION}" \
@@ -42,5 +43,5 @@ COPY . .
 # Installation des dépendances Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Lancement du bot
-CMD ["python", "main.py"]
+# Lance d'abord le provider PO Token local, puis le bot Discord.
+CMD ["sh", "/app/docker-entrypoint.sh"]
