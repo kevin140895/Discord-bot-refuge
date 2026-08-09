@@ -1,27 +1,25 @@
 from __future__ import annotations
 
+import logging
 from typing import Final, Literal
 
 import discord
 
+from services.refuge_exploration import refuge_exploration_service
 from services.refuge_panel import RefugePanelSnapshot
+from ui.refuge_exploration_view import (
+    RefugeExplorerView,
+    RefugeFootprintView,
+    RefugePrivateErrorView,
+)
 
 
+logger = logging.getLogger(__name__)
 REFUGE_PANEL_ACCENT = discord.Colour(0xD08A47)
 REFUGE_MAP_FILENAME: Final[str] = "refuge-map.png"
 RefugePanelAction = Literal["explore", "footprint", "timeline", "construction"]
 
 _ACTION_COPY: Final[dict[str, tuple[str, str, str]]] = {
-    "explore": (
-        "🔎 Explorer",
-        "L’exploration détaillée des lieux du Refuge sera activée dans la prochaine évolution.",
-        "Le panneau public est déjà prêt à accueillir cette navigation.",
-    ),
-    "footprint": (
-        "👤 Mon empreinte",
-        "Ton empreinte personnelle sera consultable ici dans une vue privée.",
-        "Elle ne sera jamais affichée publiquement sur le panneau du Refuge.",
-    ),
     "timeline": (
         "🕰️ Chronologie",
         "Les archives mensuelles du Refuge seront consultables depuis ce bouton.",
@@ -41,11 +39,14 @@ def _roman(level: int) -> str:
 
 
 class RefugePendingActionView(discord.ui.LayoutView):
-    """Small ephemeral V2 response used until REFUGE-009/010/011 land."""
+    """Small ephemeral V2 response for actions scheduled after REFUGE-009."""
 
     def __init__(self, action: RefugePanelAction) -> None:
         super().__init__(timeout=120)
-        title, primary, secondary = _ACTION_COPY[action]
+        copy = _ACTION_COPY.get(action)
+        if copy is None:
+            raise ValueError(f"Refuge action is already active: {action}")
+        title, primary, secondary = copy
         container = discord.ui.Container(accent_colour=REFUGE_PANEL_ACCENT)
         container.add_item(discord.ui.TextDisplay(f"## {title}"))
         container.add_item(discord.ui.Separator())
@@ -54,7 +55,7 @@ class RefugePendingActionView(discord.ui.LayoutView):
 
 
 class RefugePanelButton(discord.ui.Button):
-    """Persistent public control; detailed action content lands in later stages."""
+    """Persistent public control dispatching to private Refuge surfaces."""
 
     def __init__(
         self,
@@ -73,10 +74,54 @@ class RefugePanelButton(discord.ui.Button):
         self.action = action
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            view=RefugePendingActionView(self.action),
-            ephemeral=True,
-        )
+        if self.action not in {"explore", "footprint"}:
+            await interaction.response.send_message(
+                view=RefugePendingActionView(self.action),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            if self.action == "explore":
+                snapshot = await refuge_exploration_service.get_explorer()
+                view: discord.ui.LayoutView = RefugeExplorerView(
+                    snapshot,
+                    owner_user_id=interaction.user.id,
+                )
+            else:
+                snapshot = await refuge_exploration_service.get_footprint(
+                    interaction.user.id
+                )
+                avatar = getattr(interaction.user, "display_avatar", None)
+                avatar_url = (
+                    str(avatar.url)
+                    if getattr(avatar, "url", None)
+                    else None
+                )
+                display_name = str(
+                    getattr(
+                        interaction.user,
+                        "display_name",
+                        getattr(interaction.user, "name", interaction.user.id),
+                    )
+                )
+                view = RefugeFootprintView(
+                    snapshot,
+                    display_name=display_name,
+                    avatar_url=avatar_url,
+                )
+        except Exception:
+            logger.exception(
+                "[refuge] impossible de charger l'action privée %s pour user=%s",
+                self.action,
+                interaction.user.id,
+            )
+            view = RefugePrivateErrorView(
+                "Impossible de charger cette partie du Refuge pour le moment."
+            )
+
+        await interaction.edit_original_response(view=view)
 
 
 def refuge_controls_row() -> discord.ui.ActionRow:
