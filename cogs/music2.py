@@ -252,25 +252,24 @@ class Music2Cog(commands.Cog):
             )
         else:
             radio = self._radio_cog()
-            stream_url = (
-                getattr(radio, "stream_url", RADIO_STREAM_URL)
-                if radio
-                else RADIO_STREAM_URL
-            )
+            stream_url = getattr(radio, "stream_url", RADIO_STREAM_URL) if radio else RADIO_STREAM_URL
             embed.add_field(
                 name="Lecture en cours",
                 value=f"📻 Radio **{self._station_label(stream_url)}**",
                 inline=False,
             )
             embed.add_field(name="File d'attente", value="Vide", inline=True)
-        embed.set_footer(text="Ajoute un titre ou un lien depuis le bouton ➕ Ajouter.")
+        embed.set_footer(
+            text="Ajoute un titre ou un lien depuis le bouton ➕ Ajouter."
+        )
         return embed
 
     async def require_radio_listener(self, interaction: discord.Interaction) -> bool:
         member = interaction.user
         if not isinstance(member, discord.Member):
             await interaction.response.send_message(
-                "❌ Action disponible uniquement sur le serveur.", ephemeral=True
+                "❌ Action disponible uniquement sur le serveur.",
+                ephemeral=True,
             )
             return False
         voice = member.voice
@@ -338,6 +337,30 @@ class Music2Cog(commands.Cog):
     async def on_ready(self) -> None:
         await self._ensure_panel()
 
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """Keep the upgraded panel in sync when the legacy RadioView handles a click."""
+        data = interaction.data if isinstance(interaction.data, dict) else {}
+        custom_id = data.get("custom_id")
+        if (
+            interaction.channel_id != RADIO_TEXT_CHANNEL_ID
+            or custom_id
+            not in {"radio_rap_fr", "radio_rap", "radio_rock", "radio_hiphop"}
+        ):
+            return
+
+        # The legacy persistent RadioView is registered after extensions during
+        # setup_hook. Give its callback a short window to update RadioCog first.
+        await asyncio.sleep(0.25)
+        radio = self._radio_cog()
+        if self.current is not None and radio is not None:
+            if getattr(radio, "stream_url", None):
+                self._generation += 1
+                self.current = None
+                self.queue.clear()
+                self._radio_restore_stream = None
+        await self.refresh_panel()
+
     def _extract_info_sync(self, target: str) -> dict:
         is_url = urlparse(target).scheme in {"http", "https"}
         lookup = target if is_url else f"ytsearch1:{target}"
@@ -393,13 +416,15 @@ class Music2Cog(commands.Cog):
         member = interaction.user
         if not isinstance(member, discord.Member):
             await interaction.response.send_message(
-                "❌ Action disponible uniquement sur le serveur.", ephemeral=True
+                "❌ Action disponible uniquement sur le serveur.",
+                ephemeral=True,
             )
             return
         voice = member.voice
         if voice is None or voice.channel is None or voice.channel.id != RADIO_VC_ID:
             await interaction.response.send_message(
-                f"❌ Rejoins d'abord <#{RADIO_VC_ID}>.", ephemeral=True
+                f"❌ Rejoins d'abord <#{RADIO_VC_ID}>.",
+                ephemeral=True,
             )
             return
 
@@ -410,7 +435,8 @@ class Music2Cog(commands.Cog):
         except Exception as exc:
             logger.warning("[music2] recherche impossible: %s", exc)
             await interaction.followup.send(
-                "❌ Impossible de trouver ou lire ce titre.", ephemeral=True
+                "❌ Impossible de trouver ou lire ce titre.",
+                ephemeral=True,
             )
             return
 
@@ -449,7 +475,7 @@ class Music2Cog(commands.Cog):
             ) + "\r\n"
         return stream_url, headers
 
-    async def _suspend_radio(self):
+    async def _suspend_radio(self) -> object:
         radio = self._radio_cog()
         if radio is None:
             raise RuntimeError("RadioCog indisponible")
@@ -491,7 +517,8 @@ class Music2Cog(commands.Cog):
 
                 def after(error: Exception | None) -> None:
                     asyncio.run_coroutine_threadsafe(
-                        self._handle_track_end(generation, error), self.bot.loop
+                        self._handle_track_end(generation, error),
+                        self.bot.loop,
                     )
 
                 play_stream(voice, stream_url, after=after, headers=headers)
@@ -551,14 +578,16 @@ class Music2Cog(commands.Cog):
             return
         if self.current is None:
             await interaction.response.send_message(
-                "ℹ️ Aucune musique à la demande n'est en cours.", ephemeral=True
+                "ℹ️ Aucune musique à la demande n'est en cours.",
+                ephemeral=True,
             )
             return
         radio = self._radio_cog()
         voice = getattr(radio, "voice", None) if radio else None
         if voice is None:
             await interaction.response.send_message(
-                "❌ Lecteur vocal indisponible.", ephemeral=True
+                "❌ Lecteur vocal indisponible.",
+                ephemeral=True,
             )
             return
         if voice.is_paused():
@@ -577,7 +606,8 @@ class Music2Cog(commands.Cog):
             return
         if self.current is None:
             await interaction.response.send_message(
-                "ℹ️ Aucune musique à passer.", ephemeral=True
+                "ℹ️ Aucune musique à passer.",
+                ephemeral=True,
             )
             return
 
@@ -600,7 +630,10 @@ class Music2Cog(commands.Cog):
             lines.append(f"… et {len(self.queue) - 10} autre(s).")
         if not lines:
             lines.append("La file est vide : la radio est en lecture.")
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        await interaction.response.send_message(
+            "\n".join(lines),
+            ephemeral=True,
+        )
 
     async def show_now_playing(self, interaction: discord.Interaction) -> None:
         if self.current is not None:
@@ -613,11 +646,7 @@ class Music2Cog(commands.Cog):
                 description += f"\nArtiste/chaîne : {self.current.uploader}"
         else:
             radio = self._radio_cog()
-            stream_url = (
-                getattr(radio, "stream_url", RADIO_STREAM_URL)
-                if radio
-                else RADIO_STREAM_URL
-            )
+            stream_url = getattr(radio, "stream_url", RADIO_STREAM_URL) if radio else RADIO_STREAM_URL
             description = f"📻 Radio **{self._station_label(stream_url)}**"
         await interaction.response.send_message(description, ephemeral=True)
 
