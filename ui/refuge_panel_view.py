@@ -6,7 +6,7 @@ from typing import Final, Literal
 import discord
 
 from services.refuge_construction import refuge_construction_service
-from services.refuge_exploration import refuge_exploration_service
+from services.refuge_exploration_runtime import refuge_exploration_runtime_service
 from services.refuge_panel import RefugePanelSnapshot
 from ui.refuge_construction_view import RefugeConstructionView
 from ui.refuge_exploration_view import (
@@ -81,13 +81,13 @@ class RefugePanelButton(discord.ui.Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             if self.action == "explore":
-                snapshot = await refuge_exploration_service.get_explorer()
+                snapshot = await refuge_exploration_runtime_service.get_explorer()
                 view: discord.ui.LayoutView = RefugeExplorerView(
                     snapshot,
                     owner_user_id=interaction.user.id,
                 )
             elif self.action == "footprint":
-                snapshot = await refuge_exploration_service.get_footprint(
+                snapshot = await refuge_exploration_runtime_service.get_footprint(
                     interaction.user.id
                 )
                 avatar = getattr(interaction.user, "display_avatar", None)
