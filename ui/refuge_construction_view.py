@@ -12,6 +12,7 @@ from services.refuge_construction import (
     RefugeConstructionSnapshot,
     refuge_construction_service,
 )
+from services.refuge_timeline import refuge_timeline_service
 
 
 REFUGE_CONSTRUCTION_ACCENT = discord.Colour(0xB77B42)
@@ -73,6 +74,7 @@ class RefugeConstructionVoteSelect(discord.ui.Select):
         if not isinstance(view, RefugeConstructionView):
             return
         await interaction.response.defer()
+        await refuge_timeline_service.sync()
         try:
             snapshot = await refuge_construction_service.cast_vote(
                 interaction.user.id,
