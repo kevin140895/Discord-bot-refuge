@@ -63,7 +63,7 @@ def _is_casino_open(now: Optional[datetime] = None) -> bool:
 
 
 def _poster_component_metadata(message: discord.Message) -> tuple[list[str], list[str]]:
-    """Extract text and custom IDs from legacy or V2 message components."""
+    """Extract text and custom IDs from Components V2 poster components."""
 
     texts: list[str] = []
     custom_ids: list[str] = []
@@ -81,9 +81,6 @@ def _poster_component_metadata(message: discord.Message) -> tuple[list[str], lis
 
 
 def _is_machine_poster_message(message: discord.Message) -> bool:
-    embeds = list(getattr(message, "embeds", []) or [])
-    if embeds and getattr(embeds[0], "title", None) == "🎰 Machine à sous":
-        return True
     texts, _ = _poster_component_metadata(message)
     return any("🎰 Machine à sous" in text for text in texts)
 
@@ -91,12 +88,6 @@ def _is_machine_poster_message(message: discord.Message) -> bool:
 def _poster_has_play_button(message: discord.Message) -> bool:
     _, custom_ids = _poster_component_metadata(message)
     return "machineasous:play" in custom_ids
-
-
-def _poster_is_components_v2(message: discord.Message) -> bool:
-    return not bool(getattr(message, "embeds", [])) and bool(
-        getattr(message, "components", [])
-    )
 
 
 class MachineASousActionRow(discord.ui.ActionRow):
@@ -481,8 +472,7 @@ class MachineASousCog(commands.Cog):
                         msg = await ch.fetch_message(int(poster.get("message_id", 0)))
                         has_button = _poster_has_play_button(msg)
                         if (
-                            not _poster_is_components_v2(msg)
-                            or not _is_machine_poster_message(msg)
+                            not _is_machine_poster_message(msg)
                             or has_button != self.current_view_enabled
                         ):
                             await self._replace_poster_message()
@@ -492,12 +482,7 @@ class MachineASousCog(commands.Cog):
         existing = await self._find_existing_poster()
         if existing:
             has_button = _poster_has_play_button(existing)
-            if (
-                not _poster_is_components_v2(existing)
-                or has_button != self.current_view_enabled
-            ):
-                # Persist the discovered legacy/stale poster first so the
-                # replacement path deletes that exact message before sending V2.
+            if has_button != self.current_view_enabled:
                 self.store.set_poster(
                     channel_id=str(existing.channel.id),
                     message_id=str(existing.id),
