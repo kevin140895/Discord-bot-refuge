@@ -23,6 +23,7 @@ class CommunityGoalDisplay:
     progress_bar: str
     deadline: str
     reward_text: str | None = None
+    automation_note: str | None = None
 
 
 class CommunityGoalsView(discord.ui.LayoutView):
@@ -33,6 +34,7 @@ class CommunityGoalsView(discord.ui.LayoutView):
         *,
         active_goals: tuple[CommunityGoalDisplay, ...] = (),
         completed_titles: tuple[str, ...] = (),
+        automation_status: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
 
@@ -63,9 +65,15 @@ class CommunityGoalsView(discord.ui.LayoutView):
                     ),
                     f"⏳ Fin {goal.deadline}",
                 ]
+                if goal.automation_note:
+                    lines.append(goal.automation_note)
                 if goal.reward_text:
                     lines.append(f"🎁 Récompense prévue : **{goal.reward_text}**")
                 container.add_item(discord.ui.TextDisplay("\n".join(lines)))
+
+        if automation_status:
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay(automation_status))
 
         if completed_titles:
             container.add_item(discord.ui.Separator())
