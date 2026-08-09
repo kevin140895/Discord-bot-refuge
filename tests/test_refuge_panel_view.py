@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import discord
-import pytest
 
 from models.refuge_world import RefugeWorldState
 from rendering.refuge_world import RefugeRenderContext
 from services.refuge_panel import RefugePanelSnapshot
 from ui.refuge_panel_view import (
     REFUGE_MAP_FILENAME,
-    RefugePendingActionView,
     RefugePublicControlsView,
     RefugePublicPanelView,
 )
@@ -86,17 +84,11 @@ def test_callback_registration_view_is_persistent_and_has_same_custom_ids():
     ]
 
 
-def test_only_timeline_remains_pending_after_refuge_010():
-    view = RefugePendingActionView("timeline")
-    assert isinstance(view, discord.ui.LayoutView)
-    assert view.timeout == 120
-    text = "\n".join(
-        item.content
-        for item in view.walk_children()
-        if isinstance(item, discord.ui.TextDisplay)
-    )
-    assert "Chronologie" in text
-
-    for action in ("explore", "footprint", "construction"):
-        with pytest.raises(ValueError):
-            RefugePendingActionView(action)
+def test_refuge_011_keeps_all_four_public_actions_registered():
+    controls = RefugePublicControlsView()
+    assert {button.custom_id for button in _buttons(controls)} == {
+        "refuge:panel:explore",
+        "refuge:panel:footprint",
+        "refuge:panel:timeline",
+        "refuge:panel:construction",
+    }

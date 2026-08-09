@@ -6,6 +6,7 @@ import logging
 from discord.ext import commands, tasks
 
 from services.refuge_construction import refuge_construction_service
+from services.refuge_timeline import refuge_timeline_service
 
 
 logger = logging.getLogger(__name__)
@@ -18,9 +19,10 @@ class RefugeConstructionCog(commands.Cog):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        # This first sync establishes the prospective REFUGE-010 activation marker
-        # before future community goals can become eligible build rights.
+        # REFUGE-011 archives the previous Paris month before the Chantier can
+        # open, resolve or complete anything in the new month.
         try:
+            await refuge_timeline_service.sync()
             await refuge_construction_service.sync()
         except Exception:
             logger.exception("[refuge] initialisation du Chantier échouée")
@@ -33,6 +35,7 @@ class RefugeConstructionCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def advance_construction(self) -> None:
         try:
+            await refuge_timeline_service.sync()
             await refuge_construction_service.sync()
         except asyncio.CancelledError:
             raise

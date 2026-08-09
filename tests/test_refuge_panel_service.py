@@ -29,6 +29,15 @@ class _Service:
         return self.status
 
 
+class _Timeline:
+    def __init__(self):
+        self.calls = []
+
+    async def sync_under_world_lock(self, *, at=None):
+        self.calls.append(at)
+        return None
+
+
 class _Renderer:
     def __init__(self):
         self.calls = []
@@ -50,7 +59,7 @@ def _status(state, **kwargs):
 
 
 @pytest.mark.asyncio
-async def test_panel_service_evaluates_systems_sequentially_and_builds_snapshot():
+async def test_panel_service_archives_then_evaluates_systems_sequentially():
     at = datetime(2026, 8, 9, 14, 0, tzinfo=timezone.utc)
     base = RefugeWorldState(created_at="2026-08-09T00:00:00+00:00")
     fire_state = replace(base, state={"stage": "fire"})
@@ -83,11 +92,13 @@ async def test_panel_service_evaluates_systems_sequentially_and_builds_snapshot(
             is_open=True,
         )
     )
+    timeline = _Timeline()
     renderer = _Renderer()
     service = RefugePanelService(
         fire_service=fire,
         hall_service=hall,
         casino_service=casino,
+        timeline_service=timeline,
         renderer=renderer,
     )
 
@@ -103,8 +114,8 @@ async def test_panel_service_evaluates_systems_sequentially_and_builds_snapshot(
     assert snapshot.casino_is_open is True
     assert snapshot.construction_label == "Aucun chantier actif"
     assert snapshot.changed is True
-    assert len(fire.calls) == len(hall.calls) == len(casino.calls) == 1
-    assert fire.calls[0] == hall.calls[0] == casino.calls[0]
+    assert len(timeline.calls) == 1
+    assert timeline.calls[0] == fire.calls[0] == hall.calls[0] == casino.calls[0]
 
     assert await service.render_png(snapshot) == b"PNG"
     assert renderer.calls[0][0] == final_state

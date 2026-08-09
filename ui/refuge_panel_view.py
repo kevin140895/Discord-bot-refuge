@@ -8,47 +8,20 @@ import discord
 from services.refuge_construction import refuge_construction_service
 from services.refuge_exploration_runtime import refuge_exploration_runtime_service
 from services.refuge_panel import RefugePanelSnapshot
+from services.refuge_timeline import refuge_timeline_service
 from ui.refuge_construction_view import RefugeConstructionView
 from ui.refuge_exploration_view import (
     RefugeExplorerView,
     RefugeFootprintView,
     RefugePrivateErrorView,
 )
+from ui.refuge_timeline_view import RefugeTimelineView
 
 
 logger = logging.getLogger(__name__)
 REFUGE_PANEL_ACCENT = discord.Colour(0xD08A47)
 REFUGE_MAP_FILENAME: Final[str] = "refuge-map.png"
 RefugePanelAction = Literal["explore", "footprint", "timeline", "construction"]
-
-_ACTION_COPY: Final[dict[str, tuple[str, str, str]]] = {
-    "timeline": (
-        "🕰️ Chronologie",
-        "Les archives mensuelles du Refuge seront consultables depuis ce bouton.",
-        "Les saisons passées deviendront des chapitres permanents de son histoire.",
-    ),
-}
-
-
-def _roman(level: int) -> str:
-    values = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
-    return values.get(max(1, min(5, int(level))), str(int(level)))
-
-
-class RefugePendingActionView(discord.ui.LayoutView):
-    """Small ephemeral V2 response for actions scheduled after REFUGE-010."""
-
-    def __init__(self, action: RefugePanelAction) -> None:
-        super().__init__(timeout=120)
-        copy = _ACTION_COPY.get(action)
-        if copy is None:
-            raise ValueError(f"Refuge action is already active: {action}")
-        title, primary, secondary = copy
-        container = discord.ui.Container(accent_colour=REFUGE_PANEL_ACCENT)
-        container.add_item(discord.ui.TextDisplay(f"## {title}"))
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(f"{primary}\n\n-# {secondary}"))
-        self.add_item(container)
 
 
 class RefugePanelButton(discord.ui.Button):
@@ -71,14 +44,8 @@ class RefugePanelButton(discord.ui.Button):
         self.action = action
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if self.action == "timeline":
-            await interaction.response.send_message(
-                view=RefugePendingActionView(self.action),
-                ephemeral=True,
-            )
-            return
-
         await interaction.response.defer(ephemeral=True, thinking=True)
+        timeline_file: discord.File | None = None
         try:
             if self.action == "explore":
                 snapshot = await refuge_exploration_runtime_service.get_explorer()
@@ -108,7 +75,16 @@ class RefugePanelButton(discord.ui.Button):
                     display_name=display_name,
                     avatar_url=avatar_url,
                 )
+            elif self.action == "timeline":
+                snapshot = await refuge_timeline_service.get_timeline()
+                timeline_view = RefugeTimelineView(
+                    snapshot,
+                    owner_user_id=interaction.user.id,
+                )
+                timeline_file = await timeline_view.selected_file()
+                view = timeline_view
             else:
+                await refuge_timeline_service.sync()
                 snapshot = await refuge_construction_service.get_snapshot(
                     interaction.user.id
                 )
@@ -125,8 +101,15 @@ class RefugePanelButton(discord.ui.Button):
             view = RefugePrivateErrorView(
                 "Impossible de charger cette partie du Refuge pour le moment."
             )
+            timeline_file = None
 
-        await interaction.edit_original_response(view=view)
+        if self.action == "timeline":
+            await interaction.edit_original_response(
+                view=view,
+                attachments=[timeline_file] if timeline_file is not None else [],
+            )
+        else:
+            await interaction.edit_original_response(view=view)
 
 
 def refuge_controls_row() -> discord.ui.ActionRow:
@@ -214,11 +197,15 @@ class RefugePublicPanelView(discord.ui.LayoutView):
         self.add_item(container)
 
 
+def _roman(level: int) -> str:
+    values = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
+    return values.get(max(1, min(5, int(level))), str(int(level)))
+
+
 __all__ = [
     "REFUGE_MAP_FILENAME",
     "REFUGE_PANEL_ACCENT",
     "RefugePanelButton",
-    "RefugePendingActionView",
     "RefugePublicControlsView",
     "RefugePublicPanelView",
     "refuge_controls_row",
