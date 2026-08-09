@@ -35,6 +35,7 @@ from storage.season_store import season_store
 from utils.game_events import get_multiplier, record_participant
 from utils.voice_bonus import get_voice_multiplier
 from utils.seasons import should_count_xp_source
+from utils.refuge_casino_observer import observe_casino_xp_transaction
 logger = logging.getLogger(__name__)
 
 # Fichiers de persistance
@@ -143,6 +144,7 @@ async def award_xp(
     permettent de retirer de l'XP, sans bonus.
     """
     now = datetime.now(timezone.utc)
+    requested_amount = int(amount)
     if amount > 0:
         boost_exp = XP_BOOSTS.get(str(user_id))
         if boost_exp:
@@ -156,6 +158,13 @@ async def award_xp(
     )
     old_level, new_level, old_xp, new_xp = result
     delta = new_xp - old_xp
+    observe_casino_xp_transaction(
+        user_id=user_id,
+        source=source,
+        requested_amount=requested_amount,
+        applied_delta=delta,
+        at=now,
+    )
     if should_count_xp_source(source, delta):
         try:
             await season_store.record(user_id, at=now, xp_earned=delta)
