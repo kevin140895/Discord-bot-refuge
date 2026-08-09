@@ -100,6 +100,7 @@ class RefugePanelButton(discord.ui.Button):
                 timeline_file = await timeline_view.selected_file()
                 view = timeline_view
             else:
+                await refuge_timeline_service.sync()
                 snapshot = await refuge_construction_service.get_snapshot(
                     interaction.user.id
                 )
