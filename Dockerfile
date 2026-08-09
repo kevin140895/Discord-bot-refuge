@@ -8,7 +8,16 @@ RUN apt-get update && \
     ffmpeg \
     libjpeg-dev \
     zlib1g-dev \
+    curl \
+    ca-certificates \
+    unzip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# yt-dlp requiert désormais un runtime JavaScript externe pour une prise en
+# charge complète de YouTube. Deno est le runtime recommandé et activé par
+# défaut par yt-dlp.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
+    deno --version
 
 # Répertoire de travail dans le conteneur
 WORKDIR /app
