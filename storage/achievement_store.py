@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import weakref
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -47,6 +48,13 @@ class AchievementStore:
                 }
         self._data = {"schema_version": 1, "users": users}
         self._loaded = True
+
+    async def get_snapshot(self) -> dict[str, Any]:
+        """Return a defensive snapshot of all persisted unlock history."""
+
+        async with self._get_lock():
+            await self._ensure_loaded_locked()
+            return deepcopy(self._data)
 
     async def get_user_achievements(self, user_id: int) -> dict[str, str]:
         """Return a copy of one user's ``achievement_id -> unlocked_at`` map."""
