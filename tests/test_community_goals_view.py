@@ -32,9 +32,11 @@ def test_community_goals_view_renders_active_and_recent_goals() -> None:
                 progress_bar="█████░░░░░",
                 deadline="<t:1786406400:R>",
                 reward_text="Badge collectif",
+                automation_note="🤖 Objectif automatique · difficulté **Normal**",
             ),
         ),
         completed_titles=("Objectif vocal", "Objectif XP"),
+        automation_status="🤖 Automatisation en pause tant qu’un objectif est actif.",
     )
 
     assert isinstance(view, discord.ui.LayoutView)
@@ -51,6 +53,9 @@ def test_community_goals_view_renders_active_and_recent_goals() -> None:
     assert "1000 messages" in text
     assert "<t:1786406400:R>" in text
     assert "Badge collectif" in text
+    assert "Objectif automatique" in text
+    assert "difficulté **Normal**" in text
+    assert "Automatisation en pause" in text
     assert "Derniers objectifs réussis" in text
     assert "Objectif vocal" in text
     assert "Objectif XP" in text
@@ -63,10 +68,15 @@ def test_community_goals_view_renders_active_and_recent_goals() -> None:
 
 
 def test_community_goals_view_handles_no_active_goal() -> None:
-    view = CommunityGoalsView(completed_titles=("Ancien objectif",))
+    view = CommunityGoalsView(
+        completed_titles=("Ancien objectif",),
+        automation_status="🤖 Prochain tirage automatique : <t:1786406400:R>.",
+    )
     text = _container_text(view)
 
     assert "Aucun objectif communautaire actif pour le moment." in text
+    assert "Prochain tirage automatique" in text
+    assert "<t:1786406400:R>" in text
     assert "Ancien objectif" in text
 
 
@@ -83,6 +93,7 @@ def test_community_goals_view_stays_under_components_limit_with_four_goals() -> 
     view = CommunityGoalsView(
         active_goals=(goal, goal, goal, goal),
         completed_titles=("A", "B", "C"),
+        automation_status="🤖 Automatisation active.",
     )
 
     assert sum(1 for _item in view.walk_children()) < 40
@@ -98,6 +109,8 @@ async def test_objectif_communaute_sends_components_v2_view(monkeypatch) -> None
         "ends_at": "2026-08-12T12:00:00+00:00",
         "title": "Semaine active",
         "reward_text": "Badge collectif",
+        "source": "automatic",
+        "metadata": {"difficulty_label": "Ambitieux"},
         "status": "active",
     }
     completed_goal = {
@@ -114,6 +127,9 @@ async def test_objectif_communaute_sends_components_v2_view(monkeypatch) -> None
             if status == "completed":
                 return [completed_goal]
             return []
+
+        async def get_automation_state(self):
+            return {"next_goal_at": None, "had_active_goal": True}
 
     class FakeResponse:
         def __init__(self) -> None:
@@ -152,3 +168,6 @@ async def test_objectif_communaute_sends_components_v2_view(monkeypatch) -> None
     assert "1000 messages" in text
     assert "Badge collectif" in text
     assert "Objectif XP" in text
+    assert "Objectif automatique" in text
+    assert "Ambitieux" in text
+    assert "Automatisation en pause" in text
