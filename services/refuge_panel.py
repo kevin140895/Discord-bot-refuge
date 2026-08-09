@@ -16,6 +16,7 @@ from rendering.refuge_world import RefugeRenderContext
 from services.refuge_casino import RefugeCasinoService, refuge_casino_service
 from services.refuge_fire import RefugeFireService, refuge_fire_service
 from services.refuge_hall import RefugeHallService, refuge_hall_service
+from services.refuge_secrets import RefugeSecretsService, refuge_secrets_service
 from services.refuge_timeline import RefugeTimelineService, refuge_timeline_service
 from services.refuge_world_coordination import refuge_world_mutation_lock
 from utils.seasons import season_id_for, season_label
@@ -165,28 +166,35 @@ class RefugePanelService:
         hall_service: RefugeHallService = refuge_hall_service,
         casino_service: RefugeCasinoService = refuge_casino_service,
         timeline_service: RefugeTimelineService = refuge_timeline_service,
+        secrets_service: RefugeSecretsService = refuge_secrets_service,
         renderer: RefugeConstructionRenderer = refuge_construction_renderer,
     ) -> None:
         self.fire_service = fire_service
         self.hall_service = hall_service
         self.casino_service = casino_service
         self.timeline_service = timeline_service
+        self.secrets_service = secrets_service
         self.renderer = renderer
 
     async def evaluate(self, *, at: datetime | None = None) -> RefugePanelSnapshot:
         now = _aware_utc(at)
         async with refuge_world_mutation_lock():
-            # REFUGE-011 must archive the previous Paris calendar month before
-            # any current-month progression can mutate the shared world state.
+            # REFUGE-011 archives the previous Paris calendar month before any
+            # current-month mutation can touch the shared world state.
             await self.timeline_service.sync_under_world_lock(at=now)
 
-            # Sequential evaluation is intentional: all three services share
+            # Sequential evaluation is intentional: all systems share
             # RefugeWorldStore and each stage must observe the previous write.
             fire = await self.fire_service.evaluate(at=now)
             hall = await self.hall_service.evaluate(at=now)
             casino = await self.casino_service.evaluate(at=now)
 
-            state = casino.state
+            # Hidden discoveries are evaluated only after their source systems
+            # have projected the latest real evidence into the world. The
+            # service already runs under the shared mutation lock here.
+            secrets = await self.secrets_service.sync_under_world_lock(at=now)
+            state = secrets.state
+
             context = RefugeRenderContext.from_datetime(now)
             current_season = season_id_for(now)
             last_event = latest_event(state)
@@ -233,7 +241,12 @@ class RefugePanelService:
                 latest_event_label=last_event_label,
                 visual_signature=visual_signature,
                 summary_signature=_summary_signature(summary_payload),
-                changed=bool(fire.changed or hall.changed or casino.changed),
+                changed=bool(
+                    fire.changed
+                    or hall.changed
+                    or casino.changed
+                    or secrets.changed
+                ),
             )
 
     async def render_png(self, snapshot: RefugePanelSnapshot) -> bytes:
