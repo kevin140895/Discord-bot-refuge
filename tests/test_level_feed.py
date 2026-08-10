@@ -116,7 +116,9 @@ async def test_level_up_machine_a_sous(setup_router):
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert chan.sent and chan.sent[0].embed
-    assert "🎰" in chan.sent[0].embed.description
+    assert chan.sent[0].embed.title == "⬆️ LEVEL UP DANS LE REFUGE ! 🎮"
+    assert "niveau 13" in chan.sent[0].embed.description
+    assert "+2500 XP" in chan.sent[0].embed.description
     assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
