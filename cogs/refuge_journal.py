@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import REFUGE_JOURNAL_CHANNEL_ID
 from services.refuge_journal import RefugeJournalIssue, refuge_journal_service
 from storage.refuge_journal_store import refuge_journal_store
 from ui.refuge_journal_view import RefugeJournalView
@@ -15,6 +15,13 @@ from utils.timezones import PARIS_TZ
 
 
 logger = logging.getLogger(__name__)
+
+try:
+    REFUGE_JOURNAL_CHANNEL_ID = int(
+        os.getenv("REFUGE_JOURNAL_CHANNEL_ID", "1400552164979507263")
+    )
+except ValueError:
+    REFUGE_JOURNAL_CHANNEL_ID = 1400552164979507263
 
 
 class RefugeJournalCog(commands.Cog):
@@ -101,7 +108,6 @@ class RefugeJournalCog(commands.Cog):
             )
         except Exception:
             logger.exception("[Journal] publication envoyée mais persistance échouée")
-            # Delete the uncommitted message when possible so a retry cannot duplicate it.
             try:
                 await message.delete()
             except discord.HTTPException:
@@ -119,8 +125,6 @@ class RefugeJournalCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def journal_scheduler(self) -> None:
         now = datetime.now(PARIS_TZ)
-        # Sunday at 20:00 Europe/Paris. Running every minute also catches a bot
-        # restart later in the evening without ever publishing twice.
         if now.weekday() != 6 or now.hour < 20:
             return
         try:
@@ -178,4 +182,4 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(RefugeJournalCog(bot))
 
 
-__all__ = ["RefugeJournalCog"]
+__all__ = ["RefugeJournalCog", "REFUGE_JOURNAL_CHANNEL_ID"]
