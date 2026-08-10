@@ -22,6 +22,7 @@ from storage.xp_store import xp_store
 from ui.radio_view import RadioView
 from utils.api_meter import api_meter
 from utils.channel_edit_manager import channel_edit_manager
+from utils.discord_api_trace import create_discord_http_trace
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter, limiter as _limiter
 from view import PlayerTypeView, StreamerTempVoiceView
@@ -42,6 +43,12 @@ async def reset_http_error_counter() -> None:
 
 class RefugeBot(commands.Bot):
     """Discord bot with minimal startup and shutdown logic for tests."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        # discord.py creates its shared aiohttp ClientSession from Client
+        # options, so the trace must be installed before login/setup_hook.
+        kwargs.setdefault("http_trace", create_discord_http_trace(limiter))
+        super().__init__(*args, **kwargs)
 
     async def setup_hook(self) -> None:  # type: ignore[override]
         """Start background helpers and synchronise the command tree."""
@@ -77,7 +84,6 @@ class RefugeBot(commands.Bot):
         ):
             if required not in loaded_names:
                 await self.load_extension(f"cogs.{required}")
-
 
         # Sync application commands. Use guild-specific sync when ``GUILD_ID``
         # is defined so commands appear instantly on that server.
