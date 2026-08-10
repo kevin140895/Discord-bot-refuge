@@ -90,7 +90,7 @@ async def test_level_up_pari_xp(setup_router):
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert chan.sent and chan.sent[0].embed
-    assert chan.sent[0].embed.title == "🆙 Niveau augmenté !"
+    assert chan.sent[0].embed.title == "⬆️ LEVEL UP DANS LE REFUGE ! 🎮"
     assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
@@ -103,7 +103,7 @@ async def test_level_down_pari_xp(setup_router):
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert chan.sent and chan.sent[0].embed
-    assert chan.sent[0].embed.title == "⬇️ Niveau diminué"
+    assert chan.sent[0].embed.title == "⬇️ LEVEL DOWN"
     assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
