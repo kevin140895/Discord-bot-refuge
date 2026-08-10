@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional
+from typing import Iterable, Optional
 
 import discord
 from discord.ext import commands
@@ -15,10 +15,41 @@ from config import (
     ROCK_RADIO_STREAM_URL,
 )
 from storage.radio_store import RadioStore
+from ui.radio_view import RadioView
 from utils.rename_manager import rename_manager
 from utils.voice import ensure_voice, play_stream
-from view import RadioView
+
 logger = logging.getLogger(__name__)
+
+RADIO_CUSTOM_IDS = frozenset(
+    {"radio_rap_fr", "radio_rap", "radio_rock", "radio_hiphop"}
+)
+
+
+def _collect_component_custom_ids(components: Iterable[object]) -> set[str]:
+    """Collect custom IDs from legacy or nested Components V2 trees."""
+    found: set[str] = set()
+    stack = list(components)
+    while stack:
+        component = stack.pop()
+        custom_id = getattr(component, "custom_id", None)
+        if isinstance(custom_id, str):
+            found.add(custom_id)
+
+        children = getattr(component, "children", None)
+        if children:
+            stack.extend(children)
+
+        accessory = getattr(component, "accessory", None)
+        if accessory is not None:
+            stack.append(accessory)
+    return found
+
+
+def _is_radio_message(message: discord.Message) -> bool:
+    """Identify both the legacy radio panel and its Components V2 replacement."""
+    custom_ids = _collect_component_custom_ids(getattr(message, "components", []))
+    return RADIO_CUSTOM_IDS.issubset(custom_ids)
 
 
 class RadioCog(commands.Cog):
@@ -82,37 +113,45 @@ class RadioCog(commands.Cog):
         await asyncio.sleep(5)
         await self._connect_and_play()
 
+    async def _render_radio_message(self, message: discord.Message) -> None:
+        """Upgrade or refresh one existing radio message without replacing it."""
+        await message.edit(
+            content=None,
+            embeds=[],
+            attachments=[],
+            view=RadioView(),
+        )
+
     async def _ensure_radio_message(
         self, channel: discord.abc.Messageable
     ) -> None:
         stored = self.store.get_radio_message()
         channel_id = getattr(channel, "id", 0)
 
-        def is_radio_message(msg: discord.Message) -> bool:
-            return any(
-                getattr(comp, "custom_id", "") == "radio_hiphop"
-                for row in getattr(msg, "components", [])
-                for comp in getattr(row, "children", [])
-            )
-
-        # 1) Try using stored message id to avoid duplicates
+        # 1) Try using stored message id to avoid duplicates.
         if stored and int(stored.get("channel_id", 0)) == channel_id:
             fetch = getattr(channel, "fetch_message", None)
             if fetch:
                 try:
                     msg = await fetch(int(stored.get("message_id", 0)))
-                    if is_radio_message(msg):
-                        return  # Stored message is still valid
+                    if _is_radio_message(msg):
+                        try:
+                            await self._render_radio_message(msg)
+                        except Exception as e:  # pragma: no cover - network issues
+                            logger.warning(
+                                "Impossible de mettre à jour le panneau radio: %s", e
+                            )
+                        return
                 except Exception as e:  # pragma: no cover - network issues
                     logger.debug("Failed to fetch stored radio message: %s", e)
 
-        # 2) Search the history for an existing radio message
+        # 2) Search the history for an existing radio message.
         found = None
         try:
             async for msg in channel.history(limit=None):
                 if msg.author.id != self.bot.user.id:
                     continue
-                if not is_radio_message(msg):
+                if not _is_radio_message(msg):
                     continue
                 if found is None:
                     found = msg
@@ -128,16 +167,16 @@ class RadioCog(commands.Cog):
             return
 
         if found:
+            try:
+                await self._render_radio_message(found)
+            except Exception as e:  # pragma: no cover - best effort
+                logger.warning("Impossible de mettre à jour le panneau radio: %s", e)
             self.store.set_radio_message(channel_id, found.id)
             return
 
-        # 3) No message found -> create one
+        # 3) No message found -> create the Components V2 panel.
         try:
-            msg = await channel.send(
-                "📻 Sélectionne ta radio !\n"
-                "Clique sur un bouton ci-dessous pour changer de station.",
-                view=RadioView(),
-            )
+            msg = await channel.send(view=RadioView())
             self.store.set_radio_message(channel_id, msg.id)
         except Exception as e:
             logger.warning("Impossible d'envoyer le message radio: %s", e)
