@@ -40,6 +40,22 @@ PURCHASE_LIMITS: dict[str, int] = {
     "double_xp_1h": 2,
 }
 
+SHOP_ACCENT = discord.Colour.gold()
+SHOP_PRESENTATION: dict[str, dict[str, str]] = {
+    "ticket_royal": {
+        "emoji": "🎟️",
+        "description": "Une tentative supplémentaire à la Machine à sous.",
+        "limit_label": "Stock maximum",
+        "verb": "Acheter",
+    },
+    "double_xp_1h": {
+        "emoji": "⚡",
+        "description": "Multiplie tes gains d'XP personnels pendant **60 minutes**.",
+        "limit_label": "Maximum actif",
+        "verb": "Activer",
+    },
+}
+
 
 def _activate_personal_double_xp(user_id: int, duration_minutes: int) -> datetime:
     """Active ou prolonge le vrai bonus Double XP utilisé par ``award_xp``.
@@ -82,34 +98,124 @@ def _load_shop() -> typing.Optional[dict[str, typing.Any]]:
             return None
 
 
-class ShopView(discord.ui.View):
-    """Vue persistante pour la boutique."""
+def _shop_item_is_visible(key: str, item: dict[str, typing.Any]) -> bool:
+    name = str(item.get("name", key))
+    return "vip" not in key.lower() and "vip" not in name.lower()
+
+
+class ShopPurchaseButton(discord.ui.Button):
+    """Persistent purchase button used as a Components V2 section accessory."""
+
+    def __init__(
+        self,
+        cog: "EconomyUICog",
+        *,
+        item_key: str,
+        label: str,
+        emoji: str,
+    ) -> None:
+        super().__init__(
+            label=label,
+            emoji=emoji,
+            style=discord.ButtonStyle.success,
+            custom_id=f"shop_buy:{item_key}",
+        )
+        self.cog = cog
+        self.item_key = item_key
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.cog._handle_shop_purchase(interaction, self.item_key)
+
+
+class ShopView(discord.ui.LayoutView):
+    """Vue Components V2 persistante pour la boutique."""
 
     def __init__(self, cog: "EconomyUICog") -> None:
         super().__init__(timeout=None)
         self.cog = cog
+        self.add_item(self._build_container())
 
-    @discord.ui.button(
-        label="Ticket Royal",
-        style=discord.ButtonStyle.green,
-        custom_id="shop_buy:ticket_royal",
-    )
-    async def ticket_royal(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self.cog._handle_shop_purchase(interaction, "ticket_royal")
+    def _build_container(self) -> discord.ui.Container:
+        container = discord.ui.Container(accent_colour=SHOP_ACCENT)
+        container.add_item(
+            discord.ui.TextDisplay(
+                "## 🛒 BOUTIQUE DU REFUGE\n"
+                "Dépense tes XP pour obtenir des avantages utilisables dans le Refuge."
+            )
+        )
 
-    @discord.ui.button(
-        label="Double XP 1h",
-        style=discord.ButtonStyle.green,
-        custom_id="shop_buy:double_xp_1h",
-    )
-    async def double_xp_1h(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self.cog._handle_shop_purchase(interaction, "double_xp_1h")
+        data = _load_shop()
+        if not data:
+            container.add_item(discord.ui.Separator())
+            container.add_item(
+                discord.ui.TextDisplay(
+                    "⚠️ **Boutique indisponible.**\n"
+                    "Le catalogue n'a pas pu être chargé."
+                )
+            )
+            return container
 
+        visible_items = [
+            (key, item)
+            for key, item in data.items()
+            if isinstance(item, dict) and _shop_item_is_visible(key, item)
+        ]
 
+        for key, item in visible_items:
+            container.add_item(discord.ui.Separator())
+            name = str(item.get("name", key))
+            price = item.get("price")
+            price_text = f"{price} XP" if price else "Prix non défini"
+            limit = PURCHASE_LIMITS.get(key)
+            presentation = SHOP_PRESENTATION.get(key)
+
+            if presentation is None:
+                limit_text = f"\nLimite : **{limit}**" if limit is not None else ""
+                container.add_item(
+                    discord.ui.TextDisplay(
+                        f"### 🧩 {name}\n**{price_text}**{limit_text}"
+                    )
+                )
+                continue
+
+            limit_text = ""
+            if limit is not None:
+                limit_text = f"\n`{presentation['limit_label']} : {limit}`"
+            details = discord.ui.TextDisplay(
+                f"### {presentation['emoji']} {name.upper()}\n"
+                f"**{price_text}**\n"
+                f"{presentation['description']}"
+                f"{limit_text}"
+            )
+            button_label = presentation["verb"]
+            if price:
+                button_label = f"{button_label} · {price_text}"
+            container.add_item(
+                discord.ui.Section(
+                    details,
+                    accessory=ShopPurchaseButton(
+                        self.cog,
+                        item_key=key,
+                        label=button_label,
+                        emoji=presentation["emoji"],
+                    ),
+                )
+            )
+
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.TextDisplay(
+                "### 💰 Fonctionnement\n"
+                "Tes achats utilisent directement ton solde XP.\n"
+                "Les limites de stockage et d'activation sont appliquées automatiquement."
+            )
+        )
+        container.add_item(
+            discord.ui.TextDisplay(
+                "-# Les achats sont définitifs · Le solde est vérifié au moment de la transaction."
+            )
+        )
+        return container
 
 
 class EconomyUICog(commands.Cog):
@@ -117,7 +223,7 @@ class EconomyUICog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.shop_view = ShopView(self)
+        self.shop_view: typing.Optional[ShopView] = None
 
     @tasks.loop(minutes=5)
     async def boosts_cleanup(self) -> None:
@@ -188,6 +294,8 @@ class EconomyUICog(commands.Cog):
         logger.info("Chargement de l'interface économie")
         self.boosts_cleanup.start()
         ECONOMY_DIR.mkdir(parents=True, exist_ok=True)
+        shop_view = ShopView(self)
+        self.shop_view = shop_view
         try:
             ui_data = load_ui()
         except Exception as e:  # pragma: no cover - best effort
@@ -209,13 +317,13 @@ class EconomyUICog(commands.Cog):
             logger.warning("Salon économie introuvable (%s)", CHANNEL_ID)
             return
 
-        self.bot.add_view(self.shop_view)
+        self.bot.add_view(shop_view)
 
         shop_id = await self._ensure_message(
             channel,
             ui_data.get("shop_message_id"),
-            self._build_shop_text(),
-            self.shop_view,
+            None,
+            shop_view,
             "Boutique",
         )
         if shop_id:
@@ -386,8 +494,8 @@ class EconomyUICog(commands.Cog):
         self,
         channel: discord.TextChannel,
         message_id: typing.Optional[int],
-        content: str,
-        view: discord.ui.View,
+        content: typing.Optional[str],
+        view: typing.Union[discord.ui.View, discord.ui.LayoutView],
         label: str,
     ) -> typing.Optional[int]:
         msg: typing.Optional[discord.Message] = None
@@ -398,7 +506,7 @@ class EconomyUICog(commands.Cog):
                 logger.info("%s: ancien message introuvable", label)
         if msg is None:
             try:
-                msg = await channel.send(content, view=view)
+                msg = await channel.send(content=content, view=view)
                 await msg.pin(reason=f"UI {label}")
                 logger.info("%s: message créé (%s)", label, msg.id)
             except Exception as e:  # pragma: no cover - best effort
@@ -406,7 +514,15 @@ class EconomyUICog(commands.Cog):
                 return None
         else:
             try:
-                await msg.edit(content=content, view=view)
+                if isinstance(view, discord.ui.LayoutView):
+                    await msg.edit(
+                        content=None,
+                        embeds=[],
+                        attachments=[],
+                        view=view,
+                    )
+                else:
+                    await msg.edit(content=content, view=view)
                 logger.info("%s: message mis à jour", label)
             except Exception as e:  # pragma: no cover - best effort
                 logger.warning("%s: mise à jour impossible (%s)", label, e)
