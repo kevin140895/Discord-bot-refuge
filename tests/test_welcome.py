@@ -17,17 +17,28 @@ async def test_welcome_message_sent():
     bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
     channel = SimpleNamespace(id=CHANNEL_WELCOME, send=AsyncMock())
     guild = SimpleNamespace(get_channel=lambda cid: channel if cid == CHANNEL_WELCOME else None)
-    member = SimpleNamespace(guild=guild, mention="@member", bot=False)
+    member = SimpleNamespace(
+        id=123,
+        guild=guild,
+        mention="@member",
+        bot=False,
+        display_avatar=SimpleNamespace(url="https://example.invalid/avatar.png"),
+    )
 
     cog = WelcomeCog(bot)
     await cog.on_member_join(member)
 
-    expected = (
-        "🎉 Bienvenue au Refuge !\n"
+    channel.send.assert_awaited_once()
+    kwargs = channel.send.await_args.kwargs
+    assert set(kwargs) == {"embed"}
+
+    embed = kwargs["embed"]
+    assert embed.title == "🎉 Bienvenue au Refuge !"
+    assert embed.description == (
         "@member, installe-toi bien !\n"
         f"🕹️ Choisis ton rôle dans le salon <#{CHANNEL_ROLES}> pour accéder à toutes les sections.\n"
         "Ravi de t’avoir parmi nous ! 🎮"
     )
-    channel.send.assert_awaited_once_with(expected)
+    assert embed.image.url == "https://example.invalid/avatar.png"
 
     await bot.close()
