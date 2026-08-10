@@ -25,10 +25,17 @@ class TransactionStore:
         self._lock = asyncio.Lock()
 
     async def add(self, transaction: Any) -> None:
-        """Append ``transaction`` to the ledger and persist to disk."""
+        """Append ``transaction`` only if the ledger can be persisted."""
         async with self._lock:
             self.transactions.append(transaction)
-            await save_json(self.path, self.transactions)
+            try:
+                await save_json(self.path, self.transactions)
+            except Exception:
+                # The lock guarantees this is still the append performed by
+                # this call. Keep the in-memory ledger aligned with disk when
+                # persistence fails so callers can safely log/retry the audit.
+                self.transactions.pop()
+                raise
 
     async def clear(self) -> None:
         """Remove all transactions and persist the empty ledger."""

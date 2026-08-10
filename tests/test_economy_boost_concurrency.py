@@ -48,6 +48,7 @@ async def test_concurrent_double_xp_purchases_respect_active_limit(monkeypatch):
         "_activate_personal_double_xp",
         lambda _uid, _minutes: now + timedelta(hours=2),
     )
+    monkeypatch.setattr(economy_ui, "_persist_personal_double_xp", lambda: None)
 
     first_debit_started = asyncio.Event()
     release_first_debit = asyncio.Event()
@@ -154,6 +155,7 @@ async def test_boost_cleanup_serializes_disk_write_but_not_discord_role_removal(
         "_activate_personal_double_xp",
         lambda _uid, _minutes: now + timedelta(hours=1),
     )
+    monkeypatch.setattr(economy_ui, "_persist_personal_double_xp", lambda: None)
 
     debit_started = asyncio.Event()
 
