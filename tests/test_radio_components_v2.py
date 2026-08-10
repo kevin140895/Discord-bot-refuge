@@ -106,3 +106,33 @@ async def test_music2_delegates_radio_panel_restore_to_radio_cog() -> None:
     await music2.Music2Cog._restore_radio_panel(cog, text_channel)
 
     ensure.assert_awaited_once_with(text_channel)
+
+
+@pytest.mark.asyncio
+async def test_music2_fallback_restores_the_v2_radio_view() -> None:
+    message = SimpleNamespace(edit=AsyncMock())
+
+    class DummyChannel:
+        async def fetch_message(self, message_id: int):
+            assert message_id == 777
+            return message
+
+    cog = object.__new__(music2.Music2Cog)
+    cog.bot = SimpleNamespace(get_cog=lambda _name: None)
+    cog.store = SimpleNamespace(
+        get_radio_message=Mock(
+            return_value={
+                "channel_id": music2.RADIO_TEXT_CHANNEL_ID,
+                "message_id": 777,
+            }
+        )
+    )
+
+    await music2.Music2Cog._restore_radio_panel(cog, DummyChannel())
+
+    message.edit.assert_awaited_once()
+    kwargs = message.edit.await_args.kwargs
+    assert kwargs["content"] is None
+    assert kwargs["embeds"] == []
+    assert kwargs["attachments"] == []
+    assert isinstance(kwargs["view"], discord.ui.LayoutView)
