@@ -254,21 +254,6 @@ GAMES_DATA_DIR: str = os.getenv(
 )
 """Répertoire de persistance des événements de jeu, sous ``DATA_DIR`` par défaut."""
 
-CHANNEL_EDIT_MIN_INTERVAL_SECONDS: int = int(
-    os.getenv("CHANNEL_EDIT_MIN_INTERVAL_SECONDS", "180")
-)
-"""Intervalle minimal entre deux modifications du même salon."""
-
-CHANNEL_EDIT_DEBOUNCE_SECONDS: int = int(
-    os.getenv("CHANNEL_EDIT_DEBOUNCE_SECONDS", "15")
-)
-"""Délai appliqué avant l'édition d'un salon."""
-
-CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS: int = int(
-    os.getenv("CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS", "10")
-)
-"""Intervalle minimal global entre les éditions de salons."""
-
 
 # ── Renommage des salons ─────────────────────────────────────
 CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL: int = int(
