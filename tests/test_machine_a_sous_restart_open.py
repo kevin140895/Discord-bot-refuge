@@ -17,7 +17,7 @@ from cogs.machine_a_sous.machine_a_sous import MachineASousCog
 @pytest.mark.asyncio
 async def test_restart_open_replaces_closed_poster(monkeypatch):
     monkeypatch.setattr(
-        "cogs.machine_a_sous.machine_a_sous.is_open_now", lambda *_, **__: True
+        "cogs.machine_a_sous.machine_a_sous._is_casino_open", lambda *_, **__: True
     )
 
     channel = AsyncMock(spec=discord.TextChannel)
