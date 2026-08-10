@@ -12,7 +12,7 @@ from discord.ext import commands
 
 from utils.interactions import safe_respond
 from utils.metrics import measure
-from view import PlayerTypeView, RoleView
+from ui.player_roles_view import PlayerTypePanelView, RolePanelView
 from config import CHANNEL_ROLES, OWNER_ID, XP_VIEWER_ROLE_ID
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class MiscCog(commands.Cog):
             )
             channel = interaction.guild.get_channel(CHANNEL_ROLES)
         if channel:
-            await channel.send("Quel type de joueur es-tu ?", view=PlayerTypeView())
+            await channel.send(view=PlayerTypePanelView())
 
     @app_commands.command(
         name="roles",
@@ -62,25 +62,7 @@ class MiscCog(commands.Cog):
             )
             channel = interaction.guild.get_channel(CHANNEL_ROLES)
         if channel:
-            embed = discord.Embed(
-                title="🆔 Personnalise ton Profil Joueur",
-                description=(
-                    "Affiche tes badges sur ton profil pour que la communauté "
-                    "sache sur quoi tu joues et ce que tu aimes !"
-                ),
-                color=discord.Color.from_str("#5865F2"),
-            )
-            embed.add_field(
-                name="🎮 Ta Plateforme",
-                value="PC, Console, Mobile — **choix unique**.",
-                inline=False,
-            )
-            embed.add_field(
-                name="📌 Tes Intérêts",
-                value="Notifs, Communauté, Paris Sportifs — **à la carte**.",
-                inline=False,
-            )
-            await channel.send(embed=embed, view=RoleView())
+            await channel.send(view=RolePanelView())
 
     @app_commands.command(name="purge", description="Supprime N messages récents de ce salon (réservé à Kevin)")
     @app_commands.describe(nb="Nombre de messages à supprimer (1-100)")
