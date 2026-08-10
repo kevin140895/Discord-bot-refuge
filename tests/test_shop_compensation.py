@@ -43,6 +43,36 @@ async def test_exact_refund_ignores_double_xp_and_flushes(tmp_path, monkeypatch)
     await store.aclose()
 
 
+def test_boost_snapshot_restore_round_trip(monkeypatch):
+    from cogs import xp as xp_cog
+
+    monkeypatch.setattr(xp_cog, "XP_BOOSTS", {})
+    monkeypatch.setattr(xp_cog, "XP_BOOST_STARTS", {})
+    monkeypatch.setattr(xp_cog, "XP_BOOST_HISTORY", {})
+
+    uid = "42"
+    start = datetime.now(timezone.utc) - timedelta(minutes=10)
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=50)
+    history = [(start - timedelta(hours=2), start - timedelta(hours=1))]
+    xp_cog.XP_BOOST_STARTS[uid] = start
+    xp_cog.XP_BOOSTS[uid] = expiry
+    xp_cog.XP_BOOST_HISTORY[uid] = list(history)
+
+    snapshot = economy_ui._snapshot_personal_double_xp(42)
+
+    xp_cog.XP_BOOST_STARTS[uid] = datetime.now(timezone.utc)
+    xp_cog.XP_BOOSTS[uid] = datetime.now(timezone.utc) + timedelta(hours=5)
+    xp_cog.XP_BOOST_HISTORY[uid].append(
+        (datetime.now(timezone.utc), datetime.now(timezone.utc) + timedelta(minutes=1))
+    )
+
+    economy_ui._restore_personal_double_xp(42, snapshot)
+
+    assert xp_cog.XP_BOOST_STARTS[uid] == start
+    assert xp_cog.XP_BOOSTS[uid] == expiry
+    assert xp_cog.XP_BOOST_HISTORY[uid] == history
+
+
 @pytest.mark.asyncio
 async def test_ticket_delivery_failure_refunds_exact_debit(monkeypatch):
     monkeypatch.setattr(
