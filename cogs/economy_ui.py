@@ -7,7 +7,7 @@ import typing
 import discord
 from discord.ext import commands, tasks
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from storage.economy import (
     ECONOMY_DIR,
@@ -57,28 +57,76 @@ SHOP_PRESENTATION: dict[str, dict[str, str]] = {
 }
 
 
+def _snapshot_personal_double_xp(user_id: int) -> dict[str, typing.Any]:
+    """Capture l'état Double XP nécessaire à un rollback d'achat."""
+    from cogs import xp as xp_cog
+
+    uid = str(user_id)
+    return {
+        "expiry_present": uid in xp_cog.XP_BOOSTS,
+        "expiry": xp_cog.XP_BOOSTS.get(uid),
+        "start_present": uid in xp_cog.XP_BOOST_STARTS,
+        "start": xp_cog.XP_BOOST_STARTS.get(uid),
+        "history_present": uid in xp_cog.XP_BOOST_HISTORY,
+        "history": list(xp_cog.XP_BOOST_HISTORY.get(uid, [])),
+    }
+
+
+def _restore_personal_double_xp(
+    user_id: int, snapshot: dict[str, typing.Any]
+) -> None:
+    """Restaure exactement l'état Double XP capturé avant l'achat."""
+    from cogs import xp as xp_cog
+
+    uid = str(user_id)
+    states = (
+        (xp_cog.XP_BOOSTS, "expiry_present", "expiry"),
+        (xp_cog.XP_BOOST_STARTS, "start_present", "start"),
+        (xp_cog.XP_BOOST_HISTORY, "history_present", "history"),
+    )
+    for mapping, present_key, value_key in states:
+        if snapshot[present_key]:
+            value = snapshot[value_key]
+            mapping[uid] = list(value) if value_key == "history" else value
+        else:
+            mapping.pop(uid, None)
+
+
 def _activate_personal_double_xp(user_id: int, duration_minutes: int) -> datetime:
-    """Active ou prolonge le vrai bonus Double XP utilisé par ``award_xp``.
+    """Active/prolonge le Double XP en mémoire sans persistance anticipée.
 
-    Le module XP est résolu au moment de l'achat, et non lors du chargement de
-    ``economy_ui``. Cela évite de conserver une référence vers une ancienne
-    instance du module si Discord charge ensuite ``cogs.xp`` comme extension.
-
-    ``cogs.xp.add_xp_boost`` remplace normalement l'expiration existante. Pour
-    les achats boutique, on conserve le temps restant puis on ajoute la nouvelle
-    durée afin que deux achats d'une heure donnent bien deux heures de bonus au
-    total au lieu de faire payer deux fois pour une seule heure.
+    La boutique doit pouvoir annuler cette mutation si la sauvegarde de
+    l'article échoue après le débit XP. Contrairement à ``add_xp_boost``, cette
+    fonction ne programme donc aucune écriture asynchrone avant que
+    ``save_boosts`` ait confirmé la livraison.
     """
     from cogs import xp as xp_cog
 
+    uid = str(user_id)
     now = datetime.now(timezone.utc)
-    current_expiry = xp_cog.XP_BOOSTS.get(str(user_id))
-    remaining_minutes = 0.0
-    if current_expiry and current_expiry > now:
-        remaining_minutes = (current_expiry - now).total_seconds() / 60.0
+    current_expiry = xp_cog.XP_BOOSTS.get(uid)
+    current_start = xp_cog.XP_BOOST_STARTS.get(uid)
 
-    xp_cog.add_xp_boost(user_id, duration_minutes + remaining_minutes)
-    return xp_cog.XP_BOOSTS[str(user_id)]
+    if current_expiry and current_expiry > now:
+        start = current_start or now
+        expiry = current_expiry + timedelta(minutes=duration_minutes)
+    else:
+        xp_cog._remember_finished_personal_boost(
+            uid, current_start, current_expiry
+        )
+        start = now
+        expiry = now + timedelta(minutes=duration_minutes)
+
+    xp_cog.XP_BOOST_STARTS[uid] = start
+    xp_cog.XP_BOOSTS[uid] = expiry
+    return expiry
+
+
+async def _persist_personal_double_xp() -> None:
+    """Persiste l'état Double XP après livraison de l'article."""
+    from cogs import xp as xp_cog
+
+    await xp_cog.save_xp_boosts_to_disk()
 
 
 def _load_shop() -> typing.Optional[dict[str, typing.Any]]:
@@ -435,6 +483,11 @@ class EconomyUICog(commands.Cog):
                 "Solde insuffisant.", ephemeral=True
             )
             return
+
+        boost_snapshot: dict[str, typing.Any] | None = None
+        if item_key == "double_xp_1h":
+            boost_snapshot = _snapshot_personal_double_xp(user_id)
+
         try:
             await xp_adapter.add_xp(
                 user_id,
@@ -451,28 +504,97 @@ class EconomyUICog(commands.Cog):
             )
             return
 
-        if item_key == "ticket_royal":
-            tickets = load_tickets()
-            key = str(user_id)
-            tickets[key] = int(tickets.get(key, 0)) + 1
-            await save_tickets(tickets)
-        elif item_key == "double_xp_1h":
-            boosts = load_boosts()
-            key = str(user_id)
-            boost_list = boosts.setdefault(key, [])
-            expiry = _activate_personal_double_xp(user_id, 60)
-            boost_list.append({"type": "double_xp", "until": expiry.isoformat()})
-            await save_boosts(boosts)
+        try:
+            if item_key == "ticket_royal":
+                tickets = load_tickets()
+                key = str(user_id)
+                tickets[key] = int(tickets.get(key, 0)) + 1
+                await save_tickets(tickets)
+            elif item_key == "double_xp_1h":
+                boosts = load_boosts()
+                key = str(user_id)
+                boost_list = boosts.setdefault(key, [])
+                expiry = _activate_personal_double_xp(user_id, 60)
+                boost_list.append(
+                    {"type": "double_xp", "until": expiry.isoformat()}
+                )
+                await save_boosts(boosts)
+            else:
+                raise RuntimeError(f"Article sans mécanisme de livraison: {item_key}")
+        except Exception:
+            logger.exception(
+                "[shop] Livraison échouée après débit pour user=%s item=%s price=%s",
+                user_id,
+                item_key,
+                price,
+            )
+            if boost_snapshot is not None:
+                _restore_personal_double_xp(user_id, boost_snapshot)
 
-        await transactions.add(
-            {
-                "type": "buy",
-                "user_id": user_id,
-                "item": item_key,
-                "price": price,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+            refund_confirmed = False
+            try:
+                await xp_adapter.refund_xp_exact(
+                    user_id,
+                    price,
+                    interaction.guild_id or 0,
+                    source="shop_refund",
+                )
+                refund_confirmed = True
+            except Exception:
+                logger.critical(
+                    "[shop] ÉCHEC COMPENSATION XP user=%s item=%s amount=%s",
+                    user_id,
+                    item_key,
+                    price,
+                    exc_info=True,
+                )
+
+            if refund_confirmed:
+                message = (
+                    "L'achat n'a pas pu être livré. "
+                    f"Les {price} XP débités ont été intégralement remboursés."
+                )
+            else:
+                message = (
+                    "L'achat n'a pas pu être livré et le remboursement automatique "
+                    "n'a pas pu être confirmé. Préviens un administrateur."
+                )
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+
+        if item_key == "double_xp_1h":
+            try:
+                await _persist_personal_double_xp()
+            except Exception:
+                # L'article est déjà livré (inventaire persistant + état mémoire).
+                # Une panne de cette sauvegarde secondaire ne doit pas offrir
+                # simultanément l'article et un remboursement.
+                logger.exception(
+                    "[shop] Double XP livré mais persistance XP secondaire échouée "
+                    "pour user=%s",
+                    user_id,
+                )
+
+        try:
+            await transactions.add(
+                {
+                    "type": "buy",
+                    "user_id": user_id,
+                    "item": item_key,
+                    "price": price,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        except Exception:
+            # À ce stade l'article est déjà livré. Rembourser créerait un article
+            # gratuit ; l'erreur de ledger reste donc un incident d'audit séparé.
+            logger.exception(
+                "[shop] Achat livré mais transaction non persistée: "
+                "user=%s item=%s price=%s",
+                user_id,
+                item_key,
+                price,
+            )
 
         await interaction.response.send_message(
             f"Achat de {item.get('name', item_key)} effectué !", ephemeral=True
