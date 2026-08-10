@@ -89,8 +89,10 @@ class RadioView(discord.ui.LayoutView):
             )
         )
 
-        for index, station in enumerate(self.STATIONS):
-            container.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.small))
+        for station in self.STATIONS:
+            container.add_item(
+                discord.ui.Separator(spacing=discord.SeparatorSpacing.small)
+            )
             container.add_item(
                 discord.ui.Section(
                     discord.ui.TextDisplay(
