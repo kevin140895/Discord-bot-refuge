@@ -16,11 +16,12 @@ _TITLE_SEPARATORS = (" - ", " – ", " — ")
 
 
 class Music2DynamicRenameCog(commands.Cog):
-    """Rename the shared radio voice channel while custom music is playing."""
+    """Keep the shared radio voice channel name aligned with active audio."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._last_requested_name: str | None = None
+        self._last_radio_stream: str | None = None
 
     async def cog_load(self) -> None:
         self.sync_name.start()
@@ -62,10 +63,28 @@ class Music2DynamicRenameCog(commands.Cog):
         radio = self.bot.get_cog("RadioCog")
         if music is None or radio is None:
             self._last_requested_name = None
+            self._last_radio_stream = None
             return
 
+        channel = self.bot.get_channel(RADIO_VC_ID)
+        if not isinstance(channel, discord.VoiceChannel):
+            return
+
+        stream_url = getattr(radio, "stream_url", None)
+        if stream_url is not None:
+            self._last_requested_name = None
+            if stream_url == self._last_radio_stream:
+                return
+
+            rename_for_stream = getattr(radio, "_rename_for_stream", None)
+            if callable(rename_for_stream):
+                await rename_for_stream(channel, stream_url)
+                self._last_radio_stream = stream_url
+            return
+
+        self._last_radio_stream = None
         track = getattr(music, "current", None)
-        if track is None or getattr(radio, "stream_url", None) is not None:
+        if track is None:
             self._last_requested_name = None
             return
 
@@ -73,12 +92,8 @@ class Music2DynamicRenameCog(commands.Cog):
         if voice is None or not (voice.is_playing() or voice.is_paused()):
             return
 
-        channel = self.bot.get_channel(RADIO_VC_ID)
-        if not isinstance(channel, discord.VoiceChannel):
-            return
-
         new_name = self._channel_name_for_track(track)
-        if new_name == self._last_requested_name and channel.name == new_name:
+        if new_name == self._last_requested_name:
             return
 
         self._last_requested_name = new_name
