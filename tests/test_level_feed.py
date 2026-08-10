@@ -75,7 +75,7 @@ def setup_router(monkeypatch):
             await level_feed.router._handle(event)
 
     monkeypatch.setattr(level_feed.router, "_dispatch_later", fast_dispatch)
-    monkeypatch.setattr(config, "ENABLE_GAME_LEVEL_FEED", True)
+    monkeypatch.setattr(level_feed, "ENABLE_GAME_LEVEL_FEED", True)
     xp_store.data.clear()
     xp_store.lock = asyncio.Lock()
     return chan
@@ -91,6 +91,8 @@ async def test_level_up_pari_xp(setup_router):
     await asyncio.sleep(0)
     assert chan.sent and chan.sent[0].embed
     assert chan.sent[0].embed.title == "⬆️ LEVEL UP DANS LE REFUGE ! 🎮"
+    assert "niveau 13" in chan.sent[0].embed.description
+    assert "+2500 XP" in chan.sent[0].embed.description
     assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
@@ -104,6 +106,8 @@ async def test_level_down_pari_xp(setup_router):
     await asyncio.sleep(0)
     assert chan.sent and chan.sent[0].embed
     assert chan.sent[0].embed.title == "⬇️ LEVEL DOWN"
+    assert "niveau 12" in chan.sent[0].embed.description
+    assert "2500 XP" in chan.sent[0].embed.description
     assert chan.sent[0].embed.thumbnail.url == "avatar-url"
 
 
@@ -131,16 +135,18 @@ async def test_level_up_message(setup_router):
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert len(chan.sent) == 1
-    msg = chan.sent[0]
-    assert msg.embed is not None
-    assert "discutant" in msg.embed.description
-    assert "niv. 13" in msg.embed.description
+    embed = chan.sent[0].embed
+    assert embed is not None
+    assert embed.title == "⬆️ LEVEL UP DANS LE REFUGE ! 🎮"
+    assert embed.color == level_feed.REFUGE_GAMER_COLOR
+    assert "niveau 13" in embed.description
+    assert "+2500 XP" in embed.description
 
 
 @pytest.mark.asyncio
 async def test_level_up_message_ignores_game_toggle(monkeypatch, setup_router):
     chan = setup_router
-    monkeypatch.setattr(config, "ENABLE_GAME_LEVEL_FEED", False)
+    monkeypatch.setattr(level_feed, "ENABLE_GAME_LEVEL_FEED", False)
     uid = 31
     xp_store.data[str(uid)] = {"xp": 14400, "level": 12}
     await xp_store.add_xp(uid, 2500, guild_id=1, source="message")
@@ -149,8 +155,8 @@ async def test_level_up_message_ignores_game_toggle(monkeypatch, setup_router):
     assert len(chan.sent) == 1
     embed = chan.sent[0].embed
     assert embed is not None
-    assert embed.color == discord.Color.green()
-    assert "niv. 13" in embed.description
+    assert embed.color == level_feed.REFUGE_GAMER_COLOR
+    assert "niveau 13" in embed.description
 
 
 @pytest.mark.asyncio
@@ -164,9 +170,10 @@ async def test_level_down_message_uses_template(setup_router):
     assert len(chan.sent) == 1
     embed = chan.sent[0].embed
     assert embed is not None
-    assert embed.color == discord.Color.red()
-    assert "retombe" in embed.description
-    assert "-2500 XP" in embed.description
+    assert embed.title == "⬇️ LEVEL DOWN"
+    assert embed.color == level_feed.REFUGE_GAMER_COLOR
+    assert "repasse au **niveau 12**" in embed.description
+    assert "2500 XP" in embed.description
 
 
 @pytest.mark.asyncio
@@ -190,7 +197,7 @@ async def test_antispam_coalesce(setup_router):
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert len(chan.sent) == 1
-    assert chan.sent[0].embed and "niv. 14" in chan.sent[0].embed.description
+    assert chan.sent[0].embed and "niveau 14" in chan.sent[0].embed.description
 
 
 @pytest.mark.asyncio
@@ -203,13 +210,13 @@ async def test_edit_message_on_repeated_level_up(setup_router):
     await asyncio.sleep(0)
     assert len(chan.sent) == 1
     msg = chan.sent[0]
-    assert msg.embed and "niv. 13" in msg.embed.description
+    assert msg.embed and "niveau 13" in msg.embed.description
     await xp_store.add_xp(uid, 2700, guild_id=1, source="pari_xp")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert len(chan.sent) == 1
     assert chan.sent[0] is msg
-    assert msg.embed and "niv. 14" in msg.embed.description
+    assert msg.embed and "niveau 14" in msg.embed.description
 
 
 @pytest.mark.asyncio
@@ -222,13 +229,13 @@ async def test_edit_message_on_repeated_level_down(setup_router):
     await asyncio.sleep(0)
     assert len(chan.sent) == 1
     msg = chan.sent[0]
-    assert msg.embed and "niv. 12" in msg.embed.description
+    assert msg.embed and "niveau 12" in msg.embed.description
     await xp_store.add_xp(uid, -2000, guild_id=1, source="pari_xp")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert len(chan.sent) == 1
     assert chan.sent[0] is msg
-    assert msg.embed and "niv. 11" in msg.embed.description
+    assert msg.embed and "niveau 11" in msg.embed.description
 
 
 @pytest.mark.asyncio
