@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -16,6 +17,7 @@ def _make_cog(*, is_open: bool = True):
     cog._message_id = None
     cog._last_announced_state = None
     cog._last_panel_signature = None
+    cog._bet_lock = asyncio.Lock()
     return cog
 
 
@@ -88,6 +90,28 @@ async def test_check_schedule_updates_active_cog_state():
 
 
 @pytest.mark.asyncio
+async def test_save_state_uses_deep_snapshot(monkeypatch):
+    cog = _make_cog()
+    cog.state["players"] = {"42": {"bets": 1}}
+    captured = {}
+
+    async def fake_write(path, payload):
+        captured["path"] = path
+        captured["payload"] = payload
+        cog.state["players"]["42"]["bets"] = 99
+
+    monkeypatch.setattr(pari_xp, "atomic_write_json_async", fake_write)
+
+    await cog._save_state()
+
+    assert captured["path"] == pari_xp.STATE_FILE
+    assert captured["payload"] is not cog.state
+    assert captured["payload"]["players"] is not cog.state["players"]
+    assert captured["payload"]["players"]["42"]["bets"] == 1
+    assert cog.state["players"]["42"]["bets"] == 99
+
+
+@pytest.mark.asyncio
 async def test_handle_bet_win_uses_active_atomic_debit(monkeypatch):
     cog = _make_cog(is_open=True)
     cog._save_state = AsyncMock()
@@ -123,6 +147,54 @@ async def test_handle_bet_win_uses_active_atomic_debit(monkeypatch):
     cog._save_state.assert_awaited_once()
     interaction.response.send_message.assert_awaited_once()
     result_message.edit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_bet_refunds_stake_when_payout_fails(monkeypatch):
+    cog = _make_cog(is_open=True)
+    cog._save_state = AsyncMock()
+
+    monkeypatch.setattr(
+        pari_xp.xp_store,
+        "get_user_data",
+        AsyncMock(return_value={"xp": 100, "level": 1}),
+    )
+    debit = AsyncMock()
+    refund = AsyncMock()
+    monkeypatch.setattr(pari_xp.xp_adapter, "add_xp", debit)
+    monkeypatch.setattr(pari_xp.xp_adapter, "refund_xp_exact", refund)
+    monkeypatch.setattr(
+        pari_xp,
+        "award_xp",
+        AsyncMock(side_effect=RuntimeError("credit failed")),
+    )
+    monkeypatch.setattr(pari_xp.random, "random", lambda: 0.10)
+    respond = AsyncMock()
+    monkeypatch.setattr(pari_xp, "safe_respond", respond)
+
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=42),
+        guild_id=123,
+        guild=None,
+    )
+
+    await pari_xp.PariXPCog._handle_bet(cog, interaction, "red", 20)
+
+    debit.assert_awaited_once_with(42, amount=-20, guild_id=123, source="pari_xp")
+    refund.assert_awaited_once_with(
+        42,
+        20,
+        guild_id=123,
+        source="pari_xp_refund",
+    )
+    respond.assert_awaited_once_with(
+        interaction,
+        "❌ Erreur interne pendant le paiement. Ta mise a été remboursée.",
+        ephemeral=True,
+    )
+    assert cog.state["total_bets"] == 0
+    assert cog.state["total_winnings"] == 0
+    cog._save_state.assert_not_awaited()
 
 
 @pytest.mark.asyncio

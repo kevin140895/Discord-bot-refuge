@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import os
 import random
@@ -269,6 +270,9 @@ class PariXPCog(commands.Cog):
         self._message_id: Optional[int] = self.state.get("message_id")
         self._last_announced_state: Optional[bool] = None
         self._last_panel_signature: tuple[object, ...] | None = None
+        # Sérialise la séquence débit → tirage → crédit → état pour éviter
+        # que deux paris simultanés n'entrelacent les compteurs du casino.
+        self._bet_lock = asyncio.Lock()
         self.check_schedule.start()
 
     # ── Schedule handling ──
@@ -319,7 +323,11 @@ class PariXPCog(commands.Cog):
         self._last_announced_state = self.is_open
 
     async def _save_state(self) -> None:
-        await atomic_write_json_async(STATE_FILE, self.state)
+        # Ne jamais envoyer l'objet mutable partagé au thread de sérialisation.
+        # Le snapshot est construit sans await, donc aucune autre coroutine ne
+        # peut modifier self.state pendant la copie.
+        snapshot = copy.deepcopy(self.state)
+        await atomic_write_json_async(STATE_FILE, snapshot)
 
     def _roulette_panel_signature(self) -> tuple[object, ...]:
         last = self.state.get("last_winner")
@@ -415,84 +423,116 @@ class PariXPCog(commands.Cog):
                     ephemeral=True,
                 )
                 return
-            data = await xp_store.get_user_data(interaction.user.id)
-            balance = int(data.get("xp", 0))
-            if balance < amount:
-                await safe_respond(interaction, "❌ XP insuffisant.", ephemeral=True)
-                return
-            try:
-                await xp_adapter.add_xp(
-                    interaction.user.id,
-                    amount=-amount,
-                    guild_id=interaction.guild_id or 0,
-                    source="pari_xp",
-                )
-            except xp_adapter.InsufficientXPError:
-                # Une autre opération a pu consommer le solde après le
-                # pré-contrôle. Le débit atomique refuse alors proprement le pari.
-                await safe_respond(interaction, "❌ XP insuffisant.", ephemeral=True)
-                return
-            except Exception as e:  # pragma: no cover - defensive
-                logger.exception("[PariXP] debit failed: %s", e)
-                await safe_respond(interaction, "❌ Erreur interne.", ephemeral=True)
-                return
 
-            roll = random.random()
-            drawn_number: Optional[int] = None
-            if bet_type == "number":
-                assert number is not None
-                drawn_number = _draw_number_for_roll(number, roll)
-                zero_hit = drawn_number == 0
-                win = drawn_number == number
-                multiplier = 0 if zero_hit else 10
-            else:
-                zero_hit = roll < 0.03
-                if zero_hit:
-                    win = False
-                    multiplier = 0
-                else:
-                    win = roll < 0.03 + 0.45
-                    multiplier = 2
-
-            payout = amount * multiplier if win else 0
-            if win:
+            winner_role: Optional[discord.Role] = None
+            async with self._bet_lock:
+                data = await xp_store.get_user_data(interaction.user.id)
+                balance = int(data.get("xp", 0))
+                if balance < amount:
+                    await safe_respond(interaction, "❌ XP insuffisant.", ephemeral=True)
+                    return
                 try:
-                    await award_xp(
+                    await xp_adapter.add_xp(
                         interaction.user.id,
-                        payout,
-                        guild_id=interaction.guild_id,
+                        amount=-amount,
+                        guild_id=interaction.guild_id or 0,
                         source="pari_xp",
                     )
+                except xp_adapter.InsufficientXPError:
+                    # Une autre opération a pu consommer le solde après le
+                    # pré-contrôle. Le débit atomique refuse alors proprement le pari.
+                    await safe_respond(interaction, "❌ XP insuffisant.", ephemeral=True)
+                    return
                 except Exception as e:  # pragma: no cover - defensive
-                    logger.exception("[PariXP] credit failed: %s", e)
+                    logger.exception("[PariXP] debit failed: %s", e)
                     await safe_respond(interaction, "❌ Erreur interne.", ephemeral=True)
                     return
-                msg = f"🎉 Gagné ! Tu remportes {payout} XP."
-                self.state["total_winnings"] = self.state.get("total_winnings", 0) + payout
-                self.state["last_winner"] = {
-                    "user_id": interaction.user.id,
-                    "amount": payout,
-                    "timestamp": datetime.now(self.tz).isoformat(),
-                }
-                if PARI_XP_ROLE_ID and interaction.guild:
-                    role = interaction.guild.get_role(PARI_XP_ROLE_ID)
-                    me = interaction.guild.me
-                    if role and me and role < me.top_role:
+
+                roll = random.random()
+                drawn_number: Optional[int] = None
+                if bet_type == "number":
+                    assert number is not None
+                    drawn_number = _draw_number_for_roll(number, roll)
+                    zero_hit = drawn_number == 0
+                    win = drawn_number == number
+                    multiplier = 0 if zero_hit else 10
+                else:
+                    zero_hit = roll < 0.03
+                    if zero_hit:
+                        win = False
+                        multiplier = 0
+                    else:
+                        win = roll < 0.03 + 0.45
+                        multiplier = 2
+
+                payout = amount * multiplier if win else 0
+                if win:
+                    try:
+                        await award_xp(
+                            interaction.user.id,
+                            payout,
+                            guild_id=interaction.guild_id,
+                            source="pari_xp",
+                        )
+                    except Exception as e:  # pragma: no cover - defensive
+                        logger.exception("[PariXP] credit failed: %s", e)
                         try:
-                            await interaction.user.add_roles(role, reason="Pari XP gagnant")
-                        except discord.HTTPException:
-                            pass
-            else:
-                msg = "❌ Perdu."
-            if zero_hit:
-                outcome_line: str | None = "🟢 Zéro Vert (0) ! La maison gagne."
-            elif bet_type == "number":
-                outcome_line = f"🎯 Numéro tiré : {drawn_number} — ton choix : {number}."
-            else:
-                outcome_line = None
-            self.state["total_bets"] = self.state.get("total_bets", 0) + amount
-            self._record_player_result(interaction.user.id, amount, payout)
-            await self._save_state()
+                            await xp_adapter.refund_xp_exact(
+                                interaction.user.id,
+                                amount,
+                                guild_id=interaction.guild_id or 0,
+                                source="pari_xp_refund",
+                            )
+                        except Exception as refund_exc:  # pragma: no cover - defensive
+                            logger.critical(
+                                "[PariXP] payout failed and stake refund failed for user %s: %s",
+                                interaction.user.id,
+                                refund_exc,
+                                exc_info=True,
+                            )
+                            await safe_respond(
+                                interaction,
+                                "❌ Erreur interne. Le remboursement automatique a échoué ; l'incident a été journalisé.",
+                                ephemeral=True,
+                            )
+                        else:
+                            await safe_respond(
+                                interaction,
+                                "❌ Erreur interne pendant le paiement. Ta mise a été remboursée.",
+                                ephemeral=True,
+                            )
+                        return
+                    msg = f"🎉 Gagné ! Tu remportes {payout} XP."
+                    self.state["total_winnings"] = self.state.get("total_winnings", 0) + payout
+                    self.state["last_winner"] = {
+                        "user_id": interaction.user.id,
+                        "amount": payout,
+                        "timestamp": datetime.now(self.tz).isoformat(),
+                    }
+                    if PARI_XP_ROLE_ID and interaction.guild:
+                        role = interaction.guild.get_role(PARI_XP_ROLE_ID)
+                        me = interaction.guild.me
+                        if role and me and role < me.top_role:
+                            winner_role = role
+                else:
+                    msg = "❌ Perdu."
+                if zero_hit:
+                    outcome_line: str | None = "🟢 Zéro Vert (0) ! La maison gagne."
+                elif bet_type == "number":
+                    outcome_line = f"🎯 Numéro tiré : {drawn_number} — ton choix : {number}."
+                else:
+                    outcome_line = None
+                self.state["total_bets"] = self.state.get("total_bets", 0) + amount
+                self._record_player_result(interaction.user.id, amount, payout)
+                await self._save_state()
+
+            # Les effets Discord ne font pas partie de la section comptable.
+            if winner_role is not None:
+                try:
+                    await interaction.user.add_roles(winner_role, reason="Pari XP gagnant")
+                except discord.HTTPException:
+                    pass
+
             result_embed = discord.Embed(
                 title="🎰 Résultat",
                 description=_build_result_description(outcome_line, msg),
