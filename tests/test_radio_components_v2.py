@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import discord
 import pytest
 
+import cogs.music2 as music2
 from cogs.radio import RADIO_CUSTOM_IDS, RadioCog, _is_radio_message
 from ui.radio_view import RadioView
 
@@ -92,3 +93,16 @@ def test_radio_message_detection_requires_the_complete_control_contract() -> Non
     )
 
     assert not _is_radio_message(incomplete)
+
+
+@pytest.mark.asyncio
+async def test_music2_delegates_radio_panel_restore_to_radio_cog() -> None:
+    ensure = AsyncMock()
+    radio = SimpleNamespace(_ensure_radio_message=ensure)
+    cog = object.__new__(music2.Music2Cog)
+    cog.bot = SimpleNamespace(get_cog=lambda name: radio if name == "RadioCog" else None)
+    text_channel = SimpleNamespace()
+
+    await music2.Music2Cog._restore_radio_panel(cog, text_channel)
+
+    ensure.assert_awaited_once_with(text_channel)
