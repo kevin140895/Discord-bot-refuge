@@ -18,6 +18,8 @@ from utils.persistence import (
     ensure_dir,
     read_json_safe,
 )
+from utils.timezones import PARIS_TZ
+
 logger = logging.getLogger(__name__)
 
 FIRST_WIN_FILE = os.path.join(DATA_DIR, "first_win.json")
@@ -102,7 +104,7 @@ class FirstMessageCog(commands.Cog):
             logger.exception("[FirstMessage] Erreur lors de la sauvegarde de l'état")
 
     # ── Tasks ────────────────────────────────────────────────
-    @tasks.loop(time=time(hour=8))
+    @tasks.loop(time=time(hour=8, tzinfo=PARIS_TZ))
     async def daily_reset(self) -> None:
         """Réinitialise automatiquement le challenge chaque jour à 8h."""
         self._reset_state()
