@@ -25,7 +25,6 @@ async def test_setup_hook_registers_persistent_views(monkeypatch):
 
     monkeypatch.setattr("bot.xp_store.start", AsyncMock())
     monkeypatch.setattr("bot.rename_manager.start", AsyncMock())
-    monkeypatch.setattr("bot.channel_edit_manager.start", AsyncMock())
     monkeypatch.setattr("bot.api_meter.start", AsyncMock())
     monkeypatch.setattr("bot.reset_http_error_counter", AsyncMock())
     monkeypatch.setattr("bot.level_feed.setup", lambda _bot: None)
