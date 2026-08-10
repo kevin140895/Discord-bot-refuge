@@ -12,6 +12,7 @@ os.environ.setdefault("DISCORD_TOKEN", "dummy")
 
 import bot
 import view
+from ui.radio_view import RadioView
 
 
 @pytest.mark.asyncio
@@ -42,7 +43,7 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
     call_types = [type(c.args[0]) for c in add_view_mock.call_args_list]
     assert call_types == [
         view.PlayerTypeView,
-        view.RadioView,
+        RadioView,
         view.StreamerTempVoiceView,
     ]
     bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot)])
@@ -60,7 +61,7 @@ async def test_setup_hook_registers_player_type_view_once(monkeypatch):
     call_types = [type(c.args[0]) for c in add_view_mock2.call_args_list]
     assert call_types == [
         view.PlayerTypeView,
-        view.RadioView,
+        RadioView,
         view.StreamerTempVoiceView,
     ]
     bot.api_meter.start.assert_has_awaits([call(test_bot), call(test_bot), call(other_bot)])
