@@ -7,8 +7,13 @@ from datetime import datetime, timedelta
 import cogs.xp as xp
 
 
+def _disable_auto_backup(monkeypatch):
+    monkeypatch.setattr(xp.XPCog.auto_backup_xp, "start", lambda *a, **k: None)
+
+
 @pytest.mark.asyncio
 async def test_message_awards_8_xp(monkeypatch):
+    _disable_auto_backup(monkeypatch)
     monkeypatch.setattr(xp, "schedule_checkpoint", AsyncMock())
     award = AsyncMock(return_value=(0, 0, 0, 0))
     monkeypatch.setattr(xp, "award_xp", award)
@@ -26,10 +31,15 @@ async def test_message_awards_8_xp(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_voice_awards_3_xp_per_minute(monkeypatch):
+    _disable_auto_backup(monkeypatch)
     monkeypatch.setattr(xp, "schedule_checkpoint", AsyncMock())
     monkeypatch.setattr(xp, "get_multiplier", lambda *a, **k: 1.0)
     monkeypatch.setattr(xp, "record_participant", lambda *a, **k: None)
-    monkeypatch.setattr(xp, "get_voice_multiplier", lambda m: m)
+    monkeypatch.setattr(xp, "get_voice_bonus_windows", lambda *a, **k: [])
+    xp.XP_BOOSTS.clear()
+    xp.XP_BOOST_STARTS.clear()
+    xp.XP_BOOST_HISTORY.clear()
+
     award = AsyncMock(return_value=(0, 0, 0, 0))
     monkeypatch.setattr(xp, "award_xp", award)
     bot = SimpleNamespace(announce_level_up=AsyncMock())
@@ -38,13 +48,19 @@ async def test_voice_awards_3_xp_per_minute(monkeypatch):
     xp.voice_times.clear()
 
     fixed_now = datetime(2025, 1, 1, 12, 0, tzinfo=xp.PARIS_TZ)
+
     class FixedDatetime(datetime):
         @classmethod
         def now(cls, tz=None):
             return fixed_now
+
     monkeypatch.setattr(xp, "datetime", FixedDatetime)
 
-    member = SimpleNamespace(bot=False, id=42, guild=SimpleNamespace(id=1, get_channel=lambda _id: None))
+    member = SimpleNamespace(
+        bot=False,
+        id=42,
+        guild=SimpleNamespace(id=1, get_channel=lambda _id: None),
+    )
     uid = str(member.id)
     xp.voice_times[uid] = fixed_now - timedelta(minutes=1)
     before = SimpleNamespace(channel=SimpleNamespace(id=5))
