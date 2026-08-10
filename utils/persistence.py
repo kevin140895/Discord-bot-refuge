@@ -102,8 +102,8 @@ async def atomic_write_json_async(path: str | os.PathLike[str], data: Any) -> No
 
 
 _checkpoint_lock = asyncio.Lock()
-_checkpoint_task: asyncio.Task | None = None
-# Interval (seconds) between automatic voice_times checkpoints.
+_checkpoint_tasks: dict[Callable[[], Awaitable[None]], asyncio.Task[None]] = {}
+# Interval (seconds) between automatic checkpoints.
 # Defaults to 5 minutes to reduce disk writes.
 VOICE_CP_DEBOUNCE_SECONDS = float(os.getenv("VOICE_CP_DEBOUNCE_SECONDS", "300"))
 
@@ -114,29 +114,35 @@ async def schedule_checkpoint(
 ) -> None:
     """Schedule ``save_fn`` to run after ``delay`` seconds.
 
-    Unlike a debounce, once a checkpoint is scheduled it will not be
-    cancelled by subsequent calls. This throttles saves so they happen at
-    most once per ``delay`` interval.
+    Each save function owns an independent checkpoint slot. Repeated calls for
+    the same function are throttled while its checkpoint is pending, but a
+    checkpoint for another file/function can be scheduled at the same time.
     """
-    global _checkpoint_task
     async with _checkpoint_lock:
-        if _checkpoint_task and not _checkpoint_task.done():
-            # A checkpoint is already scheduled; do nothing to avoid rescheduling
+        existing_task = _checkpoint_tasks.get(save_fn)
+        if existing_task and not existing_task.done():
             return
 
+        save_name = getattr(
+            save_fn,
+            "__qualname__",
+            getattr(save_fn, "__name__", repr(save_fn)),
+        )
+
         async def _run() -> None:
-            global _checkpoint_task
             try:
                 await asyncio.sleep(delay)
                 await save_fn()
-                logging.info("💾 voice_times checkpoint saved")
+                logging.info("💾 checkpoint saved: %s", save_name)
             except asyncio.CancelledError:
                 pass
             except Exception as exc:
-                logging.exception("voice_times checkpoint failed: %s", exc)
+                logging.exception("checkpoint failed for %s: %s", save_name, exc)
                 raise
             finally:
-                # Allow future checkpoints to be scheduled
-                _checkpoint_task = None
+                async with _checkpoint_lock:
+                    current_task = asyncio.current_task()
+                    if _checkpoint_tasks.get(save_fn) is current_task:
+                        _checkpoint_tasks.pop(save_fn, None)
 
-        _checkpoint_task = asyncio.create_task(_run())
+        _checkpoint_tasks[save_fn] = asyncio.create_task(_run())
