@@ -399,7 +399,9 @@ class XPCog(commands.Cog):
                         continue
                     uid = str(member.id)
                     active.add(uid)
-                    voice_times.setdefault(uid, now)
+                    # A redémarrage, l'ancien timestamp n'est plus une borne fiable :
+                    # le bot ne peut pas observer le temps passé hors ligne.
+                    voice_times[uid] = now
         for uid in list(voice_times.keys()):
             if uid not in active:
                 voice_times.pop(uid, None)
