@@ -1,10 +1,18 @@
 import asyncio
+import importlib.util
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from main import DiscordCriticalHandler
+
+_MAIN_PATH = Path(__file__).resolve().parents[1] / "main.py"
+_MAIN_SPEC = importlib.util.spec_from_file_location("refuge_entrypoint", _MAIN_PATH)
+assert _MAIN_SPEC is not None and _MAIN_SPEC.loader is not None
+_MAIN_MODULE = importlib.util.module_from_spec(_MAIN_SPEC)
+_MAIN_SPEC.loader.exec_module(_MAIN_MODULE)
+DiscordCriticalHandler = _MAIN_MODULE.DiscordCriticalHandler
 
 
 def _record(message: str = "boom") -> logging.LogRecord:
