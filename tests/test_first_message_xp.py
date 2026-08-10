@@ -7,6 +7,16 @@ import pytest
 import cogs.first_message as fm
 
 
+def test_daily_reset_is_scheduled_at_8am_paris():
+    times = fm.FirstMessageCog.daily_reset.time
+
+    assert times is not None
+    assert len(times) == 1
+    scheduled = times[0]
+    assert (scheduled.hour, scheduled.minute, scheduled.second) == (8, 0, 0)
+    assert scheduled.tzinfo is fm.PARIS_TZ
+
+
 @pytest.mark.asyncio
 async def test_first_message_awards_xp_once(tmp_path, monkeypatch):
     class FixedDatetime(datetime):
