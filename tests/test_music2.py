@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import discord
 import pytest
 
 import cogs.music2 as music2
@@ -20,12 +21,32 @@ class DummyBot:
         return None
 
 
+def _buttons(view: discord.ui.LayoutView) -> list[discord.ui.Button]:
+    return [
+        item
+        for item in view.walk_children()
+        if isinstance(item, discord.ui.Button)
+    ]
+
+
+def _text(view: discord.ui.LayoutView) -> str:
+    return "\n".join(
+        item.content
+        for item in view.walk_children()
+        if isinstance(item, discord.ui.TextDisplay)
+    )
+
+
 @pytest.mark.asyncio
 async def test_music2_view_contains_only_custom_music_controls():
     cog = music2.Music2Cog(DummyBot())
 
+    assert isinstance(cog.view, discord.ui.LayoutView)
+    assert cog.view.is_persistent()
+
+    buttons = _buttons(cog.view)
     custom_ids = {
-        item.custom_id for item in cog.view.children if getattr(item, "custom_id", None)
+        item.custom_id for item in buttons if getattr(item, "custom_id", None)
     }
 
     assert custom_ids == {
@@ -35,9 +56,110 @@ async def test_music2_view_contains_only_custom_music_controls():
         "music2_queue",
         "music2_now_playing",
     }
+    assert custom_ids == music2.MUSIC2_CUSTOM_IDS
     assert not custom_ids.intersection(
         {"radio_rap_fr", "radio_rap", "radio_rock", "radio_hiphop"}
     )
+    assert {button.custom_id: button.label for button in buttons} == {
+        "music2_add": "Ajouter",
+        "music2_pause_resume": "Pause / Reprendre",
+        "music2_next": "Suivant",
+        "music2_queue": "File",
+        "music2_now_playing": "En cours",
+    }
+
+
+@pytest.mark.asyncio
+async def test_music2_v2_buttons_keep_existing_callback_contract():
+    cog = music2.Music2Cog(DummyBot())
+    cog.pause_resume = AsyncMock()
+    cog.skip = AsyncMock()
+    cog.show_queue = AsyncMock()
+    cog.show_now_playing = AsyncMock()
+    cog.require_radio_listener = AsyncMock(return_value=True)
+
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(send_modal=AsyncMock())
+    )
+    buttons = {button.custom_id: button for button in _buttons(cog.view)}
+
+    await buttons["music2_pause_resume"].callback(interaction)
+    await buttons["music2_next"].callback(interaction)
+    await buttons["music2_queue"].callback(interaction)
+    await buttons["music2_now_playing"].callback(interaction)
+    await buttons["music2_add"].callback(interaction)
+
+    cog.pause_resume.assert_awaited_once_with(interaction)
+    cog.skip.assert_awaited_once_with(interaction)
+    cog.show_queue.assert_awaited_once_with(interaction)
+    cog.show_now_playing.assert_awaited_once_with(interaction)
+    cog.require_radio_listener.assert_awaited_once_with(interaction)
+    interaction.response.send_modal.assert_awaited_once()
+    assert isinstance(
+        interaction.response.send_modal.await_args.args[0], music2.AddMusicModal
+    )
+
+
+def test_music2_v2_idle_layout_exposes_current_queue_and_controls():
+    cog = music2.Music2Cog(DummyBot())
+    text = _text(cog.view)
+
+    assert "## 🎵 MUSIQUE PERSONNALISÉE" in text
+    assert "### ▶️ Lecture personnalisée" in text
+    assert "Aucun titre en cours" in text
+    assert "### 📃 File d'attente" in text
+    assert "Vide" in text
+    assert "### 🎛️ Contrôles de lecture" in text
+    assert "### 🔄 Retour automatique" in text
+
+
+def test_music2_v2_refresh_reflects_current_track_and_queue():
+    cog = music2.Music2Cog(DummyBot())
+    cog.current = music2.MusicTrack(
+        title="One More Time",
+        webpage_url="https://example.test/current",
+        requester_id=42,
+        duration=320,
+    )
+    cog.queue.append(
+        music2.MusicTrack(
+            title="Around the World",
+            webpage_url="https://example.test/next",
+            requester_id=43,
+        )
+    )
+
+    cog.view.refresh()
+    text = _text(cog.view)
+
+    assert "### ▶️ Lecture en cours" in text
+    assert "One More Time" in text
+    assert "5:20" in text
+    assert "<@42>" in text
+    assert "1 titre(s)" in text
+
+
+def test_music2_message_detection_handles_nested_components_v2():
+    cog = music2.Music2Cog(DummyBot())
+    message = SimpleNamespace(components=cog.view.children)
+
+    assert cog._is_music_panel(message)
+
+
+@pytest.mark.asyncio
+async def test_render_music_panel_migrates_legacy_payload_in_place():
+    cog = music2.Music2Cog(DummyBot())
+    message = SimpleNamespace(edit=AsyncMock())
+
+    await cog._render_music_panel(message)
+
+    message.edit.assert_awaited_once()
+    kwargs = message.edit.await_args.kwargs
+    assert kwargs["content"] is None
+    assert kwargs["embeds"] == []
+    assert kwargs["attachments"] == []
+    assert kwargs["view"] is cog.view
+    assert isinstance(kwargs["view"], discord.ui.LayoutView)
 
 
 @pytest.mark.asyncio
