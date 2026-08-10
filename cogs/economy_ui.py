@@ -223,7 +223,7 @@ class EconomyUICog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.shop_view = ShopView(self)
+        self.shop_view: typing.Optional[ShopView] = None
 
     @tasks.loop(minutes=5)
     async def boosts_cleanup(self) -> None:
@@ -294,6 +294,8 @@ class EconomyUICog(commands.Cog):
         logger.info("Chargement de l'interface économie")
         self.boosts_cleanup.start()
         ECONOMY_DIR.mkdir(parents=True, exist_ok=True)
+        shop_view = ShopView(self)
+        self.shop_view = shop_view
         try:
             ui_data = load_ui()
         except Exception as e:  # pragma: no cover - best effort
@@ -315,13 +317,13 @@ class EconomyUICog(commands.Cog):
             logger.warning("Salon économie introuvable (%s)", CHANNEL_ID)
             return
 
-        self.bot.add_view(self.shop_view)
+        self.bot.add_view(shop_view)
 
         shop_id = await self._ensure_message(
             channel,
             ui_data.get("shop_message_id"),
             None,
-            self.shop_view,
+            shop_view,
             "Boutique",
         )
         if shop_id:
