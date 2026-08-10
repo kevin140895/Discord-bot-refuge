@@ -8,7 +8,8 @@ import discord
 import pytest
 
 from bot import RefugeBot
-from view import PlayerTypeView, RadioView, StreamerTempVoiceView
+from ui.radio_view import RadioView
+from view import PlayerTypeView, StreamerTempVoiceView
 
 
 @pytest.mark.asyncio
