@@ -21,8 +21,8 @@ from config import (
     ROCK_RADIO_STREAM_URL,
 )
 from storage.radio_store import RadioStore
+from ui.radio_view import RadioView
 from utils.voice import ensure_voice, play_stream
-from view import RadioView
 
 logger = logging.getLogger(__name__)
 
@@ -238,11 +238,9 @@ class Music2Cog(commands.Cog):
         try:
             message = await fetch(int(stored.get("message_id", 0)))
             await message.edit(
-                content=(
-                    "📻 Sélectionne ta radio !\n"
-                    "Clique sur un bouton ci-dessous pour changer de station."
-                ),
-                embed=None,
+                content=None,
+                embeds=[],
+                attachments=[],
                 view=RadioView(),
             )
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
