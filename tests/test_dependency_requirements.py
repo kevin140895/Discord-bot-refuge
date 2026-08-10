@@ -36,6 +36,7 @@ def test_runtime_dependencies_have_breaking_change_guards():
     assert "Pillow>=10.0,<13" in runtime
     assert "imageio-ffmpeg>=0.4,<1" in runtime
     assert "aiohttp>=3.8,<4" in runtime
+    assert "tzdata>=2024.1" in runtime
 
 
 def test_music2_uses_known_good_youtube_runtime():
