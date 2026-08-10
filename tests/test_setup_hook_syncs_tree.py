@@ -20,7 +20,6 @@ async def test_setup_hook_syncs_tree(monkeypatch):
 
     monkeypatch.setattr(bot.xp_store, "start", AsyncMock())
     monkeypatch.setattr(bot.rename_manager, "start", AsyncMock())
-    monkeypatch.setattr(bot.channel_edit_manager, "start", AsyncMock())
     monkeypatch.setattr(bot.api_meter, "start", AsyncMock())
     monkeypatch.setattr(bot.limiter, "start", MagicMock())
     monkeypatch.setattr(bot, "reset_http_error_counter", AsyncMock())

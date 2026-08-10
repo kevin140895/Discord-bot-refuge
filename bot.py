@@ -21,7 +21,6 @@ import cogs
 from storage.xp_store import xp_store
 from ui.radio_view import RadioView
 from utils.api_meter import api_meter
-from utils.channel_edit_manager import channel_edit_manager
 from utils.discord_api_trace import create_discord_http_trace
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter, limiter as _limiter
@@ -57,7 +56,6 @@ class RefugeBot(commands.Bot):
         # they have been invoked.
         await xp_store.start()
         await rename_manager.start()
-        await channel_edit_manager.start()
         await api_meter.start(self)
         limiter.start()
         await reset_http_error_counter()
@@ -76,11 +74,12 @@ class RefugeBot(commands.Bot):
             await self.load_extension(f"{cogs.__name__}.{module.name}")
             loaded_names.add(module.name)
 
-        # Ensure required cogs are loaded even if not discovered
+        # Ensure required cogs are loaded even if not discovered.
         for required in (
             "economy_ui",
             "machine_a_sous",
             "temp_vc",
+            "streamer_temp_vc",
         ):
             if required not in loaded_names:
                 await self.load_extension(f"cogs.{required}")
@@ -160,7 +159,6 @@ class RefugeBot(commands.Bot):
         await limiter.aclose()
         await api_meter.aclose()
         await rename_manager.aclose()
-        await channel_edit_manager.aclose()
         await xp_store.aclose()
         await super().close()
 
@@ -189,7 +187,6 @@ __all__ = [
     "RefugeBot",
     "xp_store",
     "rename_manager",
-    "channel_edit_manager",
     "api_meter",
     "limiter",
     "reset_http_error_counter",

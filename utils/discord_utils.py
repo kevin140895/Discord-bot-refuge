@@ -7,7 +7,6 @@ from typing import Dict, Tuple
 import discord
 from discord.ext import commands
 
-from utils.channel_edit_manager import channel_edit_manager
 from utils.rate_limit import limiter
 
 _CHANNEL_CACHE: Dict[int, Tuple[discord.abc.GuildChannel, float]] = {}
@@ -46,11 +45,6 @@ async def ensure_channel_has_message(
         logging.warning("Permissions insuffisantes dans %s", channel_id)
     except discord.HTTPException as exc:
         logging.warning("Erreur HTTP lors de l'envoi: %s", exc)
-
-
-async def safe_channel_edit(channel: discord.abc.GuildChannel, **kwargs) -> None:
-    """Schedule a channel edit respecting configured rate limits."""
-    await channel_edit_manager.request(channel, **kwargs)
 
 
 async def safe_message_edit(message: discord.Message, **kwargs) -> discord.Message | None:

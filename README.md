@@ -41,7 +41,7 @@ Modifiez les valeurs de ce fichier pour correspondre à votre serveur.
 Pour récupérer un ID dans Discord, activez le *Mode développeur* puis
 faites un clic droit sur un élément et choisissez **Copier l'identifiant**.
 
-Exemple de personnalisation :
+Exemple de personnalisation :
 
 ```python
 # config.py
@@ -54,22 +54,20 @@ en dur dans le code.
 ## Variables d'environnement
 
 Un fichier d'exemple [`.env.example`](./.env.example) regroupe les variables
-essentielles pour exécuter le bot :
+essentielles pour exécuter le bot :
 
-- `DISCORD_TOKEN` : jeton du bot fourni par le [Portail développeur Discord](https://discord.com/developers/applications).
-- `GUILD_ID` : identifiant du serveur Discord principal.
-- `OWNER_ID` : identifiant du propriétaire du bot.
-- `TZ` : fuseau horaire du processus (défaut : `Europe/Paris`).
-- `DATA_DIR` : répertoire de stockage persistant pour les données.
-- `CHANNEL_EDIT_MIN_INTERVAL_SECONDS` : intervalle minimal entre deux éditions du même salon.
-- `CHANNEL_EDIT_DEBOUNCE_SECONDS` : délai d'agrégation avant l'édition d'un salon.
-- `VOICE_CP_DEBOUNCE_SECONDS` : délai avant la sauvegarde des sessions vocales.
+- `DISCORD_TOKEN` : jeton du bot fourni par le [Portail développeur Discord](https://discord.com/developers/applications).
+- `GUILD_ID` : identifiant du serveur Discord principal.
+- `OWNER_ID` : identifiant du propriétaire du bot.
+- `TZ` : fuseau horaire du processus (défaut : `Europe/Paris`).
+- `DATA_DIR` : répertoire de stockage persistant pour les données.
+- `VOICE_CP_DEBOUNCE_SECONDS` : délai avant la sauvegarde des sessions vocales.
 
 Adaptez ces valeurs selon votre déploiement avant de lancer le bot.
 
 ## Gestion des secrets
 
-Ne stockez jamais de jetons, de clés API ou d'autres informations sensibles dans le dépôt. Utilisez des variables d'environnement ou un gestionnaire de secrets dédié. Le fichier `.env` est ignoré par Git ; servez-vous du modèle `.env.example` pour documenter les paramètres requis.
+Ne stockez jamais de jetons, de clés API ou d'autres informations sensibles dans le dépôt. Utilisez des variables d'environnement ou un gestionnaire de secrets dédié. Le fichier `.env` est ignoré par Git ; servez-vous du modèle `.env.example` pour documenter les paramètres requis.
 
 ## Données persistantes
 
@@ -97,40 +95,25 @@ Le délai avant renommage de ces salons peut être ajusté via la constante
 
 Le renommage effectif intervient après un délai total d'environ
 `RENAME_DELAY` + `CHANNEL_RENAME_DEBOUNCE_SECONDS`. Avec les valeurs par
-défaut (3 s et 2 s), le bot attend environ 5 s avant d'émettre la
+défaut (3 s et 2 s), le bot attend environ 5 s avant d'émettre la
 requête de renommage, tout en respectant les limites de l'API Discord
-(5 s entre deux renommages d'un même salon et 2 s globalement).
+(5 s entre deux renommages d'un même salon et 2 s globalement).
 Réduire ces valeurs diminue la latence mais augmente la consommation de
 ces limites.
 
 La fréquence de vérification des noms de ces salons est définie par la constante
-`TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
+`TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
 
 La vérification de l'état de la machine à sous est contrôlée par la constante
-`MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES` (1 minute par défaut).
+`MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES` (1 minute par défaut).
 
 ### Sauvegarde des sessions vocales
 
 Les heures d'entrée des membres en vocal sont stockées dans
 `data/voice_times.json`. Chaque événement vocal planifie une sauvegarde
-différée (5 min par défaut) qui écrit ce fichier de manière atomique dans un
+différée (5 min par défaut) qui écrit ce fichier de manière atomique dans un
 thread séparé afin de ne pas bloquer l'event loop. Une sauvegarde
-périodique toutes les 10 minutes est conservée en secours.
+périodique toutes les 10 minutes est conservée en secours.
 
 Le délai peut être ajusté via la variable d'environnement
 `VOICE_CP_DEBOUNCE_SECONDS`.
-
-## Limitation des éditions de salon
-
-Pour éviter les erreurs HTTP 429 causées par des modifications trop fréquentes
-des salons, deux variables d'environnement permettent d'ajuster le rythme :
-
-- `CHANNEL_EDIT_MIN_INTERVAL_SECONDS` (défaut `180`) : intervalle minimal entre
-  deux éditions du même salon.
-- `CHANNEL_EDIT_DEBOUNCE_SECONDS` (défaut `15`) : délai d'agrégation avant
-  d'appliquer les changements.
-- `CHANNEL_EDIT_GLOBAL_MIN_INTERVAL_SECONDS` (défaut `10`) : intervalle minimal
-  global entre deux éditions de salons.
-
-Ces variables peuvent être définies dans votre fichier `.env` (voir
-`.env.example`).
