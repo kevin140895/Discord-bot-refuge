@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import typing
@@ -122,11 +123,11 @@ def _activate_personal_double_xp(user_id: int, duration_minutes: int) -> datetim
     return expiry
 
 
-async def _persist_personal_double_xp() -> None:
-    """Persiste l'état Double XP après livraison de l'article."""
+def _persist_personal_double_xp() -> None:
+    """Planifie la persistance XP seulement après livraison de l'article."""
     from cogs import xp as xp_cog
 
-    await xp_cog.save_xp_boosts_to_disk()
+    asyncio.create_task(xp_cog.save_xp_boosts_to_disk())
 
 
 def _load_shop() -> typing.Optional[dict[str, typing.Any]]:
@@ -564,14 +565,14 @@ class EconomyUICog(commands.Cog):
 
         if item_key == "double_xp_1h":
             try:
-                await _persist_personal_double_xp()
+                _persist_personal_double_xp()
             except Exception:
                 # L'article est déjà livré (inventaire persistant + état mémoire).
-                # Une panne de cette sauvegarde secondaire ne doit pas offrir
+                # Une panne de cette planification secondaire ne doit pas offrir
                 # simultanément l'article et un remboursement.
                 logger.exception(
-                    "[shop] Double XP livré mais persistance XP secondaire échouée "
-                    "pour user=%s",
+                    "[shop] Double XP livré mais planification de persistance XP "
+                    "échouée pour user=%s",
                     user_id,
                 )
 
