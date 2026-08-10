@@ -27,6 +27,23 @@ def _setup_paths(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_shop_purchase_button_dispatches_once():
+    cog = SimpleNamespace(_handle_shop_purchase=AsyncMock())
+    button = economy_ui.ShopPurchaseButton(
+        cog,
+        item_key="ticket_royal",
+        label="Acheter",
+        emoji="🎟️",
+    )
+    interaction = SimpleNamespace()
+
+    await button.callback(interaction)
+
+    cog._handle_shop_purchase.assert_awaited_once_with(interaction, "ticket_royal")
+    assert not hasattr(EconomyUICog, "on_interaction")
+
+
+@pytest.mark.asyncio
 async def test_shop_buy_insufficient_balance(tmp_path, monkeypatch):
     shop_file = _setup_paths(tmp_path, monkeypatch)
     shop_file.write_text(
@@ -49,7 +66,7 @@ async def test_shop_buy_insufficient_balance(tmp_path, monkeypatch):
         response=SimpleNamespace(send_message=send_mock),
     )
 
-    await cog.on_interaction(interaction)
+    await cog._handle_shop_purchase(interaction, "double_xp_1h")
 
     add_xp_mock.assert_not_called()
     send_mock.assert_awaited()
@@ -80,7 +97,7 @@ async def test_shop_buy_double_xp(tmp_path, monkeypatch):
         response=SimpleNamespace(send_message=send_mock),
     )
 
-    await cog.on_interaction(interaction)
+    await cog._handle_shop_purchase(interaction, "double_xp_1h")
 
     add_xp_mock.assert_awaited_once_with(1, amount=-500, guild_id=123, source="shop")
     boosts = economy.load_boosts()
@@ -89,7 +106,6 @@ async def test_shop_buy_double_xp(tmp_path, monkeypatch):
     assert txs[0]["item"] == "double_xp_1h"
     send_mock.assert_awaited()
     assert send_mock.call_args.kwargs["ephemeral"] is True
-
 
 
 @pytest.mark.asyncio
@@ -115,7 +131,7 @@ async def test_shop_buy_ticket(tmp_path, monkeypatch):
         response=SimpleNamespace(send_message=send_mock),
     )
 
-    await cog.on_interaction(interaction)
+    await cog._handle_shop_purchase(interaction, "ticket_royal")
 
     add_xp_mock.assert_awaited_once_with(1, amount=-100, guild_id=123, source="shop")
     tickets = economy.load_tickets()
@@ -167,7 +183,7 @@ async def test_shop_buy_ticket_limit(tmp_path, monkeypatch):
             guild_id=123,
             response=SimpleNamespace(send_message=send_mock),
         )
-        await cog.on_interaction(interaction)
+        await cog._handle_shop_purchase(interaction, "ticket_royal")
         return send_mock
 
     for _ in range(3):
@@ -204,7 +220,7 @@ async def test_shop_buy_double_xp_limit(tmp_path, monkeypatch):
             guild_id=123,
             response=SimpleNamespace(send_message=send_mock),
         )
-        await cog.on_interaction(interaction)
+        await cog._handle_shop_purchase(interaction, "double_xp_1h")
         return send_mock
 
     for _ in range(2):
@@ -242,7 +258,7 @@ async def test_ticket_limit_allows_repurchase_after_use(tmp_path, monkeypatch):
             guild_id=123,
             response=SimpleNamespace(send_message=send_mock),
         )
-        await cog.on_interaction(interaction)
+        await cog._handle_shop_purchase(interaction, "ticket_royal")
         return send_mock
 
     for _ in range(3):
@@ -282,7 +298,7 @@ async def test_double_xp_limit_checks_active_boosts(tmp_path, monkeypatch):
             guild_id=123,
             response=SimpleNamespace(send_message=send_mock),
         )
-        await cog.on_interaction(interaction)
+        await cog._handle_shop_purchase(interaction, "double_xp_1h")
         return send_mock
 
     for _ in range(2):

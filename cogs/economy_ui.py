@@ -337,18 +337,6 @@ class EconomyUICog(commands.Cog):
     def cog_unload(self) -> None:
         self.boosts_cleanup.cancel()
 
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        data = interaction.data if isinstance(getattr(interaction, "data", None), dict) else {}
-        custom_id = data.get("custom_id")
-        if not isinstance(custom_id, str) or not custom_id.startswith("shop_buy:"):
-            return
-        response = getattr(interaction, "response", None)
-        if callable(getattr(response, "is_done", None)) and response.is_done():
-            return
-        item_key = custom_id.split(":", 1)[1]
-        await self._handle_shop_purchase(interaction, item_key)
-
     async def _handle_shop_purchase(
         self,
         interaction: discord.Interaction,
