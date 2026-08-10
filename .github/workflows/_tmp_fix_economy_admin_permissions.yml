@@ -1,0 +1,194 @@
+name: Temporary economy admin permission fix
+
+on:
+  push:
+    branches:
+      - agent/fix-economy-admin-permissions
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-economy-admin-permissions
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply targeted permission fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          xp_path = Path('cogs/xp.py')
+          xp_text = xp_path.read_text(encoding='utf-8')
+          old = '@app_commands.checks.has_role(XP_VIEWER_ROLE_ID)'
+          assert xp_text.count(old) == 1, xp_text.count(old)
+          xp_text = xp_text.replace(old, '@app_commands.checks.has_permissions(manage_guild=True)', 1)
+          old_range = 'montant: app_commands.Range[int, 1],'
+          assert xp_text.count(old_range) == 1, xp_text.count(old_range)
+          xp_text = xp_text.replace(old_range, 'montant: app_commands.Range[int, 1, 10000],', 1)
+          xp_text = xp_text.replace('    XP_VIEWER_ROLE_ID,\n', '', 1)
+          xp_path.write_text(xp_text, encoding='utf-8')
+
+          machine_path = Path('cogs/machine_a_sous/machine_a_sous.py')
+          machine_text = machine_path.read_text(encoding='utf-8')
+          assert machine_text.count(old) == 1, machine_text.count(old)
+          machine_text = machine_text.replace(old, '@app_commands.checks.has_permissions(manage_guild=True)', 1)
+          machine_text = machine_text.replace('    XP_VIEWER_ROLE_ID,\n', '', 1)
+          machine_path.write_text(machine_text, encoding='utf-8')
+
+          Path('tests/test_don_xp_command.py').write_text('''import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from pathlib import Path
+import sys
+
+import discord
+from discord.app_commands import errors
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import cogs.xp as xp
+from config import LEVEL_ROLE_REWARDS
+
+ARGENT_ROLE_ID = LEVEL_ROLE_REWARDS[10]
+
+
+def _member_with_roles(role_ids):
+    roles = [SimpleNamespace(id=r) for r in role_ids]
+    return SimpleNamespace(
+        roles=roles, get_role=lambda i: next((r for r in roles if r.id == i), None)
+    )
+
+
+@pytest.mark.asyncio
+async def test_don_xp_awards_xp(monkeypatch):
+    xp.xp_store.data.clear()
+    respond = AsyncMock()
+    monkeypatch.setattr(xp, "safe_respond", respond)
+    bot = SimpleNamespace(wait_until_ready=AsyncMock())
+    cog = xp.XPCog(bot=bot)
+    cog.auto_backup_xp.cancel()
+    member = SimpleNamespace(id=123, display_name="User", bot=False)
+    interaction = SimpleNamespace(user=SimpleNamespace(id=1), guild=SimpleNamespace(id=1))
+    await xp.XPCog.don_xp.callback(cog, interaction, member, 50)
+    assert xp.xp_store.data[str(member.id)]["xp"] == 50
+    respond.assert_awaited_once()
+
+
+def test_don_xp_check_requires_manage_guild_not_argent_role():
+    check = xp.XPCog.don_xp.checks[0]
+    manager = SimpleNamespace(
+        user=_member_with_roles([]),
+        permissions=discord.Permissions(manage_guild=True),
+    )
+    argent_member = SimpleNamespace(
+        user=_member_with_roles([ARGENT_ROLE_ID]),
+        permissions=discord.Permissions.none(),
+    )
+
+    assert check(manager)
+    with pytest.raises(errors.MissingPermissions):
+        check(argent_member)
+
+
+def test_don_xp_amount_is_capped_at_10000_in_command_contract():
+    annotation = xp.XPCog.don_xp.callback.__annotations__["montant"]
+    assert getattr(annotation, "__metadata__", ())
+    range_meta = annotation.__metadata__[0]
+    assert range_meta.min_value == 1
+    assert range_meta.max_value == 10000
+''', encoding='utf-8')
+
+          Path('tests/test_machine_a_sous_ticket_command.py').write_text('''import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from pathlib import Path
+import os
+
+import discord
+import pytest
+
+import sys
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+os.environ.setdefault("DISCORD_TOKEN", "dummy")
+
+from cogs.machine_a_sous.machine_a_sous import MachineASousCog
+from storage.roulette_store import RouletteStore
+from discord.app_commands import errors
+from config import LEVEL_ROLE_REWARDS
+
+ARGENT_ROLE_ID = LEVEL_ROLE_REWARDS[10]
+
+
+def _member_with_roles(role_ids):
+    roles = [SimpleNamespace(id=r) for r in role_ids]
+    return SimpleNamespace(
+        roles=roles,
+        get_role=lambda i: next((r for r in roles if r.id == i), None),
+    )
+
+
+def test_ticket_check_requires_manage_guild_not_argent_role():
+    check = MachineASousCog.ticket.checks[0]
+    manager = SimpleNamespace(
+        user=_member_with_roles([]),
+        permissions=discord.Permissions(manage_guild=True),
+    )
+    argent_member = SimpleNamespace(
+        user=_member_with_roles([ARGENT_ROLE_ID]),
+        permissions=discord.Permissions.none(),
+    )
+
+    assert check(manager)
+    with pytest.raises(errors.MissingPermissions):
+        check(argent_member)
+
+
+@pytest.mark.asyncio
+async def test_ticket_command_grants_ticket(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "cogs.machine_a_sous.machine_a_sous.DATA_DIR", str(tmp_path)
+    )
+    bot = SimpleNamespace(wait_until_ready=asyncio.sleep)
+    cog = MachineASousCog(bot)
+    cog.store = RouletteStore(data_dir=str(tmp_path))
+
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=1),
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    member = SimpleNamespace(id=123, mention="@user")
+
+    await MachineASousCog.ticket.callback(cog, interaction, member)
+
+    assert cog.store.has_ticket(str(member.id))
+''', encoding='utf-8')
+          PY
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate focused regression tests
+        run: |
+          python -m pytest -q tests/test_don_xp_command.py tests/test_machine_a_sous_ticket_command.py
+          git diff --check
+          ! grep -q 'XP_VIEWER_ROLE_ID' cogs/xp.py
+          ! grep -q 'XP_VIEWER_ROLE_ID' cogs/machine_a_sous/machine_a_sous.py
+          grep -q 'has_permissions(manage_guild=True)' cogs/xp.py
+          grep -q 'has_permissions(manage_guild=True)' cogs/machine_a_sous/machine_a_sous.py
+          grep -q 'Range\[int, 1, 10000\]' cogs/xp.py
+
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add cogs/xp.py cogs/machine_a_sous/machine_a_sous.py tests/test_don_xp_command.py tests/test_machine_a_sous_ticket_command.py
+          git commit -m 'fix(economy): restrict admin mutations'
+          git push origin HEAD:agent/fix-economy-admin-permissions
