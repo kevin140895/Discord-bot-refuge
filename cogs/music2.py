@@ -225,6 +225,7 @@ class Music2Cog(commands.Cog):
         ensure = getattr(radio, "_ensure_radio_message", None) if radio else None
         if callable(ensure):
             await ensure(text_channel)
+            return
 
         stored = self.store.get_radio_message()
         if not stored or int(stored.get("channel_id", 0)) != RADIO_TEXT_CHANNEL_ID:
