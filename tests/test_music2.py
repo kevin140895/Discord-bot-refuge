@@ -44,8 +44,9 @@ async def test_music2_view_contains_only_custom_music_controls():
     assert isinstance(cog.view, discord.ui.LayoutView)
     assert cog.view.is_persistent()
 
+    buttons = _buttons(cog.view)
     custom_ids = {
-        item.custom_id for item in _buttons(cog.view) if getattr(item, "custom_id", None)
+        item.custom_id for item in buttons if getattr(item, "custom_id", None)
     }
 
     assert custom_ids == {
@@ -58,6 +59,44 @@ async def test_music2_view_contains_only_custom_music_controls():
     assert custom_ids == music2.MUSIC2_CUSTOM_IDS
     assert not custom_ids.intersection(
         {"radio_rap_fr", "radio_rap", "radio_rock", "radio_hiphop"}
+    )
+    assert {button.custom_id: button.label for button in buttons} == {
+        "music2_add": "Ajouter",
+        "music2_pause_resume": "Pause / Reprendre",
+        "music2_next": "Suivant",
+        "music2_queue": "File",
+        "music2_now_playing": "En cours",
+    }
+
+
+@pytest.mark.asyncio
+async def test_music2_v2_buttons_keep_existing_callback_contract():
+    cog = music2.Music2Cog(DummyBot())
+    cog.pause_resume = AsyncMock()
+    cog.skip = AsyncMock()
+    cog.show_queue = AsyncMock()
+    cog.show_now_playing = AsyncMock()
+    cog.require_radio_listener = AsyncMock(return_value=True)
+
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(send_modal=AsyncMock())
+    )
+    buttons = {button.custom_id: button for button in _buttons(cog.view)}
+
+    await buttons["music2_pause_resume"].callback(interaction)
+    await buttons["music2_next"].callback(interaction)
+    await buttons["music2_queue"].callback(interaction)
+    await buttons["music2_now_playing"].callback(interaction)
+    await buttons["music2_add"].callback(interaction)
+
+    cog.pause_resume.assert_awaited_once_with(interaction)
+    cog.skip.assert_awaited_once_with(interaction)
+    cog.show_queue.assert_awaited_once_with(interaction)
+    cog.show_now_playing.assert_awaited_once_with(interaction)
+    cog.require_radio_listener.assert_awaited_once_with(interaction)
+    interaction.response.send_modal.assert_awaited_once()
+    assert isinstance(
+        interaction.response.send_modal.await_args.args[0], music2.AddMusicModal
     )
 
 
