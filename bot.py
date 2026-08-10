@@ -19,11 +19,12 @@ from config import DISABLED_COGS, GUILD_ID, LEVEL_FEED_CHANNEL_ID
 import cogs
 
 from storage.xp_store import xp_store
+from ui.radio_view import RadioView
 from utils.api_meter import api_meter
 from utils.channel_edit_manager import channel_edit_manager
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter, limiter as _limiter
-from view import PlayerTypeView, RadioView, StreamerTempVoiceView
+from view import PlayerTypeView, StreamerTempVoiceView
 from utils import level_feed
 
 

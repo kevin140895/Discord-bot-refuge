@@ -1,13 +1,18 @@
 from types import SimpleNamespace
-from pathlib import Path
 from unittest.mock import AsyncMock
-import sys
+
+import discord
 import pytest
 
-# Permet d'importer "view.RadioView" depuis la racine du projet
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+from ui.radio_view import RadioView
 
-from view import RadioView
+
+def _buttons(view: discord.ui.LayoutView) -> list[discord.ui.Button]:
+    return [
+        child
+        for child in view.walk_children()
+        if isinstance(child, discord.ui.Button)
+    ]
 
 
 @pytest.mark.asyncio
@@ -20,9 +25,13 @@ async def test_radio_view_has_expected_buttons():
         "radio_hiphop": "Radio Hip-Hop",
     }
 
+    assert isinstance(view, discord.ui.LayoutView)
+    assert view.is_persistent()
+
+    buttons = _buttons(view)
     for custom_id, label in expected.items():
         button = next(
-            (child for child in view.children if getattr(child, "custom_id", None) == custom_id),
+            (child for child in buttons if getattr(child, "custom_id", None) == custom_id),
             None,
         )
         assert button is not None, f"Button with custom_id '{custom_id}' not found"
@@ -41,23 +50,20 @@ async def test_radio_view_buttons_call_methods():
         "radio_hiphop": "radio_hiphop",
     }
 
+    buttons = _buttons(view)
     for custom_id, cmd_name in mapping.items():
         button = next(
-            (child for child in view.children if getattr(child, "custom_id", None) == custom_id),
+            (child for child in buttons if getattr(child, "custom_id", None) == custom_id),
             None,
         )
         assert button is not None, f"Button with custom_id '{custom_id}' not found"
 
         mock = AsyncMock()
         cog = SimpleNamespace(**{cmd_name: mock})
-
-        # Interaction minimale pour le callback : .client.get_cog(...) doit renvoyer notre "cog"
         interaction = SimpleNamespace(
             client=SimpleNamespace(get_cog=lambda name, c=cog: c)
         )
 
-        # Exécute le callback du bouton
         await button.callback(interaction)
 
-        # Vérifie que la méthode du cog a bien été appelée
-        mock.assert_awaited_once()
+        mock.assert_awaited_once_with(interaction)
