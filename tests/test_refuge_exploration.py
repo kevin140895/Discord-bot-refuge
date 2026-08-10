@@ -109,7 +109,8 @@ def test_explorer_uses_configured_next_milestone_without_inventing_progress():
 
     fire_text = " ".join(snapshot.get_zone("fire").details)
     assert "Le Campement à 1 h 00" in fire_text
-    assert "/" not in fire_text
+    # Dates legitimately contain slashes; only reject an invented x / y ratio.
+    assert " / " not in fire_text
 
 
 def test_mysteries_reveal_only_discovered_secret_names():

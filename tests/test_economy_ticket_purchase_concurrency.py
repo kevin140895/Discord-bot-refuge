@@ -71,10 +71,14 @@ async def test_concurrent_ticket_purchases_share_limit_and_debit_boundary(
     first = _interaction()
     second = _interaction()
 
-    first_task = asyncio.create_task(cog.on_interaction(first))
+    first_task = asyncio.create_task(
+        cog._handle_shop_purchase(first, "ticket_royal")
+    )
     await first_debit_started.wait()
 
-    second_task = asyncio.create_task(cog.on_interaction(second))
+    second_task = asyncio.create_task(
+        cog._handle_shop_purchase(second, "ticket_royal")
+    )
     await asyncio.sleep(0)
 
     # The second purchase must still be waiting on the shared ticket lock. If it
@@ -128,7 +132,9 @@ async def test_ticket_purchase_waits_for_concurrent_consumption(tmp_path, monkey
 
     cog = EconomyUICog(object())
     interaction = _interaction()
-    purchase_task = asyncio.create_task(cog.on_interaction(interaction))
+    purchase_task = asyncio.create_task(
+        cog._handle_shop_purchase(interaction, "ticket_royal")
+    )
     await asyncio.sleep(0)
 
     # Consumption still owns the same shared lock, so purchase cannot debit XP

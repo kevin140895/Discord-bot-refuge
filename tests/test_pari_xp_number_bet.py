@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -20,6 +21,7 @@ def _make_cog():
     cog._message_id = None
     cog._last_announced_state = None
     cog._save_state = AsyncMock()
+    cog._bet_lock = asyncio.Lock()
     return cog
 
 

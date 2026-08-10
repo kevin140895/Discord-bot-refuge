@@ -71,6 +71,7 @@ async def test_shop_does_not_grant_item_when_atomic_debit_fails(monkeypatch):
 async def test_roulette_rejects_bet_when_atomic_debit_fails(monkeypatch):
     cog = object.__new__(pari_xp.PariXPCog)
     cog.is_open = True
+    cog._bet_lock = asyncio.Lock()
 
     monkeypatch.setattr(
         pari_xp.xp_store,

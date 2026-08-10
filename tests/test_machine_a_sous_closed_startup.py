@@ -16,7 +16,7 @@ from cogs.machine_a_sous.machine_a_sous import MachineASousCog
 @pytest.mark.asyncio
 async def test_init_posts_closed_message(monkeypatch):
     monkeypatch.setattr(
-        'cogs.machine_a_sous.machine_a_sous.is_open_now',
+        "cogs.machine_a_sous.machine_a_sous._is_casino_open",
         lambda *_, **__: False,
     )
 

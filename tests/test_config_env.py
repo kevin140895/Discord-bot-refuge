@@ -12,13 +12,16 @@ def test_config_loads_env_vars(monkeypatch):
     assert config.GUILD_ID == 123456
     assert config.TZ == "UTC"
     assert os.environ["TZ"] == "UTC"
-    assert time.tzname[0] == "UTC"
-    # Restore previous timezone for subsequent tests
+
+    # POSIX exposes time.tzset(), so changing TZ also updates time.tzname.
+    # Windows has no tzset(); config intentionally keeps the env value only.
+    if hasattr(time, "tzset"):
+        assert time.tzname[0] == "UTC"
+
+    # Restore previous timezone for subsequent tests.
     if original_tz is not None:
         os.environ["TZ"] = original_tz
     else:
         os.environ.pop("TZ", None)
-    try:
+    if hasattr(time, "tzset"):
         time.tzset()
-    except AttributeError:
-        pass
