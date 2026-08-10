@@ -7,6 +7,11 @@ import pytest
 import cogs.temp_vc as temp_vc
 
 
+class DummySnowflake:
+    def __init__(self, object_id: int):
+        self.id = object_id
+
+
 @pytest.mark.asyncio
 async def test_temp_channel_created_and_removed(monkeypatch):
     temp_vc.TEMP_VC_IDS.clear()
@@ -88,9 +93,9 @@ async def test_streamer_channel_overwrites(monkeypatch):
 
     category = DummyCategory()
     trigger_channel = SimpleNamespace(category=category)
-    default_role = SimpleNamespace(id=111)
-    streamer_role = SimpleNamespace(id=temp_vc.STREAMER_ALLOWED_ROLE_ID)
-    bot_member = SimpleNamespace(id=999)
+    default_role = DummySnowflake(111)
+    streamer_role = DummySnowflake(temp_vc.STREAMER_ALLOWED_ROLE_ID)
+    bot_member = DummySnowflake(999)
 
     async def fake_create_voice_channel(name, *, category=None, user_limit=None, overwrites=None):
         return SimpleNamespace(id=555, name=name, overwrites=overwrites)
