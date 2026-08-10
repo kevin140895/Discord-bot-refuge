@@ -10,6 +10,7 @@ from discord.ext import commands
 from config import (
     ALLOWED_ROLE_ID,
     DELETE_DELAY_SECONDS,
+    STREAMER_LOBBY_VC_ID,
     TEMP_VOICE_CATEGORY_ID,
     TRIGGER_CHANNEL_ID,
 )
@@ -35,6 +36,7 @@ class StreamerTempVCCog(commands.Cog):
             owner_id: channel_id for channel_id, owner_id in persisted.items()
         }
         self._delete_tasks: Dict[int, asyncio.Task] = {}
+        self._owner_locks: Dict[int, asyncio.Lock] = {}
 
     def cog_unload(self) -> None:
         for task in self._delete_tasks.values():
@@ -195,6 +197,39 @@ class StreamerTempVCCog(commands.Cog):
             raise
         return channel
 
+    async def _get_or_create_channel(
+        self,
+        member: discord.Member,
+        trigger_channel: discord.abc.GuildChannel,
+    ) -> tuple[discord.VoiceChannel, bool]:
+        """Retourne l'unique vocal du propriétaire, en le créant si nécessaire."""
+        lock = self._owner_locks.setdefault(member.id, asyncio.Lock())
+        async with lock:
+            existing = await self._get_existing_channel(member.guild, member.id)
+            if existing is None:
+                existing = await self._adopt_existing_channel(member, trigger_channel)
+            if existing is not None:
+                return existing, False
+            return await self._create_channel(member, trigger_channel), True
+
+    async def _delete_created_channel_after_move_failure(
+        self, channel: discord.VoiceChannel
+    ) -> None:
+        """Supprime un salon créé dans ce flux si le propriétaire n'a pas pu y entrer."""
+        try:
+            await channel.delete(reason="Échec du déplacement du membre")
+        except Exception:
+            logger.exception(
+                "[streamer_temp_vc] nettoyage après échec de déplacement impossible"
+            )
+            return
+        try:
+            await self._untrack_channel(channel.id)
+        except Exception:
+            logger.exception(
+                "[streamer_temp_vc] persistance après nettoyage de déplacement échouée"
+            )
+
     async def _delete_after_delay(self, channel_id: int) -> None:
         remove_mapping = False
         try:
@@ -315,22 +350,19 @@ class StreamerTempVCCog(commands.Cog):
             )
             return
 
-        existing = await self._get_existing_channel(guild, member.id)
-        if existing is None:
-            existing = await self._adopt_existing_channel(member, trigger_channel)
-        if existing is not None:
-            await interaction.response.send_message(
-                f"Ton vocal existe déjà : {existing.mention}",
-                ephemeral=True,
-            )
-            return
-
         try:
-            channel = await self._create_channel(member, trigger_channel)
+            channel, created = await self._get_or_create_channel(member, trigger_channel)
         except Exception:
             logger.exception("[streamer_temp_vc] création du salon échouée")
             await interaction.response.send_message(
                 "Impossible de créer ton vocal pour le moment.",
+                ephemeral=True,
+            )
+            return
+
+        if not created:
+            await interaction.response.send_message(
+                f"Ton vocal existe déjà : {channel.mention}",
                 ephemeral=True,
             )
             return
@@ -346,6 +378,7 @@ class StreamerTempVCCog(commands.Cog):
             logger.exception(
                 "[streamer_temp_vc] déplacement dans le salon échoué"
             )
+            await self._delete_created_channel_after_move_failure(channel)
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -365,6 +398,30 @@ class StreamerTempVCCog(commands.Cog):
             )
             if tracked or orphan:
                 self._schedule_delete(before.channel.id)
+
+        if not after.channel or after.channel.id != STREAMER_LOBBY_VC_ID:
+            return
+
+        role = member.guild.get_role(ALLOWED_ROLE_ID)
+        if role is None or role not in member.roles:
+            return
+
+        try:
+            channel, created = await self._get_or_create_channel(member, after.channel)
+        except Exception:
+            logger.exception(
+                "[streamer_temp_vc] création depuis le lobby vocal échouée"
+            )
+            return
+
+        try:
+            await member.move_to(channel)
+        except discord.HTTPException:
+            logger.exception(
+                "[streamer_temp_vc] déplacement depuis le lobby vocal échoué"
+            )
+            if created:
+                await self._delete_created_channel_after_move_failure(channel)
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(
