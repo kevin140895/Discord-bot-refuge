@@ -284,7 +284,7 @@ CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = int(
 CHANNEL_RENAME_DEBOUNCE_SECONDS: int = int(
     os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "2")
 )
-"""Délai appliqué avant le renommage du salon."""
+"""Délai appliqué avant le renommage d'un salon."""
 
 CHANNEL_RENAME_MAX_RETRIES: int = int(
     os.getenv("CHANNEL_RENAME_MAX_RETRIES", "5")
