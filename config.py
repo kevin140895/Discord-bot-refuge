@@ -143,7 +143,9 @@ TOP_MSG_ROLE_ID = 1406412171965104208
 TOP_VC_ROLE_ID = 1406412383878119485
 MVP_ROLE_ID = 1406412507433795595
 
-ANNOUNCE_CHANNEL_ID: int = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
+ANNOUNCE_CHANNEL_ID: int = _get_int_env(
+    "ANNOUNCE_CHANNEL_ID", 1400552164979507263
+)
 """Salon utilisé pour les annonces de la machine à sous."""
 
 AWARD_ANNOUNCE_CHANNEL_ID: int = int(
@@ -282,7 +284,7 @@ CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = int(
 CHANNEL_RENAME_DEBOUNCE_SECONDS: int = int(
     os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "2")
 )
-"""Délai appliqué avant le renommage d'un salon."""
+"""Délai appliqué avant le renommage du salon."""
 
 CHANNEL_RENAME_MAX_RETRIES: int = int(
     os.getenv("CHANNEL_RENAME_MAX_RETRIES", "5")
