@@ -13,6 +13,10 @@ from utils.interactions import safe_respond
 
 logger = logging.getLogger(__name__)
 
+PORTAL_TITLE = "📬 Centre de Retours & Support"
+PORTAL_CUSTOM_IDS = frozenset({"btn_suggestion", "btn_bug", "btn_avis"})
+PORTAL_ACCENT = discord.Color.gold()
+
 
 @dataclass(frozen=True)
 class FeedbackConfig:
@@ -65,43 +69,159 @@ def _disable_buttons(view: discord.ui.View) -> None:
             item.disabled = True
 
 
-class FeedbackPortalView(discord.ui.View):
+def _collect_component_custom_ids(components: Iterable[object]) -> set[str]:
+    """Collect custom IDs from legacy rows or nested Components V2 trees."""
+    found: set[str] = set()
+    stack = list(components)
+    while stack:
+        component = stack.pop()
+        custom_id = getattr(component, "custom_id", None)
+        if isinstance(custom_id, str):
+            found.add(custom_id)
+
+        children = getattr(component, "children", None)
+        if children:
+            stack.extend(children)
+
+        accessory = getattr(component, "accessory", None)
+        if accessory is not None:
+            stack.append(accessory)
+    return found
+
+
+def _is_portal_message(message: discord.Message) -> bool:
+    """Recognise the legacy Embed portal and the Components V2 replacement."""
+    custom_ids = _collect_component_custom_ids(getattr(message, "components", []))
+    if PORTAL_CUSTOM_IDS.issubset(custom_ids):
+        return True
+    embeds = getattr(message, "embeds", [])
+    return bool(embeds and getattr(embeds[0], "title", None) == PORTAL_TITLE)
+
+
+class FeedbackPortalButton(discord.ui.Button):
+    """Persistent accessory button for one feedback category."""
+
+    def __init__(
+        self,
+        *,
+        feedback_type: str,
+        label: str,
+        emoji: str,
+        style: discord.ButtonStyle,
+        custom_id: str,
+    ) -> None:
+        super().__init__(
+            label=label,
+            emoji=emoji,
+            style=style,
+            custom_id=custom_id,
+        )
+        self.feedback_type = feedback_type
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if not isinstance(view, FeedbackPortalView):
+            return
+        await view.open_modal(interaction, self.feedback_type)
+
+
+class FeedbackPortalView(discord.ui.LayoutView):
+    """Portail public de retours basé sur Discord Components V2."""
+
     def __init__(self, cog: "FeedbackPortalCog") -> None:
         super().__init__(timeout=None)
         self.cog = cog
+        self.add_item(self._build_container())
 
-    @discord.ui.button(
-        label="Proposer une idée",
-        style=discord.ButtonStyle.success,
-        emoji="💡",
-        custom_id="btn_suggestion",
-    )
-    async def suggestion(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await interaction.response.send_modal(SuggestionModal(self.cog))
+    def _build_container(self) -> discord.ui.Container:
+        container = discord.ui.Container(accent_colour=PORTAL_ACCENT)
+        container.add_item(
+            discord.ui.TextDisplay(
+                "## 📬 CENTRE DE RETOURS & SUPPORT\n"
+                "Une idée, un problème ou simplement un avis ? Choisis la catégorie "
+                "qui correspond à ton retour pour ouvrir le formulaire adapté."
+            )
+        )
+        container.add_item(discord.ui.Separator())
 
-    @discord.ui.button(
-        label="Signaler un bug",
-        style=discord.ButtonStyle.danger,
-        emoji="🐛",
-        custom_id="btn_bug",
-    )
-    async def bug(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await interaction.response.send_modal(BugReportModal(self.cog))
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "### 💡 Proposer une idée\n"
+                    "Partage une proposition pour améliorer le Refuge, ses salons ou ses fonctionnalités."
+                ),
+                accessory=FeedbackPortalButton(
+                    feedback_type="suggestion",
+                    label="Proposer une idée",
+                    emoji="💡",
+                    style=discord.ButtonStyle.success,
+                    custom_id="btn_suggestion",
+                ),
+            )
+        )
+        container.add_item(
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.small)
+        )
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "### 🐛 Signaler un bug\n"
+                    "Décris un dysfonctionnement afin que l'équipe puisse l'identifier et le reproduire."
+                ),
+                accessory=FeedbackPortalButton(
+                    feedback_type="bug",
+                    label="Signaler un bug",
+                    emoji="🐛",
+                    style=discord.ButtonStyle.danger,
+                    custom_id="btn_bug",
+                ),
+            )
+        )
+        container.add_item(
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.small)
+        )
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "### ⭐ Donner un avis\n"
+                    "Donne ton ressenti sur le serveur et aide l'équipe à comprendre ce qui fonctionne bien ou moins bien."
+                ),
+                accessory=FeedbackPortalButton(
+                    feedback_type="avis",
+                    label="Donner un avis",
+                    emoji="⭐",
+                    style=discord.ButtonStyle.primary,
+                    custom_id="btn_avis",
+                ),
+            )
+        )
 
-    @discord.ui.button(
-        label="Donner un avis",
-        style=discord.ButtonStyle.primary,
-        emoji="⭐",
-        custom_id="btn_avis",
-    )
-    async def avis(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.TextDisplay(
+                "### 🔒 Envoi encadré\n"
+                "Le bouton ouvre un formulaire adapté à ta demande. Une fois envoyé, "
+                "le retour est transmis à l'équipe de modération."
+            )
+        )
+        container.add_item(
+            discord.ui.TextDisplay(
+                "-# Merci de rester précis et constructif · Tout abus peut être sanctionné."
+            )
+        )
+        return container
+
+    async def open_modal(
+        self, interaction: discord.Interaction, feedback_type: str
     ) -> None:
-        await interaction.response.send_modal(OpinionModal(self.cog))
+        modal_factory = {
+            "suggestion": SuggestionModal,
+            "bug": BugReportModal,
+            "avis": OpinionModal,
+        }.get(feedback_type)
+        if modal_factory is None:
+            return
+        await interaction.response.send_modal(modal_factory(self.cog))
 
 
 class FeedbackStaffView(discord.ui.View):
@@ -255,6 +375,15 @@ class FeedbackPortalCog(commands.Cog):
         self._portal_checked = True
         await self.ensure_portal_message()
 
+    async def _render_portal_message(self, message: discord.Message) -> None:
+        """Upgrade the existing portal message in place to Components V2."""
+        await message.edit(
+            content=None,
+            embeds=[],
+            attachments=[],
+            view=FeedbackPortalView(self),
+        )
+
     async def ensure_portal_message(self) -> None:
         channel = self.bot.get_channel(FEEDBACK_PORTAL_CHANNEL_ID)
         if channel is None:
@@ -267,22 +396,22 @@ class FeedbackPortalCog(commands.Cog):
             logger.warning("[feedback] portal channel non compatible")
             return
 
-        target_title = "📬 Centre de Retours & Support"
+        target = None
         async for message in channel.history(limit=50):
             if message.author.id != self.bot.user.id:
                 continue
-            if message.embeds and message.embeds[0].title == target_title:
-                return
+            if _is_portal_message(message):
+                target = message
+                break
 
-        embed = discord.Embed(
-            title=target_title,
-            description=(
-                "Bienvenue avec l'equipe technique du refuge. Utilisez les boutons "
-                "ci-dessous pour interagir avec l'équipe. Tout abus sera sanctionné."
-            ),
-            color=discord.Color.gold(),
-        )
-        await channel.send(embed=embed, view=FeedbackPortalView(self))
+        if target is not None:
+            try:
+                await self._render_portal_message(target)
+            except discord.HTTPException:
+                logger.exception("[feedback] mise à jour du portail impossible")
+            return
+
+        await channel.send(view=FeedbackPortalView(self))
 
     async def handle_submission(
         self,
