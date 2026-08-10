@@ -91,14 +91,11 @@ async def test_active_custom_track_requests_dynamic_channel_name(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_radio_mode_does_not_override_existing_station_name(monkeypatch):
-    track = SimpleNamespace(uploader="La Fouine", title="Du Ferme")
+async def test_repeated_sync_does_not_queue_same_artist_while_cache_is_stale(monkeypatch):
+    track = SimpleNamespace(uploader="Bad Bunny - Topic", title="MONACO")
     music = SimpleNamespace(current=track)
-    radio = SimpleNamespace(
-        stream_url="https://radio.example/live",
-        voice=DummyVoice(playing=True),
-    )
-    channel = DummyChannel("🟣・Radio-Rap-FR")
+    radio = SimpleNamespace(stream_url=None, voice=DummyVoice(playing=True))
+    channel = DummyChannel("📻・Radio-HipHop")
     bot = DummyBot(music=music, radio=radio, channel=channel)
     cog = dynamic_rename.Music2DynamicRenameCog(bot)
 
@@ -107,5 +104,60 @@ async def test_radio_mode_does_not_override_existing_station_name(monkeypatch):
     monkeypatch.setattr(dynamic_rename.rename_manager, "request", request)
 
     await cog._sync_current_track_name()
+    await cog._sync_current_track_name()
+    await cog._sync_current_track_name()
 
-    request.assert_not_awaited()
+    request.assert_awaited_once_with(channel, "🔴・Bad Bunny")
+
+
+@pytest.mark.asyncio
+async def test_radio_return_requests_station_name_after_custom_track(monkeypatch):
+    track = SimpleNamespace(uploader="Bad Bunny - Topic", title="MONACO")
+    music = SimpleNamespace(current=track)
+    radio = SimpleNamespace(
+        stream_url=None,
+        voice=DummyVoice(playing=True),
+        _rename_for_stream=AsyncMock(),
+    )
+    channel = DummyChannel("📻・Radio-HipHop")
+    bot = DummyBot(music=music, radio=radio, channel=channel)
+    cog = dynamic_rename.Music2DynamicRenameCog(bot)
+
+    request = AsyncMock()
+    monkeypatch.setattr(dynamic_rename.discord, "VoiceChannel", DummyChannel)
+    monkeypatch.setattr(dynamic_rename.rename_manager, "request", request)
+
+    await cog._sync_current_track_name()
+    request.assert_awaited_once_with(channel, "🔴・Bad Bunny")
+
+    music.current = None
+    radio.stream_url = "https://radio.example/live"
+    channel.name = "🔴・Bad Bunny"
+
+    await cog._sync_current_track_name()
+
+    radio._rename_for_stream.assert_awaited_once_with(
+        channel, "https://radio.example/live"
+    )
+
+
+@pytest.mark.asyncio
+async def test_radio_station_sync_is_requested_once_per_stream(monkeypatch):
+    music = SimpleNamespace(current=None)
+    radio = SimpleNamespace(
+        stream_url="https://radio.example/live",
+        voice=DummyVoice(playing=True),
+        _rename_for_stream=AsyncMock(),
+    )
+    channel = DummyChannel("🔴・Bad Bunny")
+    bot = DummyBot(music=music, radio=radio, channel=channel)
+    cog = dynamic_rename.Music2DynamicRenameCog(bot)
+
+    monkeypatch.setattr(dynamic_rename.discord, "VoiceChannel", DummyChannel)
+
+    await cog._sync_current_track_name()
+    await cog._sync_current_track_name()
+
+    radio._rename_for_stream.assert_awaited_once_with(
+        channel, "https://radio.example/live"
+    )
