@@ -124,7 +124,8 @@ async def test_role_panel_delegates_to_existing_role_logic() -> None:
 
     view._logic._set_platform_role = AsyncMock()
     view._logic._toggle_role = AsyncMock()
-    view._logic._reset_roles = AsyncMock()
+    reset_roles = AsyncMock()
+    buttons["role_reset_all"]._delegate_callback = reset_roles
 
     await buttons["role_platform_pc"].callback(interaction)
     await buttons["role_platform_console"].callback(interaction)
@@ -145,4 +146,4 @@ async def test_role_panel_delegates_to_existing_role_logic() -> None:
     ]
 
     await buttons["role_reset_all"].callback(interaction)
-    view._logic._reset_roles.assert_awaited_once_with(interaction)
+    reset_roles.assert_awaited_once_with(interaction)
