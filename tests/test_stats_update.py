@@ -67,6 +67,7 @@ async def test_update_stats_changes_channel_names(monkeypatch):
         channel.name = name
 
     monkeypatch.setattr("cogs.stats.rename_manager.request", fake_request)
+    monkeypatch.setattr("cogs.stats._ensure_rename_manager_started", AsyncMock())
     captured_tasks = []
     original_create_task = asyncio.create_task
 
@@ -127,6 +128,7 @@ async def test_startup_updates_channels_on_empty_cache(monkeypatch, tmp_path):
         channel.name = name
 
     monkeypatch.setattr("cogs.stats.rename_manager.request", fake_request)
+    monkeypatch.setattr("cogs.stats._ensure_rename_manager_started", AsyncMock())
     monkeypatch.setattr("cogs.stats.STATS_CACHE_FILE", tmp_path / "stats_cache.json")
 
     # Prevent background refresh loops from starting
