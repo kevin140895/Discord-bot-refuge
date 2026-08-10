@@ -33,7 +33,7 @@ from utils.metrics import measure
 from storage.xp_store import xp_store
 from storage.season_store import season_store
 from utils.game_events import get_multiplier, record_participant
-from utils.voice_bonus import get_voice_multiplier
+from utils.voice_bonus import get_voice_bonus_windows
 from utils.seasons import should_count_xp_source
 from utils.refuge_casino_observer import observe_casino_xp_transaction
 logger = logging.getLogger(__name__)
@@ -52,7 +52,18 @@ XP_CACHE: dict[str, dict] = xp_store.data
 DAILY_STATS: dict[str, dict[str, dict[str, int]]] = {}
 XP_LOCK = xp_store.lock
 DAILY_LOCK = asyncio.Lock()
+# ``XP_BOOSTS`` reste un mapping vers la date d'expiration pour conserver le
+# contrat utilisé par la boutique. Les débuts et anciens créneaux sont stockés
+# séparément afin de calculer précisément les sessions vocales différées.
 XP_BOOSTS: dict[str, datetime] = {}
+XP_BOOST_STARTS: dict[str, datetime] = {}
+XP_BOOST_HISTORY: dict[str, list[tuple[datetime, datetime]]] = {}
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _prune_stale_daily_stats(current_day: str) -> None:
@@ -78,7 +89,10 @@ def load_voice_times() -> dict[str, datetime]:
 async def save_voice_times_to_disk() -> None:
     """Sauvegarde atomique des temps vocaux sans bloquer l'event loop."""
     try:
-        serializable = {uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in voice_times.items()}
+        serializable = {
+            uid: dt.astimezone(timezone.utc).isoformat()
+            for uid, dt in voice_times.items()
+        }
         await atomic_write_json_async(VOICE_TIMES_FILE, serializable)
         logger.info("[xp] Voice times sauvegardés (%s)", VOICE_TIMES_FILE)
     except OSError as e:
@@ -95,23 +109,78 @@ async def save_daily_stats_to_disk() -> None:
     await atomic_write_json_async(DAILY_STATS_FILE, data)
 
 
-def load_xp_boosts() -> dict[str, datetime]:
+def load_xp_boosts() -> tuple[
+    dict[str, datetime],
+    dict[str, datetime],
+    dict[str, list[tuple[datetime, datetime]]],
+]:
+    """Load personal Double XP state, including legacy expiry-only files."""
     data = read_json_safe(XP_BOOSTS_FILE)
-    out: dict[str, datetime] = {}
-    for uid, iso in data.items():
+    expiries: dict[str, datetime] = {}
+    starts: dict[str, datetime] = {}
+    history: dict[str, list[tuple[datetime, datetime]]] = {}
+    now = datetime.now(timezone.utc)
+
+    for uid, raw in data.items():
         try:
-            out[uid] = datetime.fromisoformat(iso)
-        except ValueError as e:
+            if isinstance(raw, str):
+                # Legacy format only knew the expiry. Do not guess a historical
+                # start and accidentally grant retroactive vocal XP: an active
+                # legacy boost starts being tracked from this bootstrap onward.
+                expiry = _as_utc(datetime.fromisoformat(raw))
+                expiries[uid] = expiry
+                if expiry > now:
+                    starts[uid] = now
+                continue
+
+            if not isinstance(raw, dict):
+                raise ValueError("unsupported boost record")
+
+            expiry = _as_utc(datetime.fromisoformat(raw["expires_at"]))
+            start_raw = raw.get("started_at")
+            start = (
+                _as_utc(datetime.fromisoformat(start_raw))
+                if start_raw
+                else min(now, expiry)
+            )
+            expiries[uid] = expiry
+            starts[uid] = start
+
+            windows: list[tuple[datetime, datetime]] = []
+            for item in raw.get("history", []):
+                if not isinstance(item, dict):
+                    continue
+                window_start = _as_utc(datetime.fromisoformat(item["start"]))
+                window_end = _as_utc(datetime.fromisoformat(item["end"]))
+                if window_end > window_start:
+                    windows.append((window_start, window_end))
+            if windows:
+                history[uid] = windows[-64:]
+        except (KeyError, TypeError, ValueError) as e:
             logger.warning("Invalid XP boost for user %s: %s", uid, e)
             continue
-    return out
+
+    return expiries, starts, history
 
 
 async def save_xp_boosts_to_disk() -> None:
     try:
-        serializable = {
-            uid: dt.astimezone(timezone.utc).isoformat() for uid, dt in XP_BOOSTS.items()
-        }
+        serializable: dict[str, dict] = {}
+        for uid, expiry in XP_BOOSTS.items():
+            start = XP_BOOST_STARTS.get(uid)
+            serializable[uid] = {
+                "started_at": (
+                    _as_utc(start).isoformat() if start is not None else None
+                ),
+                "expires_at": _as_utc(expiry).isoformat(),
+                "history": [
+                    {
+                        "start": _as_utc(window_start).isoformat(),
+                        "end": _as_utc(window_end).isoformat(),
+                    }
+                    for window_start, window_end in XP_BOOST_HISTORY.get(uid, [])[-64:]
+                ],
+            }
         await atomic_write_json_async(XP_BOOSTS_FILE, serializable)
         logger.info("[xp] XP boosts sauvegardés (%s)", XP_BOOSTS_FILE)
     except OSError as e:
@@ -119,14 +188,15 @@ async def save_xp_boosts_to_disk() -> None:
 
 
 async def xp_bootstrap_cache() -> None:
-    global XP_CACHE, voice_times, DAILY_STATS, XP_LOCK, XP_BOOSTS
+    global XP_CACHE, voice_times, DAILY_STATS, XP_LOCK
+    global XP_BOOSTS, XP_BOOST_STARTS, XP_BOOST_HISTORY
     XP_CACHE = xp_store.data
     XP_LOCK = xp_store.lock
     voice_times = load_voice_times()
     DAILY_STATS = load_daily_stats()
     today = datetime.now(PARIS_TZ).date().isoformat()
     _prune_stale_daily_stats(today)
-    XP_BOOSTS = load_xp_boosts()
+    XP_BOOSTS, XP_BOOST_STARTS, XP_BOOST_HISTORY = load_xp_boosts()
     logger.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
 
@@ -134,25 +204,28 @@ async def xp_flush_cache_to_disk() -> None:
     await xp_store.flush()
     logger.info("💾 XP flush vers disque (%d utilisateurs).", len(xp_store.data))
 
+
 async def award_xp(
-    user_id: int, amount: int, guild_id: int | None = None, source: str = "manual"
+    user_id: int,
+    amount: int,
+    guild_id: int | None = None,
+    source: str = "manual",
+    *,
+    apply_personal_boost: bool = True,
 ) -> tuple[int, int, int, int]:
     """Modifie l'XP de ``user_id`` via le :class:`XPStore`.
 
-    Lorsque ``amount`` est positif et que l'utilisateur bénéficie d'un bonus
-    « Double XP », le gain est doublé automatiquement. Les montants négatifs
-    permettent de retirer de l'XP, sans bonus.
+    Les gains instantanés utilisent le Double XP personnel actif au moment de
+    l'attribution. Les gains vocaux calculent eux-mêmes les intersections
+    temporelles et passent ``apply_personal_boost=False`` pour éviter de doubler
+    rétroactivement toute la session au moment de la déconnexion.
     """
     now = datetime.now(timezone.utc)
     requested_amount = int(amount)
-    if amount > 0:
+    if amount > 0 and apply_personal_boost:
         boost_exp = XP_BOOSTS.get(str(user_id))
-        if boost_exp:
-            if boost_exp > now:
-                amount *= 2
-            else:
-                XP_BOOSTS.pop(str(user_id), None)
-                asyncio.create_task(save_xp_boosts_to_disk())
+        if boost_exp and _as_utc(boost_exp) > now:
+            amount *= 2
     result = await xp_store.add_xp(
         user_id, amount, guild_id=guild_id, source=source
     )
@@ -177,12 +250,113 @@ async def award_xp(
     return result
 
 
-def add_xp_boost(user_id: int, duration_minutes: int) -> None:
-    """Active un bonus Double XP pour ``user_id`` pendant ``duration_minutes``."""
-    XP_BOOSTS[str(user_id)] = datetime.now(timezone.utc) + timedelta(
-        minutes=duration_minutes
-    )
+def _remember_finished_personal_boost(
+    uid: str, start: datetime | None, end: datetime | None
+) -> None:
+    if start is None or end is None:
+        return
+    start_utc = _as_utc(start)
+    end_utc = _as_utc(end)
+    if end_utc <= start_utc:
+        return
+    windows = XP_BOOST_HISTORY.setdefault(uid, [])
+    window = (start_utc, end_utc)
+    if window not in windows:
+        windows.append(window)
+        del windows[:-64]
+
+
+def add_xp_boost(user_id: int, duration_minutes: float) -> None:
+    """Active un bonus Double XP personnel pendant ``duration_minutes``."""
+    uid = str(user_id)
+    now = datetime.now(timezone.utc)
+    current_expiry = XP_BOOSTS.get(uid)
+    current_start = XP_BOOST_STARTS.get(uid)
+
+    if current_expiry is not None and _as_utc(current_expiry) > now:
+        # Une prolongation boutique doit conserver le début réel du boost.
+        start = _as_utc(current_start) if current_start is not None else now
+    else:
+        _remember_finished_personal_boost(uid, current_start, current_expiry)
+        start = now
+
+    XP_BOOST_STARTS[uid] = start
+    XP_BOOSTS[uid] = now + timedelta(minutes=float(duration_minutes))
     asyncio.create_task(save_xp_boosts_to_disk())
+
+
+def _personal_boost_windows(
+    user_id: int, start: datetime, end: datetime
+) -> list[tuple[datetime, datetime]]:
+    uid = str(user_id)
+    start_utc = _as_utc(start)
+    end_utc = _as_utc(end)
+    candidates = list(XP_BOOST_HISTORY.get(uid, []))
+
+    current_start = XP_BOOST_STARTS.get(uid)
+    current_end = XP_BOOSTS.get(uid)
+    if current_start is not None and current_end is not None:
+        candidates.append((_as_utc(current_start), _as_utc(current_end)))
+
+    matches: list[tuple[datetime, datetime]] = []
+    for window_start, window_end in candidates:
+        overlap_start = max(start_utc, window_start)
+        overlap_end = min(end_utc, window_end)
+        if overlap_end > overlap_start:
+            matches.append((overlap_start, overlap_end))
+    return matches
+
+
+def _window_contains(
+    moment: datetime, windows: list[tuple[datetime, datetime]]
+) -> bool:
+    return any(start <= moment < end for start, end in windows)
+
+
+def calculate_voice_xp(
+    user_id: int,
+    start: datetime,
+    end: datetime,
+    event_multiplier: float = 1.0,
+) -> int:
+    """Calculate voice XP using only boost time that overlaps the session.
+
+    The base system awards 3 XP per *completed* minute. We keep that rounding
+    rule by limiting the billable interval to the completed minutes first, then
+    split that interval on every global/personal boost boundary.
+    """
+    start_utc = _as_utc(start)
+    end_utc = _as_utc(end)
+    completed_minutes = int((end_utc - start_utc).total_seconds() // 60)
+    if completed_minutes <= 0:
+        return 0
+
+    billable_end = start_utc + timedelta(minutes=completed_minutes)
+    global_windows = get_voice_bonus_windows(start_utc, billable_end)
+    personal_windows = _personal_boost_windows(user_id, start_utc, billable_end)
+
+    boundaries = {start_utc, billable_end}
+    for window_start, window_end in global_windows + personal_windows:
+        boundaries.add(max(start_utc, window_start))
+        boundaries.add(min(billable_end, window_end))
+    ordered = sorted(boundaries)
+
+    total_xp = 0.0
+    base_event_multiplier = float(event_multiplier)
+    for segment_start, segment_end in zip(ordered, ordered[1:]):
+        if segment_end <= segment_start:
+            continue
+        midpoint = segment_start + (segment_end - segment_start) / 2
+        multiplier = base_event_multiplier
+        if _window_contains(midpoint, global_windows) and multiplier < 2.0:
+            multiplier = 2.0
+        if _window_contains(midpoint, personal_windows):
+            multiplier *= 2.0
+        minutes = (segment_end - segment_start).total_seconds() / 60.0
+        total_xp += minutes * 3.0 * multiplier
+
+    return int(total_xp + 1e-9)
+
 
 async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed: int):
     def _draw() -> io.BytesIO:
@@ -202,6 +376,7 @@ async def generate_rank_card(user: discord.User, level: int, xp: int, xp_needed:
         return buffer
 
     return await asyncio.to_thread(_draw)
+
 
 class XPCog(commands.Cog):
     """Fonctionnalités liées à l'XP."""
@@ -293,18 +468,21 @@ class XPCog(commands.Cog):
             start = voice_times.pop(uid, None)
             if start is not None:
                 duration = now - start
-                xp_amount = int(duration.total_seconds() // 60) * 3
-                if before.channel is not None:
-                    event_mult = get_multiplier(before.channel.id, member.id)
-                    mult = get_voice_multiplier(event_mult)
-                    if event_mult != 1.0:
-                        record_participant(before.channel.id, member.id)
-                    xp_amount = int(xp_amount * mult)
+                event_mult = get_multiplier(before.channel.id, member.id)
+                if event_mult != 1.0:
+                    record_participant(before.channel.id, member.id)
+                xp_amount = calculate_voice_xp(
+                    member.id,
+                    start,
+                    now,
+                    event_multiplier=event_mult,
+                )
                 old_lvl, new_lvl, old_xp, new_xp = await award_xp(
                     member.id,
                     xp_amount,
                     guild_id=member.guild.id,
                     source="voice_leave",
+                    apply_personal_boost=False,
                 )
                 # Statistiques quotidiennes (en secondes)
                 day = now.date().isoformat()

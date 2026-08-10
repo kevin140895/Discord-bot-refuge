@@ -24,7 +24,7 @@ from config import (
     XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID,
 )
 from utils.persistence import read_json_safe, atomic_write_json_async, ensure_dir
-from utils.voice_bonus import set_voice_bonus
+from utils.voice_bonus import register_voice_bonus_window, set_voice_bonus
 logger = logging.getLogger(__name__)
 
 try:
@@ -65,6 +65,16 @@ def _hm_to_dt(hm: str, day: date) -> datetime:
     """Convertit une heure ``HH:MM`` en :class:`datetime` pour ``day``."""
     h, m = map(int, hm.split(":"))
     return datetime.combine(day, time(hour=h, minute=m, tzinfo=PARIS_TZ))
+
+
+def _session_start(session: Dict[str, Any], fallback: datetime) -> datetime:
+    start_iso = session.get("start")
+    if start_iso:
+        try:
+            return datetime.fromisoformat(start_iso)
+        except (TypeError, ValueError):
+            logger.warning("[double_xp] invalid persisted start: %r", start_iso)
+    return fallback
 
 
 class DoubleVoiceXP(commands.Cog):
@@ -117,7 +127,13 @@ class DoubleVoiceXP(commands.Cog):
                 sessions = state.get("sessions", [])
                 if sessions and isinstance(sessions[0], str):  # rétro-compatibilité
                     sessions = [
-                        {"hm": hm, "started": False, "end": None, "ended": False}
+                        {
+                            "hm": hm,
+                            "start": None,
+                            "started": False,
+                            "end": None,
+                            "ended": False,
+                        }
                         for hm in sessions
                     ]
                     state["sessions"] = sessions
@@ -126,17 +142,38 @@ class DoubleVoiceXP(commands.Cog):
             self.state = state
             now = datetime.now(PARIS_TZ)
             for sess in sessions:
-                dt = _hm_to_dt(sess["hm"], today)
-                if sess.get("started") and not sess.get("ended"):
+                scheduled_start = _hm_to_dt(sess["hm"], today)
+                if sess.get("started"):
+                    start_dt = _session_start(sess, scheduled_start)
                     end_iso = sess.get("end")
-                    if end_iso:
+                    if not end_iso:
+                        continue
+                    try:
                         end_dt = datetime.fromisoformat(end_iso)
-                        if end_dt > now:
-                            self._resume_session(sess, (end_dt - now).total_seconds())
-                        else:
-                            await self._end_session(sess, announce=False)
+                    except (TypeError, ValueError):
+                        logger.warning("[double_xp] invalid persisted end: %r", end_iso)
+                        continue
+
+                    if sess.get("ended"):
+                        register_voice_bonus_window(start_dt, end_dt)
+                    elif end_dt > now:
+                        self._resume_session(
+                            sess,
+                            (end_dt - now).total_seconds(),
+                            start_dt,
+                        )
+                    else:
+                        # The bot was offline when the bonus should have ended.
+                        # Restore only the real persisted interval, never the
+                        # downtime between the scheduled end and this restart.
+                        register_voice_bonus_window(start_dt, end_dt)
+                        await self._end_session(
+                            sess,
+                            announce=False,
+                            ended_at=end_dt,
+                        )
                 else:
-                    self._schedule_session(dt, sess)
+                    self._schedule_session(scheduled_start, sess)
 
     def _schedule_session(self, dt: datetime, session: Dict[str, Any]) -> None:
         """Planifier ``session`` pour démarrer à ``dt``."""
@@ -148,9 +185,14 @@ class DoubleVoiceXP(commands.Cog):
         task = asyncio.create_task(self._run_session(session, delay))
         self._tasks.append(task)
 
-    def _resume_session(self, session: Dict[str, Any], delay: float) -> None:
+    def _resume_session(
+        self,
+        session: Dict[str, Any],
+        delay: float,
+        start_dt: datetime | None = None,
+    ) -> None:
         """Reprendre une session déjà démarrée et programmée pour se terminer."""
-        set_voice_bonus(True)
+        set_voice_bonus(True, at=start_dt)
         task = asyncio.create_task(self._finish_session(session, delay))
         self._tasks.append(task)
 
@@ -169,16 +211,14 @@ class DoubleVoiceXP(commands.Cog):
         """Activer le bonus et annoncer le début de ``session``."""
         if session.get("started"):
             return
+        start_dt = datetime.now(PARIS_TZ)
+        end_dt = start_dt + timedelta(minutes=XP_DOUBLE_VOICE_DURATION_MINUTES)
         session["started"] = True
-        end_dt = datetime.now(PARIS_TZ) + timedelta(
-            minutes=XP_DOUBLE_VOICE_DURATION_MINUTES
-        )
+        session["start"] = start_dt.isoformat()
         session["end"] = end_dt.isoformat()
         await _write_state(self.state)
-        set_voice_bonus(True)
-        logger.info(
-            "[double_xp] session started at %s", end_dt.isoformat()
-        )
+        set_voice_bonus(True, at=start_dt)
+        logger.info("[double_xp] session started at %s", end_dt.isoformat())
         channel = self.bot.get_channel(XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID)
         if channel:
             try:
@@ -189,14 +229,19 @@ class DoubleVoiceXP(commands.Cog):
                 logger.warning("[double_xp] Failed to send start message: %s", e)
 
     async def _end_session(
-        self, session: Dict[str, Any], announce: bool = True
+        self,
+        session: Dict[str, Any],
+        announce: bool = True,
+        ended_at: datetime | None = None,
     ) -> None:
         """Désactiver le bonus et annoncer la fin de ``session``."""
         if session.get("ended"):
             return
+        effective_end = ended_at or datetime.now(PARIS_TZ)
         session["ended"] = True
+        session["end"] = effective_end.isoformat()
         await _write_state(self.state)
-        set_voice_bonus(False)
+        set_voice_bonus(False, at=effective_end)
         logger.info("[double_xp] session ended")
         channel = self.bot.get_channel(XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID)
         if announce and channel:

@@ -77,12 +77,14 @@ async def test_announcements_and_duration(monkeypatch):
 @pytest.mark.asyncio
 async def test_resume_after_restart(tmp_path, monkeypatch):
     now = datetime.now(dx.PARIS_TZ)
+    start = now - timedelta(minutes=15)
     end = now + timedelta(seconds=0.1)
     state = {
         "date": now.date().isoformat(),
         "sessions": [
             {
-                "hm": now.strftime("%H:%M"),
+                "hm": start.strftime("%H:%M"),
+                "start": start.isoformat(),
                 "started": True,
                 "end": end.isoformat(),
                 "ended": False,
@@ -92,6 +94,7 @@ async def test_resume_after_restart(tmp_path, monkeypatch):
     state_file = tmp_path / "double_voice_xp.json"
     monkeypatch.setattr(dx, "STATE_FILE", str(state_file))
     await dx._write_state(state)
+
     async def wait():
         return None
 
@@ -105,7 +108,7 @@ async def test_resume_after_restart(tmp_path, monkeypatch):
             with patch.object(dx.DoubleVoiceXP, "_end_session", AsyncMock()) as end_mock:
                 dx.DoubleVoiceXP(bot)
                 await asyncio.sleep(0.2)
-    set_bonus.assert_called_with(True)
+    set_bonus.assert_called_with(True, at=start)
     assert end_mock.await_count == 1
 
 
