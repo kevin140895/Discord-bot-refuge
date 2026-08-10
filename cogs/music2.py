@@ -26,6 +26,17 @@ from utils.voice import ensure_voice, play_stream
 
 logger = logging.getLogger(__name__)
 
+MUSIC2_ACCENT = discord.Colour(0x5865F2)
+MUSIC2_CUSTOM_IDS = frozenset(
+    {
+        "music2_add",
+        "music2_pause_resume",
+        "music2_next",
+        "music2_queue",
+        "music2_now_playing",
+    }
+)
+
 
 @dataclass(slots=True)
 class MusicTrack:
@@ -53,12 +64,13 @@ class AddMusicModal(discord.ui.Modal, title="Ajouter une musique"):
         await self.cog.add_track_from_interaction(interaction, str(self.query.value))
 
 
-class Music2View(discord.ui.View):
-    """Contrôleur dédié à la musique personnalisée."""
+class Music2View(discord.ui.LayoutView):
+    """Contrôleur Components V2 dédié à la musique personnalisée."""
 
     def __init__(self, cog: "Music2Cog") -> None:
         super().__init__(timeout=None)
         self.cog = cog
+        self.refresh()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.channel_id == RADIO_TEXT_CHANNEL_ID:
@@ -69,66 +81,153 @@ class Music2View(discord.ui.View):
         )
         return False
 
-    @discord.ui.button(
-        label="Ajouter",
-        emoji="➕",
-        style=discord.ButtonStyle.success,
-        custom_id="music2_add",
-        row=0,
-    )
-    async def add_music(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    def refresh(self) -> None:
+        """Rebuild the visual state without changing any playback behaviour."""
+        self.clear_items()
+        self.add_item(self._build_container())
+
+    def _button(
+        self,
+        *,
+        label: str,
+        emoji: str,
+        style: discord.ButtonStyle,
+        custom_id: str,
+        callback,
+    ) -> discord.ui.Button:
+        button = discord.ui.Button(
+            label=label,
+            emoji=emoji,
+            style=style,
+            custom_id=custom_id,
+        )
+        button.callback = callback
+        return button
+
+    def _build_container(self) -> discord.ui.Container:
+        container = discord.ui.Container(accent_colour=MUSIC2_ACCENT)
+        container.add_item(
+            discord.ui.TextDisplay(
+                "## 🎵 MUSIQUE PERSONNALISÉE\n"
+                "Ajoute un titre ou un lien pour lancer une musique à la demande. "
+                "La radio active est suspendue pendant la file puis reprend automatiquement."
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        current = self.cog.current
+        if current is None:
+            current_text = (
+                "### ▶️ Lecture personnalisée\n"
+                "**Aucun titre en cours.**\n"
+                "-# La station radio sélectionnée continue de jouer."
+            )
+        else:
+            current_text = (
+                "### ▶️ Lecture en cours\n"
+                f"**{current.title}**\n"
+                f"{self.cog._format_duration(current.duration)} · "
+                f"demandé par <@{current.requester_id}>"
+            )
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(current_text),
+                accessory=self._button(
+                    label="En cours",
+                    emoji="🎵",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="music2_now_playing",
+                    callback=self._show_now_playing,
+                ),
+            )
+        )
+
+        container.add_item(
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.small)
+        )
+        queue_size = len(self.cog.queue)
+        queue_text = (
+            "**Vide** · la radio reprendra automatiquement après la lecture."
+            if queue_size == 0
+            else f"**{queue_size} titre(s)** en attente."
+        )
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    f"### 📃 File d'attente\n{queue_text}"
+                ),
+                accessory=self._button(
+                    label="File",
+                    emoji="📃",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="music2_queue",
+                    callback=self._show_queue,
+                ),
+            )
+        )
+
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.TextDisplay(
+                "### 🎛️ Contrôles de lecture\n"
+                "Ajoute un morceau, mets la lecture en pause ou passe directement au suivant."
+            )
+        )
+        container.add_item(
+            discord.ui.ActionRow(
+                self._button(
+                    label="Ajouter",
+                    emoji="➕",
+                    style=discord.ButtonStyle.success,
+                    custom_id="music2_add",
+                    callback=self._add_music,
+                ),
+                self._button(
+                    label="Pause / Reprendre",
+                    emoji="⏯️",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="music2_pause_resume",
+                    callback=self._pause_resume,
+                ),
+                self._button(
+                    label="Suivant",
+                    emoji="⏭️",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="music2_next",
+                    callback=self._next_track,
+                ),
+            )
+        )
+
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.TextDisplay(
+                "### 🔄 Retour automatique\n"
+                "Quand la file personnalisée est terminée, la station radio précédente reprend automatiquement."
+            )
+        )
+        container.add_item(
+            discord.ui.TextDisplay(
+                f"-# Pour contrôler la musique, rejoins d'abord <#{RADIO_VC_ID}> · Les stations restent disponibles sur le panneau Radio."
+            )
+        )
+        return container
+
+    async def _add_music(self, interaction: discord.Interaction) -> None:
         if not await self.cog.require_radio_listener(interaction):
             return
         await interaction.response.send_modal(AddMusicModal(self.cog))
 
-    @discord.ui.button(
-        label="Pause / Reprendre",
-        emoji="⏯️",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music2_pause_resume",
-        row=0,
-    )
-    async def pause_resume(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def _pause_resume(self, interaction: discord.Interaction) -> None:
         await self.cog.pause_resume(interaction)
 
-    @discord.ui.button(
-        label="Suivant",
-        emoji="⏭️",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music2_next",
-        row=0,
-    )
-    async def next_track(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def _next_track(self, interaction: discord.Interaction) -> None:
         await self.cog.skip(interaction)
 
-    @discord.ui.button(
-        label="File",
-        emoji="📃",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music2_queue",
-        row=0,
-    )
-    async def queue(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def _show_queue(self, interaction: discord.Interaction) -> None:
         await self.cog.show_queue(interaction)
 
-    @discord.ui.button(
-        label="En cours",
-        emoji="🎵",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music2_now_playing",
-        row=0,
-    )
-    async def now_playing(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def _show_now_playing(self, interaction: discord.Interaction) -> None:
         await self.cog.show_now_playing(interaction)
 
 
@@ -168,6 +267,7 @@ class Music2Cog(commands.Cog):
         return f"{minutes:d}:{seconds:02d}"
 
     def build_panel_embed(self) -> discord.Embed:
+        """Legacy data projection kept for compatibility with existing callers/tests."""
         embed = discord.Embed(
             title="🎵 Musique personnalisée",
             description=(
@@ -247,15 +347,38 @@ class Music2Cog(commands.Cog):
             logger.exception("[music2] restauration du panneau radio impossible")
 
     @staticmethod
+    def _component_custom_ids(message: discord.Message) -> set[str]:
+        """Collect custom IDs from legacy ActionRows or nested Components V2."""
+        found: set[str] = set()
+        stack = list(getattr(message, "components", []))
+        while stack:
+            component = stack.pop()
+            custom_id = getattr(component, "custom_id", None)
+            if isinstance(custom_id, str):
+                found.add(custom_id)
+            children = getattr(component, "children", None)
+            if children:
+                stack.extend(children)
+            accessory = getattr(component, "accessory", None)
+            if accessory is not None:
+                stack.append(accessory)
+        return found
+
+    @staticmethod
     def _is_music_panel(message: discord.Message) -> bool:
-        return any(
-            getattr(component, "custom_id", "") == "music2_add"
-            for row in getattr(message, "components", [])
-            for component in getattr(row, "children", [])
-        ) and not any(
-            getattr(component, "custom_id", "") == "radio_hiphop"
-            for row in getattr(message, "components", [])
-            for component in getattr(row, "children", [])
+        custom_ids = Music2Cog._component_custom_ids(message)
+        return MUSIC2_CUSTOM_IDS.issubset(custom_ids) and "radio_hiphop" not in custom_ids
+
+    def _refresh_panel_view(self) -> Music2View:
+        self.view.refresh()
+        return self.view
+
+    async def _render_music_panel(self, message: discord.Message) -> None:
+        await message.edit(
+            content=None,
+            embeds=[],
+            attachments=[],
+            view=self._refresh_panel_view(),
         )
 
     async def _ensure_panel(self) -> None:
@@ -272,11 +395,7 @@ class Music2Cog(commands.Cog):
                 message = await fetch(int(stored.get("message_id", 0)))
                 if self._is_music_panel(message):
                     self._panel_message = message
-                    await message.edit(
-                        content=None,
-                        embed=self.build_panel_embed(),
-                        view=self.view,
-                    )
+                    await self._render_music_panel(message)
                     return
             except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
                 self.store.clear_music_message()
@@ -302,20 +421,13 @@ class Music2Cog(commands.Cog):
 
         if found is None:
             try:
-                found = await text_channel.send(
-                    embed=self.build_panel_embed(),
-                    view=self.view,
-                )
+                found = await text_channel.send(view=self._refresh_panel_view())
             except (discord.Forbidden, discord.HTTPException):
                 logger.exception("[music2] création du panneau personnalisé impossible")
                 return
         else:
             try:
-                await found.edit(
-                    content=None,
-                    embed=self.build_panel_embed(),
-                    view=self.view,
-                )
+                await self._render_music_panel(found)
             except (discord.Forbidden, discord.HTTPException):
                 logger.exception("[music2] mise à jour du panneau personnalisé impossible")
                 return
@@ -331,11 +443,7 @@ class Music2Cog(commands.Cog):
         if message is None:
             return
         try:
-            await message.edit(
-                content=None,
-                embed=self.build_panel_embed(),
-                view=self.view,
-            )
+            await self._render_music_panel(message)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             self._panel_message = None
             self.store.clear_music_message()
