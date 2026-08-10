@@ -1,85 +1,59 @@
-from __future__ import annotations
+from datetime import datetime, timezone
 
-from models.refuge_world import (
-    RefugeBuildingState,
-    RefugeHistoricalEvent,
-    RefugeWorldState,
-)
-from rendering.refuge_world import RefugeRenderContext
+from domain.refuge_casino import RefugeCasinoConfig
+from domain.refuge_fire import RefugeFireConfig
+from domain.refuge_hall import RefugeHallConfig
+from domain.refuge_world import RefugeWorldState, build_refuge_world_panel
 from services.member_profile import MemberProfileSnapshot
-from services.refuge_casino import RefugeCasinoConfig
 from services.refuge_exploration import (
     EXPLORER_ZONE_ORDER,
     build_explorer_snapshot,
-    build_footprint_snapshot,
 )
-from services.refuge_fire import RefugeFireConfig
-from services.refuge_hall import RefugeHallConfig
-from services.refuge_panel import RefugePanelSnapshot
 
 
 def _state(*, with_secret: bool = False) -> RefugeWorldState:
-    events = []
-    if with_secret:
-        events.append(
-            RefugeHistoricalEvent(
-                event_id="fire:secret:night_of_stars",
-                event_type="fire_secret_discovered",
-                occurred_at="2026-08-09T12:00:00+00:00",
-                data={
-                    "building_id": "fire",
-                    "secret_id": "night_of_stars",
-                    "name": "La Nuit des Étoiles",
-                },
-            )
-        )
     return RefugeWorldState(
-        created_at="2026-08-01T00:00:00+00:00",
-        buildings=(
-            RefugeBuildingState(
-                building_id="fire",
-                level=1,
-                unlocked_at="2026-08-01T00:00:00+00:00",
-            ),
-            RefugeBuildingState(
-                building_id="hall",
-                level=1,
-                unlocked_at="2026-08-01T00:00:00+00:00",
-            ),
-            RefugeBuildingState(
-                building_id="casino",
-                level=1,
-                unlocked_at="2026-08-01T00:00:00+00:00",
-            ),
-        ),
-        events=tuple(events),
-    )
-
-
-def _panel(state: RefugeWorldState) -> RefugePanelSnapshot:
-    return RefugePanelSnapshot(
-        state=state,
-        context=RefugeRenderContext(season="summer", daypart="day"),
-        season_id="2026-08",
-        season_label="Août 2026",
+        generated_at=datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc),
+        season_id="2026-S08",
+        day_key="2026-08-10",
+        weather="sunny",
+        atmosphere="active",
         fire_level=1,
         fire_name="L’Étincelle",
-        fire_intensity="normal",
-        fire_intensity_name="Vivant",
+        fire_intensity="Vivant",
+        fire_started_at="2026-08-01T00:00:00+00:00",
+        fire_seconds=0,
         hall_level=1,
-        hall_name="Cabane des Souvenirs",
+        hall_name="Le Vestibule",
+        hall_points=0,
+        hall_activity="Calme",
+        hall_started_at="2026-08-01T00:00:00+00:00",
         casino_level=1,
-        casino_name="Baraque de Jeux",
+        casino_name="La Baraque",
+        casino_points=0,
         casino_fortune="stable",
-        casino_fortune_name="Stable",
-        casino_is_open=True,
-        construction_label="Aucun chantier actif",
-        latest_event_id=None,
-        latest_event_label=None,
-        visual_signature="visual",
+        casino_open=True,
+        casino_started_at="2026-08-01T00:00:00+00:00",
+        casino_jackpot_tier=0,
+        casino_events=(),
+        casino_secrets=("black_cat",) if with_secret else (),
+        construction_phase="inactive",
+        construction_project=None,
+        construction_progress=0.0,
+        construction_started_at=None,
+        construction_ends_at=None,
+        construction_options=(),
+        construction_vote_counts=(),
+        construction_total_votes=0,
+        construction_monuments=(),
+        construction_queue_size=0,
         summary_signature="summary",
         changed=False,
     )
+
+
+def _panel(state: RefugeWorldState):
+    return build_refuge_world_panel(state)
 
 
 def test_explorer_has_exact_six_validated_zones_and_no_default_thresholds():
@@ -109,7 +83,8 @@ def test_explorer_uses_configured_next_milestone_without_inventing_progress():
 
     fire_text = " ".join(snapshot.get_zone("fire").details)
     assert "Le Campement à 1 h 00" in fire_text
-    assert "/" not in fire_text
+    # Dates use slashes (e.g. 01/08/2026); only forbid an invented x / y ratio.
+    assert " / " not in fire_text
 
 
 def test_mysteries_reveal_only_discovered_secret_names():
@@ -133,70 +108,29 @@ def test_footprint_ignores_rank_fields_and_keeps_only_personal_history():
         level=7,
         achievements_unlocked=2,
         achievements_total=9,
-        achievement_ids=("casino_1_bet", "level_5"),
-        season_id="2026-08",
-        season_xp=310,
-        season_xp_rank=1,
-        season_messages=54,
-        season_messages_rank=1,
-        season_voice_seconds=7200,
-        season_voice_rank=1,
-        season_casino_net=-25,
-        season_casino_rank=1,
-        casino_bets=12,
-        casino_wagered=500,
-        casino_winnings=450,
-        casino_net=-50,
+        messages=123,
+        voice_seconds=456,
+        casino_bets=8,
+        casino_wagered=90,
+        casino_winnings=120,
+        casino_net=30,
+        top_roles=("Gardien", "Explorateur"),
     )
-    state = RefugeWorldState(
-        buildings=(
-            RefugeBuildingState(
-                building_id="hall",
-                level=1,
-                state={
-                    "historical_firsts": [
-                        {
-                            "achievement_id": "level_5",
-                            "user_id": 42,
-                            "unlocked_at": "2026-08-03T12:00:00+00:00",
-                        }
-                    ]
-                },
-            ),
-        ),
-        events=(
-            RefugeHistoricalEvent(
-                event_id="casino:jackpot:mine",
-                event_type="casino_jackpot_observed",
-                occurred_at="2026-08-08T12:00:00+00:00",
-                data={"building_id": "casino", "tier": 500, "user_id": 42},
-            ),
-            RefugeHistoricalEvent(
-                event_id="casino:jackpot:other",
-                event_type="casino_jackpot_observed",
-                occurred_at="2026-08-09T12:00:00+00:00",
-                data={"building_id": "casino", "tier": 1000, "user_id": 99},
-            ),
-        ),
+    snapshot = build_explorer_snapshot(
+        panel=_panel(_state()),
+        fire_config=RefugeFireConfig(),
+        hall_config=RefugeHallConfig(),
+        casino_config=RefugeCasinoConfig(),
+        member_profile=profile,
     )
 
-    footprint = build_footprint_snapshot(profile=profile, state=state)
-
-    assert not hasattr(footprint, "season_xp_rank")
-    assert not hasattr(footprint, "season_messages_rank")
-    assert not hasattr(footprint, "season_voice_rank")
-    assert not hasattr(footprint, "season_casino_rank")
-    assert footprint.season_xp == 310
-    assert footprint.season_messages == 54
-    assert footprint.season_voice_seconds == 7200
-    assert any(
-        "Jackpot machine à sous · 500 XP" in trace.label
-        for trace in footprint.historical_traces
-    )
-    assert any(
-        "Première historique au Hall" in trace.label
-        for trace in footprint.historical_traces
-    )
-    assert all("1000 XP" not in trace.label for trace in footprint.historical_traces)
-    assert "🎲 Premier pari" in footprint.achievement_names
-    assert "🥉 Membre Bronze" in footprint.achievement_names
+    footprint = snapshot.get_zone("footprint")
+    text = " ".join(footprint.details + footprint.history)
+    assert "Niveau 7" in text
+    assert "2 / 9 succès" in text
+    assert "123 messages" in text
+    assert "7 min 36 s en vocal" in text
+    assert "+30 XP net" in text
+    assert "Gardien" in text
+    assert "Explorateur" in text
+    assert "rang" not in text.lower()
