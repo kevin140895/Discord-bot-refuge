@@ -55,7 +55,7 @@ def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
     return min(max(value, minimum), maximum)
 
 
-AI_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest").strip() or "mistral-small-latest"
+AI_MODEL = os.getenv("MISTRAL_MODEL", "mistral-medium-3-5").strip() or "mistral-medium-3-5"
 AI_API_URL = (
     os.getenv("MISTRAL_API_URL", "https://api.mistral.ai/v1/chat/completions").strip()
     or "https://api.mistral.ai/v1/chat/completions"
