@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque
@@ -48,6 +49,10 @@ MUSIC2_EXTRACTION_ATTEMPTS = 2
 MUSIC2_EXTRACTION_RETRY_DELAY_SECONDS = 0.75
 MUSIC2_SEARCH_CANDIDATES = 5
 MUSIC2_SEARCH_SUFFIX = "audio"
+# Direct media URLs returned by yt-dlp are short-lived. Reuse a freshly resolved
+# URL to avoid immediately querying YouTube twice, but refresh queued tracks once
+# the cached resolution is old enough that expiry becomes plausible.
+MUSIC2_STREAM_CACHE_TTL_SECONDS = 300.0
 
 
 @dataclass(slots=True)
@@ -57,6 +62,9 @@ class MusicTrack:
     requester_id: int
     duration: int | None = None
     uploader: str | None = None
+    cached_stream_url: str | None = None
+    cached_stream_headers: str | None = None
+    cached_stream_resolved_at: float | None = None
 
 
 class AddMusicModal(discord.ui.Modal, title="Ajouter une musique"):
@@ -670,6 +678,26 @@ class Music2Cog(commands.Cog):
                 raise last_error
             raise RuntimeError("Recherche yt-dlp impossible")
 
+    @staticmethod
+    def _stream_from_info(info: dict) -> tuple[str, str | None]:
+        stream_url = str(info.get("url") or "")
+        if not stream_url:
+            formats = info.get("formats") or []
+            for fmt in reversed(formats):
+                if fmt and fmt.get("url"):
+                    stream_url = str(fmt["url"])
+                    break
+        if not stream_url:
+            raise RuntimeError("Flux audio introuvable")
+
+        raw_headers = info.get("http_headers")
+        headers = None
+        if isinstance(raw_headers, dict) and raw_headers:
+            headers = "\r\n".join(
+                f"{key}: {value}" for key, value in raw_headers.items()
+            ) + "\r\n"
+        return stream_url, headers
+
     def _track_from_info(self, info: dict, requester_id: int) -> MusicTrack:
         title = str(info.get("title") or "Titre inconnu")
         webpage_url = str(
@@ -686,12 +714,27 @@ class Music2Cog(commands.Cog):
         except (TypeError, ValueError):
             duration = None
         uploader = info.get("uploader")
+
+        cached_stream_url = None
+        cached_stream_headers = None
+        cached_stream_resolved_at = None
+        try:
+            cached_stream_url, cached_stream_headers = self._stream_from_info(info)
+            cached_stream_resolved_at = time.monotonic()
+        except RuntimeError:
+            # Some extractors can return useful metadata before exposing a
+            # playable format. In that case playback will resolve it normally.
+            pass
+
         return MusicTrack(
             title=title,
             webpage_url=webpage_url,
             requester_id=requester_id,
             duration=duration,
             uploader=str(uploader) if uploader else None,
+            cached_stream_url=cached_stream_url,
+            cached_stream_headers=cached_stream_headers,
+            cached_stream_resolved_at=cached_stream_resolved_at,
         )
 
     async def add_track_from_interaction(
@@ -738,9 +781,10 @@ class Music2Cog(commands.Cog):
             return
 
         logger.info(
-            "[music2] recherche résolue requester=%s titre=%r",
+            "[music2] recherche résolue requester=%s titre=%r flux_prêt=%s",
             member.id,
             track.title,
+            bool(track.cached_stream_url),
         )
         self.queue.append(track)
         position = len(self.queue)
@@ -758,23 +802,28 @@ class Music2Cog(commands.Cog):
         await self.refresh_panel()
 
     async def _resolve_stream(self, track: MusicTrack) -> tuple[str, str | None]:
-        info = await self._extract_info(track.webpage_url, purpose="résolution flux")
-        stream_url = str(info.get("url") or "")
-        if not stream_url:
-            formats = info.get("formats") or []
-            for fmt in reversed(formats):
-                if fmt and fmt.get("url"):
-                    stream_url = str(fmt["url"])
-                    break
-        if not stream_url:
-            raise RuntimeError("Flux audio introuvable")
+        resolved_at = track.cached_stream_resolved_at
+        if track.cached_stream_url and resolved_at is not None:
+            cache_age = max(time.monotonic() - resolved_at, 0.0)
+            if cache_age <= MUSIC2_STREAM_CACHE_TTL_SECONDS:
+                logger.info(
+                    "[music2] flux réutilisé titre=%r âge=%.1fs headers=%s",
+                    track.title,
+                    cache_age,
+                    bool(track.cached_stream_headers),
+                )
+                return track.cached_stream_url, track.cached_stream_headers
+            logger.info(
+                "[music2] flux en cache expiré titre=%r âge=%.1fs; résolution fraîche",
+                track.title,
+                cache_age,
+            )
 
-        raw_headers = info.get("http_headers")
-        headers = None
-        if isinstance(raw_headers, dict) and raw_headers:
-            headers = "\r\n".join(
-                f"{key}: {value}" for key, value in raw_headers.items()
-            ) + "\r\n"
+        info = await self._extract_info(track.webpage_url, purpose="résolution flux")
+        stream_url, headers = self._stream_from_info(info)
+        track.cached_stream_url = stream_url
+        track.cached_stream_headers = headers
+        track.cached_stream_resolved_at = time.monotonic()
         logger.info(
             "[music2] flux résolu titre=%r headers=%s",
             track.title,
