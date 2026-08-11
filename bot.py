@@ -32,6 +32,12 @@ from utils import level_feed
 limiter: Final[GlobalRateLimiter] = _limiter
 logger = logging.getLogger(__name__)
 
+# The dedicated RockRadioCog is a legacy duplicate. Rock playback is handled by
+# RadioCog, which switches the main radio channel to ROCK_RADIO_STREAM_URL.
+# Keep the legacy module in the repository for reference/tests, but never load it
+# automatically in production.
+LEGACY_DISABLED_COGS: Final[frozenset[str]] = frozenset({"rock_radio"})
+
 
 async def reset_http_error_counter() -> None:
     """Reset the HTTP error counter (placeholder)."""
@@ -68,7 +74,7 @@ class RefugeBot(commands.Bot):
         discovered = list(pkgutil.iter_modules(cogs.__path__))
         loaded_names = set()
         for module in discovered:
-            if module.name in DISABLED_COGS:
+            if module.name in DISABLED_COGS or module.name in LEGACY_DISABLED_COGS:
                 logger.info("Skipping disabled cog: %s", module.name)
                 continue
             await self.load_extension(f"{cogs.__name__}.{module.name}")
