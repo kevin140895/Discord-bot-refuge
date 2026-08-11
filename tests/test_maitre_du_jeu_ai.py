@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -6,45 +5,55 @@ import pytest
 from cogs.maitre_du_jeu_ai import AIReply, AIStatus, MaitreDuJeuAI
 
 
-def _fake_client(*responses):
-    create = AsyncMock(side_effect=list(responses))
-    return SimpleNamespace(responses=SimpleNamespace(create=create)), create
+def _success_payload(text: str) -> dict:
+    return {"choices": [{"message": {"content": text}}]}
+
+
+def _fake_requester(*responses):
+    return AsyncMock(side_effect=list(responses))
 
 
 @pytest.mark.asyncio
-async def test_ai_success_uses_responses_api_without_tools_or_storage():
-    client, create = _fake_client(SimpleNamespace(output_text="Bonjour depuis l'IA."))
+async def test_ai_success_uses_mistral_chat_without_tools():
+    requester = _fake_requester(
+        (200, _success_payload("Bonjour depuis Mistral."), {"x-request-id": "req-1"})
+    )
     ai = MaitreDuJeuAI(
-        client=client,
-        model="gpt-5-mini",
+        requester=requester,
+        api_key="",
+        model="mistral-small-latest",
         user_cooldown_seconds=0,
         max_requests_per_window=5,
     )
 
     reply = await ai.answer(42, "Raconte-moi une anecdote.")
 
-    assert reply == AIReply(AIStatus.SUCCESS, text="Bonjour depuis l'IA.")
-    create.assert_awaited_once()
-    kwargs = create.await_args.kwargs
-    assert kwargs["model"] == "gpt-5-mini"
-    assert kwargs["store"] is False
-    assert kwargs["max_output_tokens"] == ai.max_output_tokens
-    assert "lecture seule" in kwargs["instructions"]
-    assert "tools" not in kwargs
-    assert kwargs["input"] == [
-        {"role": "user", "content": "Raconte-moi une anecdote."}
-    ]
+    assert reply == AIReply(AIStatus.SUCCESS, text="Bonjour depuis Mistral.")
+    requester.assert_awaited_once()
+    payload = requester.await_args.args[0]
+    assert payload["model"] == "mistral-small-latest"
+    assert payload["max_tokens"] == ai.max_output_tokens
+    assert payload["tool_choice"] == "none"
+    assert payload["safe_prompt"] is True
+    assert "tools" not in payload
+    assert payload["messages"][0]["role"] == "system"
+    assert "lecture seule" in payload["messages"][0]["content"]
+    assert payload["messages"][1] == {
+        "role": "user",
+        "content": "Raconte-moi une anecdote.",
+    }
 
 
 @pytest.mark.asyncio
 async def test_ai_keeps_only_short_local_conversation_context():
     clock = [100.0]
-    client, create = _fake_client(
-        SimpleNamespace(output_text="Première réponse."),
-        SimpleNamespace(output_text="Deuxième réponse."),
+    requester = _fake_requester(
+        (200, _success_payload("Première réponse."), {}),
+        (200, _success_payload("Deuxième réponse."), {}),
     )
     ai = MaitreDuJeuAI(
-        client=client,
+        requester=requester,
+        api_key="",
         clock=lambda: clock[0],
         user_cooldown_seconds=0,
         memory_max_messages=4,
@@ -57,8 +66,9 @@ async def test_ai_keeps_only_short_local_conversation_context():
 
     assert first.status is AIStatus.SUCCESS
     assert second.status is AIStatus.SUCCESS
-    second_input = create.await_args_list[1].kwargs["input"]
-    assert second_input == [
+    second_messages = requester.await_args_list[1].args[0]["messages"]
+    assert second_messages[0]["role"] == "system"
+    assert second_messages[1:] == [
         {"role": "user", "content": "Première question"},
         {"role": "assistant", "content": "Première réponse."},
         {"role": "user", "content": "Deuxième question"},
@@ -68,12 +78,13 @@ async def test_ai_keeps_only_short_local_conversation_context():
 @pytest.mark.asyncio
 async def test_ai_memory_expires_after_ttl():
     clock = [100.0]
-    client, create = _fake_client(
-        SimpleNamespace(output_text="Première réponse."),
-        SimpleNamespace(output_text="Nouvelle réponse."),
+    requester = _fake_requester(
+        (200, _success_payload("Première réponse."), {}),
+        (200, _success_payload("Nouvelle réponse."), {}),
     )
     ai = MaitreDuJeuAI(
-        client=client,
+        requester=requester,
+        api_key="",
         clock=lambda: clock[0],
         user_cooldown_seconds=0,
         memory_ttl_seconds=10,
@@ -84,7 +95,9 @@ async def test_ai_memory_expires_after_ttl():
     clock[0] += 11
     await ai.answer(7, "Question après expiration")
 
-    assert create.await_args_list[1].kwargs["input"] == [
+    second_messages = requester.await_args_list[1].args[0]["messages"]
+    assert second_messages[0]["role"] == "system"
+    assert second_messages[1:] == [
         {"role": "user", "content": "Question après expiration"}
     ]
 
@@ -92,9 +105,10 @@ async def test_ai_memory_expires_after_ttl():
 @pytest.mark.asyncio
 async def test_ai_enforces_per_user_cooldown_before_second_api_call():
     clock = [100.0]
-    client, create = _fake_client(SimpleNamespace(output_text="Réponse."))
+    requester = _fake_requester((200, _success_payload("Réponse."), {}))
     ai = MaitreDuJeuAI(
-        client=client,
+        requester=requester,
+        api_key="",
         clock=lambda: clock[0],
         user_cooldown_seconds=8,
         max_requests_per_window=5,
@@ -107,15 +121,16 @@ async def test_ai_enforces_per_user_cooldown_before_second_api_call():
     assert first.status is AIStatus.SUCCESS
     assert second.status is AIStatus.COOLDOWN
     assert second.retry_after == pytest.approx(5.0)
-    assert create.await_count == 1
+    assert requester.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_ai_enforces_rolling_request_quota():
     clock = [100.0]
-    client, create = _fake_client(SimpleNamespace(output_text="Réponse."))
+    requester = _fake_requester((200, _success_payload("Réponse."), {}))
     ai = MaitreDuJeuAI(
-        client=client,
+        requester=requester,
+        api_key="",
         clock=lambda: clock[0],
         user_cooldown_seconds=0,
         user_window_seconds=60,
@@ -129,11 +144,11 @@ async def test_ai_enforces_rolling_request_quota():
     assert first.status is AIStatus.SUCCESS
     assert second.status is AIStatus.QUOTA
     assert second.retry_after == pytest.approx(59.0)
-    assert create.await_count == 1
+    assert requester.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_ai_unavailable_without_api_key_never_attempts_request():
+async def test_ai_unavailable_without_mistral_api_key():
     ai = MaitreDuJeuAI(api_key="")
 
     reply = await ai.answer(7, "Question générale")
@@ -143,11 +158,10 @@ async def test_ai_unavailable_without_api_key_never_attempts_request():
 
 @pytest.mark.asyncio
 async def test_ai_api_failure_returns_safe_error_status():
-    client = SimpleNamespace(
-        responses=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("boom")))
-    )
+    requester = AsyncMock(side_effect=RuntimeError("boom"))
     ai = MaitreDuJeuAI(
-        client=client,
+        requester=requester,
+        api_key="",
         user_cooldown_seconds=0,
         max_requests_per_window=5,
     )
@@ -159,10 +173,85 @@ async def test_ai_api_failure_returns_safe_error_status():
 
 
 @pytest.mark.asyncio
-async def test_ai_rejects_oversized_question_before_api_call():
-    client, create = _fake_client(SimpleNamespace(output_text="Ne doit pas être appelée"))
+async def test_ai_mistral_rate_limit_maps_to_temporary_quota():
+    requester = _fake_requester(
+        (
+            429,
+            {"message": "rate limited"},
+            {"x-request-id": "req-rate", "Retry-After": "12"},
+        )
+    )
     ai = MaitreDuJeuAI(
-        client=client,
+        requester=requester,
+        api_key="",
+        user_cooldown_seconds=0,
+        max_requests_per_window=5,
+    )
+
+    reply = await ai.answer(7, "Question générale")
+
+    assert reply.status is AIStatus.QUOTA
+    assert reply.retry_after == pytest.approx(12.0)
+
+
+@pytest.mark.asyncio
+async def test_ai_mistral_auth_rejection_is_unavailable():
+    requester = _fake_requester(
+        (401, {"message": "unauthorized"}, {"x-request-id": "req-auth"})
+    )
+    ai = MaitreDuJeuAI(
+        requester=requester,
+        api_key="",
+        user_cooldown_seconds=0,
+        max_requests_per_window=5,
+    )
+
+    reply = await ai.answer(7, "Question générale")
+
+    assert reply.status is AIStatus.UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_ai_accepts_structured_mistral_content_parts():
+    requester = _fake_requester(
+        (
+            200,
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": [
+                                {"type": "text", "text": "Première partie."},
+                                {"type": "text", "text": "Deuxième partie."},
+                            ]
+                        }
+                    }
+                ]
+            },
+            {},
+        )
+    )
+    ai = MaitreDuJeuAI(
+        requester=requester,
+        api_key="",
+        user_cooldown_seconds=0,
+        max_requests_per_window=5,
+    )
+
+    reply = await ai.answer(7, "Question générale")
+
+    assert reply.status is AIStatus.SUCCESS
+    assert reply.text == "Première partie.\nDeuxième partie."
+
+
+@pytest.mark.asyncio
+async def test_ai_rejects_oversized_question_before_api_call():
+    requester = _fake_requester(
+        (200, _success_payload("Ne doit pas être appelée"), {})
+    )
+    ai = MaitreDuJeuAI(
+        requester=requester,
+        api_key="",
         question_max_chars=10,
         user_cooldown_seconds=0,
     )
@@ -170,4 +259,4 @@ async def test_ai_rejects_oversized_question_before_api_call():
     reply = await ai.answer(7, "Cette question est beaucoup trop longue")
 
     assert reply.status is AIStatus.TOO_LONG
-    create.assert_not_awaited()
+    requester.assert_not_awaited()
