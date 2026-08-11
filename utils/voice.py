@@ -82,12 +82,14 @@ def play_stream(
     *,
     after: Optional[Callable[[Optional[Exception]], None]] = None,
     headers: Optional[str] = None,
+    on_demand: bool = False,
 ) -> None:
     """Lance la lecture du flux ``stream_url`` si rien n'est joué.
 
     Les radios live conservent le profil faible latence historique. Les flux
-    à la demande résolus par yt-dlp fournissent des en-têtes HTTP ; ils utilisent
-    alors un profil FFmpeg séparé avec buffering normal et reconnexion réseau.
+    à la demande utilisent un profil FFmpeg séparé avec buffering normal et
+    reconnexion réseau. ``on_demand`` permet de sélectionner explicitement ce
+    profil même lorsque yt-dlp ne fournit aucun en-tête HTTP.
     """
     if voice and not voice.is_playing():
         if shutil.which("ffmpeg") is None:
@@ -95,9 +97,15 @@ def play_stream(
             return
 
         header_value = headers.strip() if headers else ""
-        is_on_demand = bool(header_value)
+        is_on_demand = on_demand or bool(header_value)
         before_options = FFMPEG_VOD_BEFORE if is_on_demand else FFMPEG_BEFORE
         ffmpeg_options = FFMPEG_VOD_OPTIONS if is_on_demand else FFMPEG_OPTIONS
+
+        logger.debug(
+            "Profil FFmpeg sélectionné: %s (headers=%s)",
+            "vod" if is_on_demand else "radio",
+            bool(header_value),
+        )
 
         if header_value:
             before_options = f"{before_options} -headers {shlex.quote(header_value)}"

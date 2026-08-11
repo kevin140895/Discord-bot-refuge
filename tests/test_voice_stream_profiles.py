@@ -70,3 +70,29 @@ def test_on_demand_stream_uses_buffered_reconnect_profile(monkeypatch):
     assert "thread_queue_size 4096" in captured["before_options"]
     assert "nobuffer" not in captured["before_options"]
     assert "User-Agent: yt-dlp" in captured["before_options"]
+
+
+def test_on_demand_stream_without_headers_still_uses_vod_profile(monkeypatch):
+    captured = {}
+
+    def fake_ffmpeg(source, *, before_options, options):
+        captured.update(
+            source=source,
+            before_options=before_options,
+            options=options,
+        )
+        return object()
+
+    monkeypatch.setattr(voice_utils.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(voice_utils.discord, "FFmpegPCMAudio", fake_ffmpeg)
+
+    voice = DummyVoice()
+    voice_utils.play_stream(
+        voice,
+        "https://cdn.example/audio",
+        on_demand=True,
+    )
+
+    assert captured["options"] == FFMPEG_VOD_OPTIONS
+    assert captured["before_options"] == FFMPEG_VOD_BEFORE
+    assert "nobuffer" not in captured["before_options"]
