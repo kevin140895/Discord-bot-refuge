@@ -1,8 +1,9 @@
 """Assistant Maître du jeu déclenché par une mention directe du bot.
 
-La V2 enrichit la V1 avec des réponses contextuelles en lecture seule : état XP,
-Double XP personnel, catalogue boutique et état radio. Aucun chemin de cette cog
-n'exécute de commande métier ni ne modifie l'économie, l'XP ou la radio.
+La V3 conserve toutes les réponses déterministes V2 en priorité et ajoute un
+fallback conversationnel OpenAI strictement en lecture seule pour les questions
+inconnues. Aucun chemin de cette cog ne donne à l'IA un accès métier à Discord,
+l'économie, l'XP, la boutique ou la radio.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from enum import Enum
 import discord
 from discord.ext import commands
 
+from cogs.maitre_du_jeu_ai import AIReply, AIStatus, MaitreDuJeuAI
 from config import (
     RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
@@ -214,7 +216,7 @@ def _load_shop_snapshot() -> dict[str, dict]:
 
 
 def build_response(intent: AssistantIntent) -> discord.Embed:
-    """Construit les réponses statiques et les fallbacks de la V2."""
+    """Construit les réponses statiques et les fallbacks de l'assistant."""
 
     if intent is AssistantIntent.COMMANDS:
         embed = discord.Embed(
@@ -229,11 +231,11 @@ def build_response(intent: AssistantIntent) -> discord.Embed:
         )
     elif intent is AssistantIntent.UNKNOWN:
         embed = discord.Embed(
-            title="🤖 Maître du jeu · V2",
+            title="🤖 Maître du jeu · V3",
             description=(
-                "Je n'ai pas encore appris à répondre à cette question.\n\n"
-                "Je peux aider sur **l'XP, les niveaux, le Double XP, la boutique, "
-                "le Ticket Royal, la radio et les commandes**."
+                "Mon module conversationnel IA n'est pas disponible pour cette réponse.\n\n"
+                "Mes fonctions fiables restent disponibles pour **l'XP, les niveaux, "
+                "le Double XP, la boutique, le Ticket Royal, la radio et les commandes**."
             ),
             colour=discord.Colour.orange(),
         )
@@ -242,17 +244,18 @@ def build_response(intent: AssistantIntent) -> discord.Embed:
             title="🤖 Maître du jeu",
             description=(
                 "Je suis là pour t'aider à comprendre le Refuge.\n\n"
-                "Tu peux maintenant me demander par exemple :\n"
+                "Tu peux me demander par exemple :\n"
                 "• `combien j'ai d'XP ?`\n"
                 "• `mon Double XP est actif ?`\n"
                 "• `combien coûte le Ticket Royal ?`\n"
                 "• `la radio fonctionne ?`\n"
-                "• `pourquoi je n'ai pas gagné d'XP ?`"
+                "• `pourquoi je n'ai pas gagné d'XP ?`\n"
+                "• ou me poser une **question générale** pour utiliser le mode conversationnel."
             ),
             colour=discord.Colour.blurple(),
         )
 
-    embed.set_footer(text="Maître du jeu · Assistant V2 en test")
+    embed.set_footer(text="Maître du jeu · Assistant V3 · lecture seule")
     return embed
 
 
@@ -467,6 +470,59 @@ async def build_live_response(
     return build_response(intent)
 
 
+def _format_retry_after(seconds: float | None) -> str:
+    if seconds is None or seconds <= 1:
+        return "quelques secondes"
+    if seconds < 60:
+        return f"{max(1, int(seconds + 0.999))} s"
+    minutes = max(1, int((seconds + 59) // 60))
+    return f"{minutes} min"
+
+
+def build_ai_response(reply: AIReply) -> discord.Embed:
+    """Transforme le résultat du fallback IA en réponse Discord bornée."""
+
+    if reply.status is AIStatus.SUCCESS and reply.text:
+        embed = discord.Embed(
+            title="🤖 Maître du jeu · Conversation",
+            description=reply.text,
+            colour=discord.Colour.blurple(),
+        )
+        embed.set_footer(text="Maître du jeu · Assistant V3 · IA en lecture seule")
+        return embed
+
+    if reply.status is AIStatus.COOLDOWN:
+        embed = discord.Embed(
+            title="⏳ Maître du jeu · Patience",
+            description=(
+                "Le mode conversationnel est limité pour éviter le spam et maîtriser "
+                f"les coûts. Réessaie dans **{_format_retry_after(reply.retry_after)}**."
+            ),
+            colour=discord.Colour.orange(),
+        )
+    elif reply.status is AIStatus.QUOTA:
+        embed = discord.Embed(
+            title="🛡️ Maître du jeu · Limite IA",
+            description=(
+                "Tu as atteint la limite temporaire du mode conversationnel. "
+                f"Il sera de nouveau disponible dans environ **{_format_retry_after(reply.retry_after)}**.\n\n"
+                "Les réponses déterministes XP, boutique, radio et Double XP restent disponibles."
+            ),
+            colour=discord.Colour.orange(),
+        )
+    elif reply.status is AIStatus.TOO_LONG:
+        embed = discord.Embed(
+            title="✂️ Maître du jeu · Question trop longue",
+            description="Raccourcis ta question puis mentionne-moi à nouveau.",
+            colour=discord.Colour.orange(),
+        )
+    else:
+        return build_response(AssistantIntent.UNKNOWN)
+
+    embed.set_footer(text="Maître du jeu · Assistant V3 · protection anti-abus")
+    return embed
+
+
 class MaitreDuJeuCog(commands.Cog):
     """Répond aux messages qui mentionnent directement le compte du bot."""
 
@@ -475,6 +531,7 @@ class MaitreDuJeuCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._last_reply_at: dict[int, float] = {}
+        self.ai = MaitreDuJeuAI()
 
     def _is_on_cooldown(self, user_id: int) -> bool:
         now = time.monotonic()
@@ -504,11 +561,15 @@ class MaitreDuJeuCog(commands.Cog):
 
         question = extract_question(message.content, bot_user.id)
         intent = classify_question(question)
-        embed = await build_live_response(
-            intent,
-            bot=self.bot,
-            user_id=message.author.id,
-        )
+        if intent is AssistantIntent.UNKNOWN:
+            ai_reply = await self.ai.answer(message.author.id, question)
+            embed = build_ai_response(ai_reply)
+        else:
+            embed = await build_live_response(
+                intent,
+                bot=self.bot,
+                user_id=message.author.id,
+            )
         await message.reply(
             embed=embed,
             mention_author=False,
