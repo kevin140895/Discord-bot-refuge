@@ -50,7 +50,8 @@ def _normalize_text(value: str) -> str:
     without_accents = "".join(
         char for char in decomposed if not unicodedata.combining(char)
     )
-    return " ".join(without_accents.split())
+    without_apostrophes = re.sub(r"['’]", " ", without_accents)
+    return " ".join(without_apostrophes.split())
 
 
 def extract_question(content: str, bot_user_id: int) -> str:
