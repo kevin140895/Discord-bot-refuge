@@ -37,6 +37,16 @@ MUSIC2_CUSTOM_IDS = frozenset(
     }
 )
 
+# yt-dlp already has internal retry mechanisms, but Music 2.0 also performs a
+# small application-level retry because a transient YouTube extraction failure
+# should not immediately abort a user request. Network calls are bounded so one
+# bad extractor request cannot hang the interaction indefinitely.
+MUSIC2_YTDLP_SOCKET_TIMEOUT_SECONDS = 15.0
+MUSIC2_YTDLP_RETRIES = 3
+MUSIC2_YTDLP_EXTRACTOR_RETRIES = 3
+MUSIC2_EXTRACTION_ATTEMPTS = 2
+MUSIC2_EXTRACTION_RETRY_DELAY_SECONDS = 0.75
+
 
 @dataclass(slots=True)
 class MusicTrack:
@@ -484,6 +494,9 @@ class Music2Cog(commands.Cog):
             "no_warnings": True,
             "noplaylist": True,
             "skip_download": True,
+            "socket_timeout": MUSIC2_YTDLP_SOCKET_TIMEOUT_SECONDS,
+            "retries": MUSIC2_YTDLP_RETRIES,
+            "extractor_retries": MUSIC2_YTDLP_EXTRACTOR_RETRIES,
         }
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(lookup, download=False)
@@ -496,9 +509,46 @@ class Music2Cog(commands.Cog):
                 raise RuntimeError("Aucun résultat exploitable")
             return dict(info)
 
-    async def _extract_info(self, target: str) -> dict:
+    async def _extract_info(self, target: str, *, purpose: str = "extraction") -> dict:
         async with self._extract_lock:
-            return await asyncio.to_thread(self._extract_info_sync, target)
+            last_error: Exception | None = None
+            for attempt in range(1, MUSIC2_EXTRACTION_ATTEMPTS + 1):
+                try:
+                    logger.info(
+                        "[music2] yt-dlp %s tentative %d/%d",
+                        purpose,
+                        attempt,
+                        MUSIC2_EXTRACTION_ATTEMPTS,
+                    )
+                    info = await asyncio.to_thread(self._extract_info_sync, target)
+                    if attempt > 1:
+                        logger.info(
+                            "[music2] yt-dlp %s rétabli à la tentative %d",
+                            purpose,
+                            attempt,
+                        )
+                    return info
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= MUSIC2_EXTRACTION_ATTEMPTS:
+                        logger.warning(
+                            "[music2] yt-dlp %s échec après %d tentative(s): %s",
+                            purpose,
+                            attempt,
+                            exc,
+                        )
+                        break
+                    logger.warning(
+                        "[music2] yt-dlp %s tentative %d échouée: %s; nouvel essai",
+                        purpose,
+                        attempt,
+                        exc,
+                    )
+                    await asyncio.sleep(MUSIC2_EXTRACTION_RETRY_DELAY_SECONDS)
+
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("Extraction yt-dlp impossible")
 
     def _track_from_info(self, info: dict, requester_id: int) -> MusicTrack:
         title = str(info.get("title") or "Titre inconnu")
@@ -543,8 +593,15 @@ class Music2Cog(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
+        target = query.strip()
+        mode = "url" if urlparse(target).scheme in {"http", "https"} else "texte"
+        logger.info(
+            "[music2] recherche demandée requester=%s mode=%s",
+            member.id,
+            mode,
+        )
         try:
-            info = await self._extract_info(query.strip())
+            info = await self._extract_info(target, purpose="recherche")
             track = self._track_from_info(info, member.id)
         except Exception as exc:
             logger.warning("[music2] recherche impossible: %s", exc)
@@ -554,6 +611,11 @@ class Music2Cog(commands.Cog):
             )
             return
 
+        logger.info(
+            "[music2] recherche résolue requester=%s titre=%r",
+            member.id,
+            track.title,
+        )
         self.queue.append(track)
         position = len(self.queue)
         if self.current is None:
@@ -570,7 +632,7 @@ class Music2Cog(commands.Cog):
         await self.refresh_panel()
 
     async def _resolve_stream(self, track: MusicTrack) -> tuple[str, str | None]:
-        info = await self._extract_info(track.webpage_url)
+        info = await self._extract_info(track.webpage_url, purpose="résolution flux")
         stream_url = str(info.get("url") or "")
         if not stream_url:
             formats = info.get("formats") or []
@@ -587,6 +649,11 @@ class Music2Cog(commands.Cog):
             headers = "\r\n".join(
                 f"{key}: {value}" for key, value in raw_headers.items()
             ) + "\r\n"
+        logger.info(
+            "[music2] flux résolu titre=%r headers=%s",
+            track.title,
+            bool(headers),
+        )
         return stream_url, headers
 
     async def _suspend_radio(self) -> object:
@@ -597,6 +664,10 @@ class Music2Cog(commands.Cog):
         if self._radio_restore_stream is None:
             current_stream = getattr(radio, "stream_url", None)
             self._radio_restore_stream = current_stream or RADIO_STREAM_URL
+            logger.info(
+                "[music2] radio suspendue station=%s",
+                self._station_label(self._radio_restore_stream),
+            )
 
         radio.stream_url = None
         voice = getattr(radio, "voice", None)
@@ -623,6 +694,11 @@ class Music2Cog(commands.Cog):
             generation = self._generation
 
             try:
+                logger.info(
+                    "[music2] préparation lecture titre=%r génération=%d",
+                    track.title,
+                    generation,
+                )
                 radio = await self._suspend_radio()
                 stream_url, headers = await self._resolve_stream(track)
                 voice = radio.voice
@@ -635,9 +711,20 @@ class Music2Cog(commands.Cog):
                         self.bot.loop,
                     )
 
-                play_stream(voice, stream_url, after=after, headers=headers)
+                play_stream(
+                    voice,
+                    stream_url,
+                    after=after,
+                    headers=headers,
+                    on_demand=True,
+                )
                 if not voice.is_playing() and not voice.is_paused():
                     raise RuntimeError("Le lecteur audio n'a pas démarré")
+                logger.info(
+                    "[music2] lecture démarrée titre=%r génération=%d",
+                    track.title,
+                    generation,
+                )
             except Exception:
                 logger.exception("[music2] lecture de %s impossible", track.webpage_url)
                 self.current = None
@@ -652,12 +739,20 @@ class Music2Cog(commands.Cog):
         self, generation: int, error: Exception | None
     ) -> None:
         if generation != self._generation:
+            logger.debug(
+                "[music2] callback audio obsolète ignoré génération=%d active=%d",
+                generation,
+                self._generation,
+            )
             return
         if error:
             logger.warning("[music2] fin de piste avec erreur: %s", error)
+        else:
+            logger.info("[music2] fin de piste génération=%d", generation)
 
         radio = self._radio_cog()
         if radio is not None and getattr(radio, "stream_url", None):
+            logger.info("[music2] reprise radio manuelle détectée; file annulée")
             self.current = None
             self.queue.clear()
             self._radio_restore_stream = None
@@ -670,19 +765,40 @@ class Music2Cog(commands.Cog):
     async def _restore_radio(self) -> None:
         radio = self._radio_cog()
         if radio is None:
-            self._radio_restore_stream = None
+            logger.warning("[music2] restauration impossible: RadioCog indisponible")
             return
 
         stream_url = self._radio_restore_stream or RADIO_STREAM_URL
-        self._radio_restore_stream = None
         radio.stream_url = stream_url
+        logger.info(
+            "[music2] restauration radio station=%s",
+            self._station_label(stream_url),
+        )
         try:
             await radio._connect_and_play()
-            channel = self.bot.get_channel(RADIO_VC_ID)
-            if isinstance(channel, discord.VoiceChannel):
-                await radio._rename_for_stream(channel, stream_url)
         except Exception:
+            # Ne pas perdre la station cible : une prochaine tentative peut
+            # encore restaurer exactement la station active avant Music 2.0.
+            self._radio_restore_stream = stream_url
             logger.exception("[music2] restauration de la radio impossible")
+            return
+
+        self._radio_restore_stream = None
+        channel = self.bot.get_channel(RADIO_VC_ID)
+        if isinstance(channel, discord.VoiceChannel):
+            try:
+                await radio._rename_for_stream(channel, stream_url)
+            except Exception:
+                # Le renommage est cosmétique : la lecture radio ne doit pas
+                # être considérée en échec si Discord refuse temporairement le nom.
+                logger.warning(
+                    "[music2] radio restaurée mais renommage du salon impossible",
+                    exc_info=True,
+                )
+        logger.info(
+            "[music2] radio restaurée station=%s",
+            self._station_label(stream_url),
+        )
 
     async def pause_resume(self, interaction: discord.Interaction) -> None:
         if not await self.require_radio_listener(interaction):
