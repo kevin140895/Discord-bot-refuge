@@ -19,11 +19,12 @@ def test_active_feature_channel_ids_are_centralized_in_config() -> None:
     assert "from config import DATA_DIR, F1_CHANNEL_ID" in f1_text
 
 
-def test_retired_f1_and_nhl_cogs_are_disabled_from_auto_discovery() -> None:
+def test_retired_and_legacy_cogs_are_disabled_from_auto_discovery() -> None:
     config_text = (ROOT / "config.py").read_text(encoding="utf-8")
     bot_text = (ROOT / "bot.py").read_text(encoding="utf-8")
 
     assert 'frozenset({"f1_standings", "nhl_notifications"})' in config_text
     assert "from config import DISABLED_COGS" in bot_text
-    assert "if module.name in DISABLED_COGS:" in bot_text
+    assert 'LEGACY_DISABLED_COGS: Final[frozenset[str]] = frozenset({"rock_radio"})' in bot_text
+    assert "module.name in DISABLED_COGS or module.name in LEGACY_DISABLED_COGS" in bot_text
     assert "Skipping disabled cog" in bot_text
