@@ -79,7 +79,7 @@ class RadioCog(commands.Cog):
 
     async def _connect_and_play(self) -> None:
         if not self.stream_url:
-            logger.warning("RADIO_STREAM_URL non défini")
+            logger.debug("Radio suspendue: aucune reconnexion à effectuer")
             return
         self.voice = await ensure_voice(self.bot, self.vc_id, self.voice)
         if self.voice is None:
@@ -101,6 +101,12 @@ class RadioCog(commands.Cog):
     def _after_play(self, error: Optional[Exception]) -> None:
         if error:
             logger.warning("Erreur de lecture radio: %s", error)
+        # Music2 suspend volontairement la radio en mettant ``stream_url`` à
+        # ``None``. Le callback FFmpeg de la station arrêtée arrive ensuite :
+        # il ne doit surtout pas relancer l'auto-reconnect pendant la musique.
+        if not self.stream_url:
+            logger.debug("Fin de flux ignorée: radio suspendue")
+            return
         if self._reconnect_task is None or self._reconnect_task.done():
             # ``Player.after`` runs in the audio thread where no event loop is
             # running. Use ``run_coroutine_threadsafe`` to schedule the
@@ -111,6 +117,11 @@ class RadioCog(commands.Cog):
 
     async def _delayed_reconnect(self) -> None:
         await asyncio.sleep(5)
+        # A reconnect can have been queued immediately before Music2 suspended
+        # the station. Re-check the state after the delay to close that race.
+        if not self.stream_url:
+            logger.debug("Reconnexion annulée: radio suspendue")
+            return
         await self._connect_and_play()
 
     async def _render_radio_message(self, message: discord.Message) -> None:
@@ -307,6 +318,10 @@ class RadioCog(commands.Cog):
         after: discord.VoiceState,
     ) -> None:
         if member.id == self.bot.user.id and after.channel is None:
+            # Une déconnexion physique ne doit pas réveiller la radio quand
+            # Music2 l'a explicitement suspendue.
+            if not self.stream_url:
+                return
             if self._reconnect_task is None or self._reconnect_task.done():
                 self._reconnect_task = asyncio.create_task(
                     self._delayed_reconnect()
