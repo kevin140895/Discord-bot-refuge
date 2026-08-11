@@ -34,5 +34,5 @@ def test_play_stream_adds_headers(monkeypatch):
     voice_mod.play_stream(voice, "http://example.com", headers="X-Test: value")
 
     assert captured["url"] == "http://example.com"
-    assert "-headers 'X-Test: value'" in captured["before"]
+    assert "-headers 'X-Test: value\r\n'" in captured["before"]
     assert voice.play_called_with is not None
