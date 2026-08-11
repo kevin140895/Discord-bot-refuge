@@ -342,6 +342,19 @@ class PariXPCog(commands.Cog):
         )
 
     async def _ensure_roulette_message(self) -> None:
+        """Synchronise le panneau sans rendre le bot dépendant de Discord au boot."""
+        try:
+            await self._ensure_roulette_message_once()
+        except discord.HTTPException as exc:
+            # Les erreurs 5xx/transport de Discord sont transitoires. Le cog est
+            # chargé quand même et la boucle check_schedule réessaiera à la
+            # minute suivante. Les erreurs de programmation restent visibles.
+            logger.warning(
+                "[PariXP] Synchronisation du panneau différée après erreur Discord: %s",
+                exc,
+            )
+
+    async def _ensure_roulette_message_once(self) -> None:
         channel = self.bot.get_channel(PARI_XP_CHANNEL_ID)
         if channel is None:
             try:
