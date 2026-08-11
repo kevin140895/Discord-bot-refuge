@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import sys
+from datetime import datetime, timezone
 from typing import Optional
 
 import discord
@@ -10,10 +13,49 @@ import discord
 from bot import RefugeBot
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+_RAILWAY_LEVELS = {
+    logging.DEBUG: "debug",
+    logging.INFO: "info",
+    logging.WARNING: "warn",
+    logging.ERROR: "error",
+    logging.CRITICAL: "error",
+}
+
+
+class RailwayJsonFormatter(logging.Formatter):
+    """Serialize application logs as one-line JSON understood by Railway."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, str] = {
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat().replace("+00:00", "Z"),
+            "level": _RAILWAY_LEVELS.get(
+                record.levelno,
+                "error" if record.levelno >= logging.ERROR else "info",
+            ),
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            payload["stack"] = self.formatStack(record.stack_info)
+
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def configure_logging() -> None:
+    """Configure a single stdout handler for Railway structured logging."""
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(RailwayJsonFormatter())
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[handler],
+        force=True,
+    )
 
 
 class DiscordCriticalHandler(logging.Handler):
@@ -68,6 +110,8 @@ class DiscordCriticalHandler(logging.Handler):
 
 
 def main() -> None:
+    configure_logging()
+
     intents = discord.Intents(
         guilds=True,
         members=True,
@@ -90,7 +134,10 @@ def main() -> None:
         )
         logging.getLogger().addHandler(handler)
 
-    bot.run(token)
+    # discord.py installs its own stderr handler by default in Client.run().
+    # Our root logger is already configured above, so disabling it prevents
+    # duplicate lines and keeps Railway severity driven by the JSON level field.
+    bot.run(token, log_handler=None)
 
 
 if __name__ == "__main__":
