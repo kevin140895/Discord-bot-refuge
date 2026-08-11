@@ -19,6 +19,7 @@ from cogs.maitre_du_jeu import (
     classify_question,
     extract_question,
 )
+from cogs.maitre_du_jeu_ai import AIReply, AIStatus
 
 
 def test_extract_question_removes_both_discord_mention_forms():
@@ -50,11 +51,28 @@ def test_classify_question(question, expected):
     assert classify_question(question) is expected
 
 
-def test_build_response_marks_unknown_questions_as_v2():
+def test_build_response_marks_unknown_questions_as_v3_fallback():
     embed = build_response(AssistantIntent.UNKNOWN)
-    assert "V2" in embed.title
+    assert "V3" in embed.title
+    assert "module conversationnel IA" in embed.description
     assert "XP" in embed.description
-    assert embed.footer.text == "Maître du jeu · Assistant V2 en test"
+    assert embed.footer.text == "Maître du jeu · Assistant V3 · lecture seule"
+
+
+def test_build_ai_response_renders_success_as_read_only_conversation():
+    embed = mdj.build_ai_response(AIReply(AIStatus.SUCCESS, text="Paris est la capitale de la France."))
+
+    assert "Conversation" in embed.title
+    assert "Paris" in embed.description
+    assert "lecture seule" in embed.footer.text
+
+
+def test_build_ai_response_explains_ai_cooldown():
+    embed = mdj.build_ai_response(AIReply(AIStatus.COOLDOWN, retry_after=4.2))
+
+    assert "Patience" in embed.title
+    assert "5 s" in embed.description
+    assert "coûts" in embed.description
 
 
 @pytest.mark.asyncio
@@ -156,9 +174,10 @@ async def test_diagnostic_is_explicit_about_v2_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_message_replies_to_direct_bot_mention(monkeypatch):
+async def test_on_message_replies_to_direct_bot_mention_without_ai_for_known_intent(monkeypatch):
     bot = SimpleNamespace(user=SimpleNamespace(id=42))
     cog = MaitreDuJeuCog(bot)
+    cog.ai.answer = AsyncMock()
     live_embed = discord.Embed(title="live")
     live_builder = AsyncMock(return_value=live_embed)
     monkeypatch.setattr(mdj, "build_live_response", live_builder)
@@ -176,10 +195,57 @@ async def test_on_message_replies_to_direct_bot_mention(monkeypatch):
         bot=bot,
         user_id=7,
     )
+    cog.ai.answer.assert_not_awaited()
     message.reply.assert_awaited_once()
     kwargs = message.reply.await_args.kwargs
     assert kwargs["mention_author"] is False
     assert kwargs["embed"] is live_embed
+
+
+@pytest.mark.asyncio
+async def test_on_message_unknown_question_uses_ai_fallback(monkeypatch):
+    bot = SimpleNamespace(user=SimpleNamespace(id=42))
+    cog = MaitreDuJeuCog(bot)
+    cog.ai.answer = AsyncMock(
+        return_value=AIReply(AIStatus.SUCCESS, text="Une réponse conversationnelle.")
+    )
+    live_builder = AsyncMock()
+    monkeypatch.setattr(mdj, "build_live_response", live_builder)
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=7, bot=False),
+        guild=SimpleNamespace(id=123),
+        content="<@42> raconte-moi une anecdote sur les jeux vidéo",
+        reply=AsyncMock(),
+    )
+
+    await cog.on_message(message)
+
+    cog.ai.answer.assert_awaited_once_with(7, "raconte-moi une anecdote sur les jeux vidéo")
+    live_builder.assert_not_awaited()
+    message.reply.assert_awaited_once()
+    embed = message.reply.await_args.kwargs["embed"]
+    assert "Conversation" in embed.title
+    assert "réponse conversationnelle" in embed.description
+
+
+@pytest.mark.asyncio
+async def test_on_message_ai_unavailable_falls_back_without_breaking_listener(monkeypatch):
+    bot = SimpleNamespace(user=SimpleNamespace(id=42))
+    cog = MaitreDuJeuCog(bot)
+    cog.ai.answer = AsyncMock(return_value=AIReply(AIStatus.UNAVAILABLE))
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=7, bot=False),
+        guild=SimpleNamespace(id=123),
+        content="<@42> parle-moi de quelque chose",
+        reply=AsyncMock(),
+    )
+
+    await cog.on_message(message)
+
+    message.reply.assert_awaited_once()
+    embed = message.reply.await_args.kwargs["embed"]
+    assert "V3" in embed.title
+    assert "module conversationnel IA" in embed.description
 
 
 @pytest.mark.asyncio
