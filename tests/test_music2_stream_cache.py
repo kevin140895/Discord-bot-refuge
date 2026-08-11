@@ -13,9 +13,9 @@ class DummyBot:
         return None
 
 
-def test_track_from_info_keeps_fresh_resolved_audio_stream(monkeypatch):
-    monkeypatch.setattr(music2.time, "monotonic", lambda: 100.0)
+def test_track_from_info_keeps_fresh_resolved_audio_stream():
     cog = music2.Music2Cog(DummyBot())
+    before = music2.time.monotonic()
 
     track = cog._track_from_info(
         {
@@ -30,17 +30,17 @@ def test_track_from_info_keeps_fresh_resolved_audio_stream(monkeypatch):
         },
         requester_id=42,
     )
+    after = music2.time.monotonic()
 
     assert track.webpage_url == "https://www.youtube.com/watch?v=abc123"
     assert track.cached_stream_url == "https://cdn.example.test/audio?token=short-lived"
-    assert track.cached_stream_resolved_at == 100.0
+    assert before <= track.cached_stream_resolved_at <= after
     assert "User-Agent: yt-dlp" in track.cached_stream_headers
     assert "Referer: https://www.youtube.com/" in track.cached_stream_headers
 
 
 @pytest.mark.asyncio
-async def test_resolve_stream_reuses_fresh_cache_without_second_ytdlp_call(monkeypatch):
-    monkeypatch.setattr(music2.time, "monotonic", lambda: 120.0)
+async def test_resolve_stream_reuses_fresh_cache_without_second_ytdlp_call():
     cog = music2.Music2Cog(DummyBot())
     cog._extract_info = AsyncMock(
         side_effect=AssertionError("yt-dlp must not run for a fresh cached stream")
@@ -51,7 +51,7 @@ async def test_resolve_stream_reuses_fresh_cache_without_second_ytdlp_call(monke
         requester_id=42,
         cached_stream_url="https://cdn.example.test/audio",
         cached_stream_headers="User-Agent: yt-dlp\r\n",
-        cached_stream_resolved_at=100.0,
+        cached_stream_resolved_at=music2.time.monotonic() - 1.0,
     )
 
     stream_url, headers = await cog._resolve_stream(track)
@@ -62,9 +62,7 @@ async def test_resolve_stream_reuses_fresh_cache_without_second_ytdlp_call(monke
 
 
 @pytest.mark.asyncio
-async def test_resolve_stream_refreshes_expired_cache(monkeypatch):
-    times = iter([500.0, 501.0])
-    monkeypatch.setattr(music2.time, "monotonic", lambda: next(times))
+async def test_resolve_stream_refreshes_expired_cache():
     cog = music2.Music2Cog(DummyBot())
     cog._extract_info = AsyncMock(
         return_value={
@@ -73,21 +71,27 @@ async def test_resolve_stream_refreshes_expired_cache(monkeypatch):
             "http_headers": {"User-Agent": "fresh"},
         }
     )
+    old_resolved_at = (
+        music2.time.monotonic() - music2.MUSIC2_STREAM_CACHE_TTL_SECONDS - 10.0
+    )
     track = music2.MusicTrack(
         title="Queued Song",
         webpage_url="https://www.youtube.com/watch?v=abc123",
         requester_id=42,
         cached_stream_url="https://cdn.example.test/expired-audio",
-        cached_stream_resolved_at=0.0,
+        cached_stream_resolved_at=old_resolved_at,
     )
+    before_refresh = music2.time.monotonic()
 
     stream_url, headers = await cog._resolve_stream(track)
+    after_refresh = music2.time.monotonic()
 
     assert stream_url == "https://cdn.example.test/fresh-audio"
     assert headers == "User-Agent: fresh\r\n"
     assert track.cached_stream_url == stream_url
     assert track.cached_stream_headers == headers
-    assert track.cached_stream_resolved_at == 501.0
+    assert before_refresh <= track.cached_stream_resolved_at <= after_refresh
+    assert track.cached_stream_resolved_at > old_resolved_at
     cog._extract_info.assert_awaited_once_with(
         track.webpage_url,
         purpose="résolution flux",
