@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 # automatically in production.
 LEGACY_DISABLED_COGS: Final[frozenset[str]] = frozenset({"rock_radio"})
 
+# Some modules live under ``cogs`` because they support a cog, but are not
+# discord.py extensions themselves and therefore do not expose ``setup()``.
+# They must never be passed to ``load_extension`` during package autodiscovery.
+COG_SUPPORT_MODULES: Final[frozenset[str]] = frozenset({"maitre_du_jeu_ai"})
+
 
 async def reset_http_error_counter() -> None:
     """Reset the HTTP error counter (placeholder)."""
@@ -70,10 +75,14 @@ class RefugeBot(commands.Bot):
         # Load active cogs from the ``cogs`` package so every enabled slash
         # command is registered when the bot starts. Retired/disabled modules
         # stay in the repository for reference but must not start background
-        # tasks or register commands.
+        # tasks or register commands. Support-only modules are also excluded
+        # because they are not discord.py extensions and expose no ``setup``.
         discovered = list(pkgutil.iter_modules(cogs.__path__))
         loaded_names = set()
         for module in discovered:
+            if module.name in COG_SUPPORT_MODULES:
+                logger.debug("Skipping cog support module: %s", module.name)
+                continue
             if module.name in DISABLED_COGS or module.name in LEGACY_DISABLED_COGS:
                 logger.info("Skipping disabled cog: %s", module.name)
                 continue
