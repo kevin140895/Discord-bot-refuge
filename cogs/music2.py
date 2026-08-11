@@ -46,6 +46,8 @@ MUSIC2_YTDLP_RETRIES = 3
 MUSIC2_YTDLP_EXTRACTOR_RETRIES = 3
 MUSIC2_EXTRACTION_ATTEMPTS = 2
 MUSIC2_EXTRACTION_RETRY_DELAY_SECONDS = 0.75
+MUSIC2_SEARCH_CANDIDATES = 5
+MUSIC2_SEARCH_SUFFIX = "audio"
 
 
 @dataclass(slots=True)
@@ -509,6 +511,87 @@ class Music2Cog(commands.Cog):
                 raise RuntimeError("Aucun résultat exploitable")
             return dict(info)
 
+    @staticmethod
+    def _search_candidate_url(info: dict) -> str | None:
+        for key in ("webpage_url", "original_url"):
+            value = str(info.get(key) or "").strip()
+            if urlparse(value).scheme in {"http", "https"}:
+                return value
+
+        raw_url = str(info.get("url") or "").strip()
+        if urlparse(raw_url).scheme in {"http", "https"}:
+            return raw_url
+
+        video_id = str(info.get("id") or raw_url).strip()
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+        return None
+
+    def _search_info_sync(self, target: str) -> dict:
+        """Search several YouTube candidates and return the first playable one."""
+        search_options = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extract_flat": "in_playlist",
+            "ignoreerrors": True,
+            "socket_timeout": MUSIC2_YTDLP_SOCKET_TIMEOUT_SECONDS,
+            "retries": MUSIC2_YTDLP_RETRIES,
+            "extractor_retries": MUSIC2_YTDLP_EXTRACTOR_RETRIES,
+        }
+        lookup = (
+            f"ytsearch{MUSIC2_SEARCH_CANDIDATES}:"
+            f"{target} {MUSIC2_SEARCH_SUFFIX}"
+        )
+        with yt_dlp.YoutubeDL(search_options) as ydl:
+            search_info = ydl.extract_info(lookup, download=False)
+
+        entries = (
+            search_info.get("entries")
+            if search_info is not None and hasattr(search_info, "get")
+            else None
+        )
+        candidates = [dict(entry) for entry in (entries or []) if entry]
+        if not candidates:
+            raise RuntimeError("Aucun résultat de recherche exploitable")
+
+        last_error: Exception | None = None
+        for rank, candidate in enumerate(
+            candidates[:MUSIC2_SEARCH_CANDIDATES], start=1
+        ):
+            candidate_url = self._search_candidate_url(candidate)
+            if candidate_url is None:
+                logger.warning(
+                    "[music2] candidat YouTube %d/%d ignoré: URL absente",
+                    rank,
+                    len(candidates),
+                )
+                continue
+            try:
+                resolved = self._extract_info_sync(candidate_url)
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "[music2] candidat YouTube %d/%d indisponible titre=%r: %s",
+                    rank,
+                    len(candidates),
+                    candidate.get("title") or "Titre inconnu",
+                    exc,
+                )
+                continue
+
+            logger.info(
+                "[music2] candidat YouTube retenu rang=%d/%d titre=%r",
+                rank,
+                len(candidates),
+                resolved.get("title") or candidate.get("title") or "Titre inconnu",
+            )
+            return resolved
+
+        if last_error is not None:
+            raise RuntimeError("Aucun des résultats YouTube n'est lisible") from last_error
+        raise RuntimeError("Aucun des résultats YouTube n'est exploitable")
+
     async def _extract_info(self, target: str, *, purpose: str = "extraction") -> dict:
         async with self._extract_lock:
             last_error: Exception | None = None
@@ -549,6 +632,43 @@ class Music2Cog(commands.Cog):
             if last_error is not None:
                 raise last_error
             raise RuntimeError("Extraction yt-dlp impossible")
+
+    async def _search_info(self, target: str) -> dict:
+        async with self._extract_lock:
+            last_error: Exception | None = None
+            for attempt in range(1, MUSIC2_EXTRACTION_ATTEMPTS + 1):
+                try:
+                    logger.info(
+                        "[music2] yt-dlp recherche multi-résultats tentative %d/%d",
+                        attempt,
+                        MUSIC2_EXTRACTION_ATTEMPTS,
+                    )
+                    info = await asyncio.to_thread(self._search_info_sync, target)
+                    if attempt > 1:
+                        logger.info(
+                            "[music2] recherche multi-résultats rétablie à la tentative %d",
+                            attempt,
+                        )
+                    return info
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= MUSIC2_EXTRACTION_ATTEMPTS:
+                        logger.warning(
+                            "[music2] recherche multi-résultats en échec après %d tentative(s): %s",
+                            attempt,
+                            exc,
+                        )
+                        break
+                    logger.warning(
+                        "[music2] recherche multi-résultats tentative %d échouée: %s; nouvel essai",
+                        attempt,
+                        exc,
+                    )
+                    await asyncio.sleep(MUSIC2_EXTRACTION_RETRY_DELAY_SECONDS)
+
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("Recherche yt-dlp impossible")
 
     def _track_from_info(self, info: dict, requester_id: int) -> MusicTrack:
         title = str(info.get("title") or "Titre inconnu")
@@ -594,14 +714,20 @@ class Music2Cog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         target = query.strip()
-        mode = "url" if urlparse(target).scheme in {"http", "https"} else "texte"
+        is_url = urlparse(target).scheme in {"http", "https"}
+        mode = "url" if is_url else "texte"
         logger.info(
             "[music2] recherche demandée requester=%s mode=%s",
             member.id,
             mode,
         )
         try:
-            info = await self._extract_info(target, purpose="recherche")
+            if is_url:
+                # Respecte strictement un lien fourni par l'utilisateur : aucun
+                # autre résultat YouTube ne doit le remplacer silencieusement.
+                info = await self._extract_info(target, purpose="recherche URL")
+            else:
+                info = await self._search_info(target)
             track = self._track_from_info(info, member.id)
         except Exception as exc:
             logger.warning("[music2] recherche impossible: %s", exc)
