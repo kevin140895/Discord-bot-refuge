@@ -24,6 +24,7 @@ from utils.api_meter import api_meter
 from utils.discord_api_trace import create_discord_http_trace
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter, limiter as _limiter
+from utils.ytdlp_auth import configure_ytdlp_auth
 from view import PlayerTypeView, StreamerTempVoiceView
 from utils import level_feed
 
@@ -62,6 +63,11 @@ class RefugeBot(commands.Bot):
 
     async def setup_hook(self) -> None:  # type: ignore[override]
         """Start background helpers and synchronise the command tree."""
+        # Configure yt-dlp before any music cog is imported. This makes the same
+        # Railway cookie jar available to search, candidate validation and
+        # stream resolution without exposing the cookie contents to the cogs.
+        configure_ytdlp_auth()
+
         # Start background helpers. In the real project these are asynchronous
         # coroutines, hence we ``await`` them so the test suite can verify
         # they have been invoked.
