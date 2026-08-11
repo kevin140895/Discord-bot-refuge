@@ -96,7 +96,12 @@ def play_stream(
             logger.warning("FFmpeg introuvable: impossible de lire le flux %s", stream_url)
             return
 
-        header_value = headers.strip() if headers else ""
+        # FFmpeg's ``-headers`` expects the HTTP block to end with CRLF.  Do not
+        # use ``strip()`` here: it removes that terminator and makes FFmpeg emit
+        # "No trailing CRLF found" before repairing the header itself.
+        header_value = headers.rstrip(" \t") if headers else ""
+        if header_value and not header_value.endswith("\r\n"):
+            header_value += "\r\n"
         is_on_demand = on_demand or bool(header_value)
         before_options = FFMPEG_VOD_BEFORE if is_on_demand else FFMPEG_BEFORE
         ffmpeg_options = FFMPEG_VOD_OPTIONS if is_on_demand else FFMPEG_OPTIONS
