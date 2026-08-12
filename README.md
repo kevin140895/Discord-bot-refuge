@@ -32,42 +32,43 @@ Audio playback relies on FFmpeg. Some useful parameters can be tuned in
 Ces valeurs peuvent être ajustées dans la fonction `_before_opts()` et dans
 la variable `audio_opts` selon vos besoins.
 
-## Configuration du serveur
+## Configuration
 
-Les IDs propres à votre serveur Discord (rôles, salons, catégories…) sont
-réunis dans le fichier [`config.py`](./config.py).
-Modifiez les valeurs de ce fichier pour correspondre à votre serveur.
+[`.env.example`](./.env.example) est la **référence officielle de la configuration par variables d'environnement** du bot. Il documente les valeurs utilisées par le casino, les salons temporaires, le rate limiter, l'API meter, les alertes, les radios, Mistral, le Refuge, yt-dlp et les fonctionnalités conservées mais désactivées.
 
-Pour récupérer un ID dans Discord, activez le *Mode développeur* puis
-faites un clic droit sur un élément et choisissez **Copier l'identifiant**.
+Les valeurs non sensibles de l'exemple correspondent aux valeurs par défaut du code. Les secrets sont volontairement laissés vides. Une valeur numérique vide n'est pas une manière valide de « désactiver » un paramètre : utilisez `0` uniquement lorsque `.env.example` indique explicitement que `0` est accepté.
 
-Exemple de personnalisation :
+[`config.py`](./config.py) reste la couche de compatibilité importée par les cogs : elle expose les constantes historiques à partir de l'objet `Settings` et contient encore quelques identifiants statiques propres au serveur. Elle ne doit plus servir de liste de référence pour les variables d'environnement.
 
-```python
-# config.py
-ROLE_PC = 123456789012345678  # ID du rôle PC de votre serveur
-```
+Pour récupérer un ID dans Discord, activez le *Mode développeur* puis utilisez **Copier l'identifiant** sur le serveur, salon ou rôle concerné. Les IDs Discord sont des Snowflakes numériques ; conservez-les sous forme d'entiers décimaux dans les variables correspondantes.
 
-`bot.py` et `view.py` importent ces constantes afin d'éviter toute valeur
-en dur dans le code.
+### Railway
 
-## Variables d'environnement
+Railway fournit les variables du service au processus sous forme de variables d'environnement. Railway détecte également les fichiers `.env.example` présents à la racine d'un dépôt GitHub afin de proposer les variables à configurer dans l'onglet **Variables** du service.
 
-Un fichier d'exemple [`.env.example`](./.env.example) regroupe les variables
-essentielles pour exécuter le bot :
+Après l'ajout, la modification ou la suppression d'une variable Railway, appliquez les changements staged via un nouveau déploiement pour qu'ils soient pris en compte par le conteneur.
 
-- `DISCORD_TOKEN` : jeton du bot fourni par le [Portail développeur Discord](https://discord.com/developers/applications).
-- `GUILD_ID` : identifiant du serveur Discord principal.
-- `OWNER_ID` : identifiant du propriétaire du bot.
-- `TZ` : fuseau horaire du processus (défaut : `Europe/Paris`).
-- `DATA_DIR` : répertoire de stockage persistant pour les données.
-- `VOICE_CP_DEBOUNCE_SECONDS` : délai avant la sauvegarde des sessions vocales.
+### Principales familles de variables
 
-Adaptez ces valeurs selon votre déploiement avant de lancer le bot.
+La liste exhaustive et les valeurs de référence restent dans [`.env.example`](./.env.example). Elle est organisée par familles :
+
+- Discord, processus et persistance ;
+- salons/rôles configurables et alertes ;
+- salons vocaux temporaires / Streamer ;
+- casino et roulette XP ;
+- radios et renommages ;
+- Double XP vocal ;
+- rate limiter et API meter ;
+- Maître du jeu / Mistral ;
+- monde du Refuge (panneau, journal, objectifs, construction, Feu, Hall, Casino) ;
+- YouTube / yt-dlp ;
+- NHL, actuellement désactivé mais conservé dans le dépôt.
 
 ## Gestion des secrets
 
-Ne stockez jamais de jetons, de clés API ou d'autres informations sensibles dans le dépôt. Utilisez des variables d'environnement ou un gestionnaire de secrets dédié. Le fichier `.env` est ignoré par Git ; servez-vous du modèle `.env.example` pour documenter les paramètres requis.
+Ne stockez jamais de jetons, clés API, cookies ou autres informations sensibles dans le dépôt. Les entrées sensibles de `.env.example` (`DISCORD_TOKEN`, `MISTRAL_API_KEY`, `YOUTUBE_COOKIES_B64`, `NHL_ODDS_API_KEY`) doivent rester vides dans Git.
+
+En production Railway, renseignez leurs vraies valeurs uniquement dans l'onglet **Variables** du service. Pour un développement local, exportez les variables dans votre environnement avant de lancer `python main.py`.
 
 ## Données persistantes
 
@@ -81,39 +82,26 @@ d'environnement `DATA_DIR` :
 export DATA_DIR=/chemin/vers/mes/données
 ```
 
-Assurez-vous que ce dossier existe et est accessible en lecture/écriture par
-le bot. Pour migrer un ancien déploiement utilisant `/data`, copiez vos fichiers
-vers `/app/data` ou définissez `DATA_DIR=/data`.
+`GAMES_DATA_DIR` utilise `${DATA_DIR}/games` par défaut dans le code ; si vous le définissez explicitement, gardez-le cohérent avec le volume persistant choisi.
 
-Les salons vocaux temporaires sont listés dans `data/temp_vc_ids.json`. Ce
-fichier doit être conservé entre les redéploiements (volume monté ou dossier
-`DATA_DIR` persistant), sans quoi les salons existants seront supprimés lors du
-démarrage.
+Assurez-vous que le dossier persistant existe et est accessible en lecture/écriture par le bot. Pour migrer un ancien déploiement utilisant `/data`, copiez vos fichiers vers `/app/data` ou définissez `DATA_DIR=/data`.
 
-Le délai avant renommage de ces salons peut être ajusté via la constante
-`RENAME_DELAY` dans [`config.py`](./config.py).
+Les salons vocaux temporaires sont listés dans `data/temp_vc_ids.json`. Ce fichier doit être conservé entre les redéploiements (volume monté ou dossier `DATA_DIR` persistant), sans quoi les salons existants seront supprimés lors du démarrage.
 
-Le renommage effectif intervient après un délai total d'environ
-`RENAME_DELAY` + `CHANNEL_RENAME_DEBOUNCE_SECONDS`. Avec les valeurs par
-défaut (3 s et 2 s), le bot attend environ 5 s avant d'émettre la
-requête de renommage, tout en respectant les limites de l'API Discord
-(5 s entre deux renommages d'un même salon et 2 s globalement).
-Réduire ces valeurs diminue la latence mais augmente la consommation de
-ces limites.
+## Renommage des salons
 
-La fréquence de vérification des noms de ces salons est définie par la constante
-`TEMP_VC_CHECK_INTERVAL_SECONDS` (30 secondes par défaut).
+Les paramètres exposés par variables d'environnement sont documentés dans `.env.example`, notamment :
 
-La vérification de l'état de la machine à sous est contrôlée par la constante
-`MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES` (1 minute par défaut).
+- `CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL` ;
+- `CHANNEL_RENAME_MIN_INTERVAL_GLOBAL` ;
+- `CHANNEL_RENAME_DEBOUNCE_SECONDS` ;
+- `CHANNEL_RENAME_MAX_RETRIES` ;
+- `CHANNEL_RENAME_BACKOFF_BASE`.
 
-### Sauvegarde des sessions vocales
+Avec les valeurs actuelles, le gestionnaire impose notamment 5 s entre deux renommages d'un même salon, 2 s au niveau global et un debounce de 2 s. Réduire les intervalles augmente la pression sur l'API Discord.
 
-Les heures d'entrée des membres en vocal sont stockées dans
-`data/voice_times.json`. Chaque événement vocal planifie une sauvegarde
-différée (5 min par défaut) qui écrit ce fichier de manière atomique dans un
-thread séparé afin de ne pas bloquer l'event loop. Une sauvegarde
-périodique toutes les 10 minutes est conservée en secours.
+## Sauvegarde des sessions vocales
 
-Le délai peut être ajusté via la variable d'environnement
-`VOICE_CP_DEBOUNCE_SECONDS`.
+Les heures d'entrée des membres en vocal sont stockées dans `data/voice_times.json`. Chaque événement vocal planifie une sauvegarde différée de **300 secondes (5 minutes) par défaut**, qui écrit le fichier de manière atomique dans un thread séparé afin de ne pas bloquer l'event loop. Une sauvegarde périodique toutes les 10 minutes est conservée en secours.
+
+Le délai se configure via `VOICE_CP_DEBOUNCE_SECONDS`. `.env.example` utilise lui aussi `300`, afin qu'une copie de la configuration de référence ne transforme pas involontairement le checkpoint de 5 minutes en sauvegarde quasi immédiate.
