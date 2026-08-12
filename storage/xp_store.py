@@ -69,7 +69,8 @@ class XPStore:
             return
             
         ensure_dir(DATA_DIR)
-        self.data = read_json_safe(self.path)
+        loaded_data = await asyncio.to_thread(read_json_safe, self.path)
+        self.data = loaded_data if isinstance(loaded_data, dict) else {}
         
         # ``self.data`` est la source de vérité persistée, pas un cache jetable.
         # La maintenance peut donc observer sa taille mais ne doit jamais évincer
@@ -253,15 +254,9 @@ class XPStore:
         
         # Traitement immédiat (non-batch)
         async with self.lock:
-            # Vérifier le cache
             if uid not in self.data:
                 self.stats["cache_misses"] += 1
-                # Charger depuis le disque si nécessaire
-                all_data = read_json_safe(self.path)
-                if uid in all_data:
-                    self.data[uid] = all_data[uid]
-                else:
-                    self.data[uid] = {"xp": 0, "level": 0}
+                self.data[uid] = {"xp": 0, "level": 0}
             else:
                 self.stats["cache_hits"] += 1
             
@@ -350,11 +345,7 @@ class XPStore:
         async with self.lock:
             if uid not in self.data:
                 self.stats["cache_misses"] += 1
-                all_data = read_json_safe(self.path)
-                if uid in all_data:
-                    self.data[uid] = all_data[uid]
-                else:
-                    self.data[uid] = {"xp": 0, "level": 0}
+                self.data[uid] = {"xp": 0, "level": 0}
             else:
                 self.stats["cache_hits"] += 1
 
@@ -392,69 +383,53 @@ class XPStore:
         return True
 
     async def get_user_data(self, user_id: int) -> XPUserData:
-        """Récupère une copie des données d'un utilisateur."""
+        """Récupère une copie des données d'un utilisateur depuis la mémoire."""
         uid = str(user_id)
+        should_check_size = False
         
         async with self.lock:
             if uid in self.data:
                 self.stats["cache_hits"] += 1
-                user = self.data[uid]
-                user["last_accessed"] = datetime.utcnow().isoformat()
-                return dict(user)
-            
-            self.stats["cache_misses"] += 1
-            
-        # Charger depuis le disque
-        all_data = read_json_safe(self.path)
-        user_data = all_data.get(uid, {"xp": 0, "level": 0})
+            else:
+                self.stats["cache_misses"] += 1
+                self.data[uid] = {"xp": 0, "level": 0}
+                should_check_size = len(self.data) > self.cache_size * 1.2
+
+            user = self.data[uid]
+            user["last_accessed"] = datetime.utcnow().isoformat()
+            user_data = dict(user)
+
+        # ``_cleanup_cache`` est un no-op d'intégrité aujourd'hui, mais on garde
+        # le déclencheur historique hors du verrou pour ne pas imbriquer les locks.
+        if should_check_size:
+            asyncio.create_task(self._cleanup_cache())
         
-        # Ajouter au cache
-        async with self.lock:
-            self.data[uid] = user_data
-            user_data["last_accessed"] = datetime.utcnow().isoformat()
-            
-            # Vérifier la taille du cache. La méthode ne supprime aucune donnée
-            # tant que ``self.data`` reste la source de vérité persistée.
-            if len(self.data) > self.cache_size * 1.2:  # 20% de marge
-                asyncio.create_task(self._cleanup_cache())
-        
-        return dict(user_data)
+        return user_data
 
     async def get_top_users(self, limit: int = 10) -> List[Tuple[str, XPUserData]]:
-        """Récupère le top des utilisateurs depuis l'état XP le plus récent."""
-        disk_data = await asyncio.to_thread(read_json_safe, self.path)
-        all_data: Dict[str, XPUserData] = {}
-        if isinstance(disk_data, dict):
-            all_data = {
-                str(uid): dict(payload)
-                for uid, payload in disk_data.items()
-                if isinstance(payload, dict)
-            }
-
-        # Les mutations immédiates vivent d'abord dans ``self.data`` et ne sont
-        # persistées qu'après un flush différé. Elles doivent donc écraser le
-        # snapshot disque pour éviter un classement temporairement obsolète.
+        """Récupère le top depuis l'état mémoire chargé au démarrage."""
         async with self.lock:
-            for uid, payload in self.data.items():
-                all_data[uid] = dict(payload)
+            all_data = [
+                (uid, dict(payload))
+                for uid, payload in self.data.items()
+            ]
 
         sorted_users = sorted(
-            all_data.items(),
+            all_data,
             key=lambda x: int(x[1].get("xp", 0)),
             reverse=True,
         )[:limit]
         return sorted_users
 
     def read_json(self) -> Dict[str, XPUserData]:
-        """Lit le fichier JSON brut des XP."""
+        """Lit explicitement le fichier JSON brut des XP de façon synchrone."""
         return read_json_safe(self.path)
 
     async def get_stats(self) -> Dict[str, any]:
-        """Retourne les statistiques du store."""
+        """Retourne les statistiques du store depuis l'état mémoire."""
         async with self.lock:
             cache_users = len(self.data)
-        
-        total_users = len(read_json_safe(self.path))
+            total_users = cache_users
         
         return {
             **self.stats,

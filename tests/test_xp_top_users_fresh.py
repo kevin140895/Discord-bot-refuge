@@ -5,7 +5,7 @@ from utils.persistence import atomic_write_json
 
 
 @pytest.mark.asyncio
-async def test_get_top_users_prefers_fresh_memory_over_stale_disk(tmp_path):
+async def test_get_top_users_prefers_fresh_memory_over_boot_snapshot(tmp_path):
     path = tmp_path / "xp.json"
     atomic_write_json(
         path,
@@ -15,6 +15,7 @@ async def test_get_top_users_prefers_fresh_memory_over_stale_disk(tmp_path):
         },
     )
     store = XPStore(path=str(path))
+    await store.start()
     store.data["1"] = {"xp": 300, "level": 1}
 
     leaderboard = await store.get_top_users(limit=2)
@@ -24,9 +25,11 @@ async def test_get_top_users_prefers_fresh_memory_over_stale_disk(tmp_path):
         ("2", 200),
     ]
 
+    await store.aclose()
+
 
 @pytest.mark.asyncio
-async def test_get_top_users_keeps_disk_only_users_when_memory_is_partial(tmp_path):
+async def test_get_top_users_keeps_all_users_loaded_at_boot(tmp_path):
     path = tmp_path / "xp.json"
     atomic_write_json(
         path,
@@ -36,6 +39,7 @@ async def test_get_top_users_keeps_disk_only_users_when_memory_is_partial(tmp_pa
         },
     )
     store = XPStore(path=str(path))
+    await store.start()
     store.data["30"] = {"xp": 250, "level": 1}
 
     leaderboard = await store.get_top_users(limit=3)
@@ -45,6 +49,8 @@ async def test_get_top_users_keeps_disk_only_users_when_memory_is_partial(tmp_pa
         ("30", 250),
         ("20", 50),
     ]
+
+    await store.aclose()
 
 
 @pytest.mark.asyncio
