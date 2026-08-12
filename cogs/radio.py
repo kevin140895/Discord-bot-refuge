@@ -16,7 +16,6 @@ from config import (
 )
 from storage.radio_store import RadioStore
 from ui.radio_view import RadioView
-from utils.rename_manager import rename_manager
 from utils.voice import ensure_voice, play_stream
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,6 @@ class RadioCog(commands.Cog):
         # than the bot's event loop, so we store the future returned by
         # ``asyncio.run_coroutine_threadsafe`` instead of an ``asyncio.Task``.
         self._reconnect_task: Optional[asyncio.Future] = None
-        self._original_name: Optional[str] = None
         self._previous_stream: Optional[str] = None
         self.store = RadioStore(data_dir=DATA_DIR)
 
@@ -194,10 +192,6 @@ class RadioCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        voice_channel = self.bot.get_channel(self.vc_id)
-        if isinstance(voice_channel, discord.VoiceChannel):
-            self._original_name = voice_channel.name
-
         text_channel = self.bot.get_channel(RADIO_TEXT_CHANNEL_ID)
         if isinstance(text_channel, discord.abc.Messageable):
             await self._ensure_radio_message(text_channel)
@@ -206,33 +200,28 @@ class RadioCog(commands.Cog):
     async def _rename_for_stream(
         self, channel: discord.VoiceChannel, stream_url: str
     ) -> None:
-        if stream_url == RADIO_RAP_STREAM_URL:
-            await rename_manager.request(channel, "🔘・Radio-Rap-US")
-        elif stream_url == RADIO_RAP_FR_STREAM_URL:
-            await rename_manager.request(channel, "🟣・Radio-Rap-FR")
-        elif stream_url == ROCK_RADIO_STREAM_URL:
-            await rename_manager.request(channel, "☢️・Radio-Rock")
-        elif stream_url == RADIO_STREAM_URL:
-            await rename_manager.request(channel, "📻・Radio-HipHop")
-        else:
-            if self._original_name:
-                await rename_manager.request(channel, self._original_name)
+        """Compatibility no-op: RADIO_VC_ID is no longer renamed dynamically.
+
+        Music2 historically called this helper while restoring the previous
+        station. Keeping the coroutine temporarily avoids coupling this focused
+        migration to unrelated playback code while guaranteeing that no channel
+        name REST write is emitted.
+        """
+        return None
 
     async def _switch_stream(
         self,
         interaction: discord.Interaction,
         stream_url: str,
         user_message: str,
-        rename_name: str,
     ) -> None:
-        """Basculer vers un flux radio et renommer le salon."""
+        """Basculer vers un flux radio sans modifier le nom du salon."""
         is_done = getattr(interaction.response, "is_done", lambda: False)
         if not is_done():
             try:
                 await interaction.response.defer(ephemeral=True)
             except Exception:
                 logger.debug("Impossible de defer la réponse radio", exc_info=True)
-        channel = self.bot.get_channel(self.vc_id)
 
         if self.stream_url == stream_url and self._previous_stream:
             self.stream_url = self._previous_stream
@@ -240,8 +229,6 @@ class RadioCog(commands.Cog):
             if self.voice and self.voice.is_playing():
                 self.voice.stop()
             await self._connect_and_play()
-            if isinstance(channel, discord.VoiceChannel):
-                await self._rename_for_stream(channel, self.stream_url)
             await self._send_radio_response(
                 interaction, "Radio changée pour la station précédente"
             )
@@ -252,8 +239,6 @@ class RadioCog(commands.Cog):
         if self.voice and self.voice.is_playing():
             self.voice.stop()
         await self._connect_and_play()
-        if isinstance(channel, discord.VoiceChannel):
-            await rename_manager.request(channel, rename_name)
         await self._send_radio_response(interaction, user_message)
 
     async def radio_rap(self, interaction: discord.Interaction) -> None:
@@ -261,7 +246,6 @@ class RadioCog(commands.Cog):
             interaction,
             RADIO_RAP_STREAM_URL,
             "Radio changée pour rap",
-            "🔘・Radio-Rap-US",
         )
 
     async def radio_rap_fr(self, interaction: discord.Interaction) -> None:
@@ -269,7 +253,6 @@ class RadioCog(commands.Cog):
             interaction,
             RADIO_RAP_FR_STREAM_URL,
             "Radio changée pour rap FR",
-            "🟣・Radio-Rap-FR",
         )
 
     async def radio_rock(self, interaction: discord.Interaction) -> None:
@@ -277,18 +260,14 @@ class RadioCog(commands.Cog):
             interaction,
             ROCK_RADIO_STREAM_URL,
             "Radio changée pour rock",
-            "☢️・Radio-Rock",
         )
 
     async def radio_hiphop(self, interaction: discord.Interaction) -> None:
-        channel = self.bot.get_channel(self.vc_id)
         self.stream_url = RADIO_STREAM_URL
         self._previous_stream = None
         if self.voice and self.voice.is_playing():
             self.voice.stop()
         await self._connect_and_play()
-        if isinstance(channel, discord.VoiceChannel):
-            await self._rename_for_stream(channel, RADIO_STREAM_URL)
         await self._send_radio_response(
             interaction, "Radio changée pour la station Hip-Hop"
         )

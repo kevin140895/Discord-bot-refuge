@@ -473,6 +473,50 @@ class APIMeter:
         cutoff = time.time() - 300
         return [msg for msg, ts in self.alert_messages if ts >= cutoff]
 
+    def _summary_alert_specs(
+        self, *, total: int, too_many: int, usage_pct: float
+    ) -> List[Tuple[int, str, str, bool]]:
+        """Classify rate-limit and API-budget alerts independently.
+
+        Discord 429 responses can be route, resource, user, or global rate
+        limits and therefore do not imply that the bot exhausted its own
+        10-minute API budget. A 429 stays actionable as a dedicated warning,
+        while soft/hard budget alerts are driven only by budget utilisation.
+        """
+
+        alerts: List[Tuple[int, str, str, bool]] = []
+
+        if too_many:
+            alerts.append(
+                (
+                    logging.WARNING,
+                    f"api.rate_limit usage={usage_pct:.0f}% calls={total} 429={too_many}",
+                    "rate_limit",
+                    True,
+                )
+            )
+
+        if usage_pct >= config.API_HARD_LIMIT_PCT:
+            alerts.append(
+                (
+                    logging.ERROR,
+                    f"api.hard_limit usage={usage_pct:.0f}% calls={total} 429={too_many}",
+                    "hard",
+                    True,
+                )
+            )
+        elif usage_pct >= config.API_SOFT_LIMIT_PCT:
+            alerts.append(
+                (
+                    logging.WARNING,
+                    f"api.soft_limit usage={usage_pct:.0f}% calls={total} 429={too_many}",
+                    "soft",
+                    False,
+                )
+            )
+
+        return alerts
+
     # ------------------------------------------------------------------
     async def _summary_loop(self) -> None:
         while True:
@@ -495,18 +539,16 @@ class APIMeter:
                 avg,
                 usage_pct,
             )
-            if too_many or usage_pct >= config.API_SOFT_LIMIT_PCT:
+            for level, message, key, notify in self._summary_alert_specs(
+                total=total,
+                too_many=too_many,
+                usage_pct=usage_pct,
+            ):
                 await self.emit_alert(
-                    logging.WARNING,
-                    f"api.soft_limit usage={usage_pct:.0f}% calls={total} 429={too_many}",
-                    key="soft",
-                )
-            if too_many or usage_pct >= config.API_HARD_LIMIT_PCT:
-                await self.emit_alert(
-                    logging.ERROR,
-                    f"api.hard_limit usage={usage_pct:.0f}% 429={too_many}",
-                    key="hard",
-                    notify=True,
+                    level,
+                    message,
+                    key=key,
+                    notify=notify,
                 )
 
     async def emit_alert(
