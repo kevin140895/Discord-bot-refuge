@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from utils.background_tasks import background_tasks
+
 __all__ = [
     "ensure_dir",
     "read_json_safe",
@@ -117,6 +119,10 @@ async def schedule_checkpoint(
     Each save function owns an independent checkpoint slot. Repeated calls for
     the same function are throttled while its checkpoint is pending, but a
     checkpoint for another file/function can be scheduled at the same time.
+
+    The shared background-task registry owns the task lifetime and consumes any
+    unhandled exception so checkpoint failures cannot become orphaned task
+    exceptions.
     """
     async with _checkpoint_lock:
         existing_task = _checkpoint_tasks.get(save_fn)
@@ -134,15 +140,13 @@ async def schedule_checkpoint(
                 await asyncio.sleep(delay)
                 await save_fn()
                 logging.info("💾 checkpoint saved: %s", save_name)
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:
-                logging.exception("checkpoint failed for %s: %s", save_name, exc)
-                raise
             finally:
                 async with _checkpoint_lock:
                     current_task = asyncio.current_task()
                     if _checkpoint_tasks.get(save_fn) is current_task:
                         _checkpoint_tasks.pop(save_fn, None)
 
-        _checkpoint_tasks[save_fn] = asyncio.create_task(_run())
+        _checkpoint_tasks[save_fn] = background_tasks.create_task(
+            _run(),
+            name=f"checkpoint:{save_name}",
+        )
