@@ -51,7 +51,8 @@ jobs:
             tests/test_api_meter_alert_classification.py \
             tests/test_rename_manager_isolation.py \
             tests/test_rename_manager_aclose.py \
-            tests/test_rename_manager_deleted_channel.py
+            tests/test_rename_manager_deleted_channel.py \
+            tests/test_radio_cog_does_not_start_rename_manager.py
 
       - name: Run test suite
         run: python -m pytest -q
