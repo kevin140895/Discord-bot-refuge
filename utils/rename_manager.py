@@ -30,6 +30,7 @@ class _RenameManager:
 
     def __init__(self) -> None:
         self._queue: asyncio.Queue[int] = asyncio.Queue()
+        self._queued_ids: set[int] = set()
         self._pending: Dict[int, Tuple[discord.abc.GuildChannel, str]] = {}
         self._last_per_channel: Dict[int, float] = {}
         # TODO: consider periodic cleanup for IDs that are never reused
@@ -66,6 +67,17 @@ class _RenameManager:
         self._channel_tasks.clear()
         self._pending.clear()
 
+        # Dispose dispatcher items that were queued but not yet claimed. Items
+        # already claimed by channel tasks were balanced in their ``finally``.
+        while True:
+            try:
+                cid = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._queued_ids.discard(cid)
+            self._queue.task_done()
+        self._queued_ids.clear()
+
     async def request(
         self, channel: discord.abc.GuildChannel, new_name: str
     ) -> None:
@@ -83,21 +95,30 @@ class _RenameManager:
         self._pending[cid] = (channel, new_name)
 
         task = self._channel_tasks.get(cid)
-        if task is None or task.done():
-            await self._queue.put(cid)
+        if task is not None and not task.done():
             logging.debug(
-                "[rename_manager] queued rename %s -> %r", cid, new_name
+                "[rename_manager] coalesced active rename %s -> %r", cid, new_name
             )
-        else:
+            return
+
+        if cid in self._queued_ids:
             logging.debug(
-                "[rename_manager] coalesced rename %s -> %r", cid, new_name
+                "[rename_manager] coalesced queued rename %s -> %r", cid, new_name
             )
+            return
+
+        self._queued_ids.add(cid)
+        await self._queue.put(cid)
+        logging.debug(
+            "[rename_manager] queued rename %s -> %r", cid, new_name
+        )
 
     async def _run(self) -> None:
         """Dispatch queued channel IDs without awaiting their network work."""
 
         while True:
             cid = await self._queue.get()
+            self._queued_ids.discard(cid)
             task = self._channel_tasks.get(cid)
             if task is not None and not task.done():
                 # A request can race with task cleanup. The active per-channel
@@ -134,7 +155,12 @@ class _RenameManager:
 
             # Close the small race where a request arrives after the drain loop
             # observed no pending work but before this task removed itself.
-            if cid in self._pending and self._worker is not None:
+            if (
+                cid in self._pending
+                and self._worker is not None
+                and cid not in self._queued_ids
+            ):
+                self._queued_ids.add(cid)
                 await self._queue.put(cid)
 
     async def _process_channel(self, cid: int) -> None:
