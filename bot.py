@@ -95,13 +95,18 @@ class RefugeBot(commands.Bot):
             await self.load_extension(f"{cogs.__name__}.{module.name}")
             loaded_names.add(module.name)
 
-        # Ensure required cogs are loaded even if not discovered.
+        # Ensure startup-critical cogs are loaded even if package discovery did
+        # not return them. DISABLED_COGS remains authoritative: a cog explicitly
+        # disabled by configuration must never be reloaded by this fallback.
         for required in (
             "economy_ui",
             "machine_a_sous",
             "temp_vc",
             "streamer_temp_vc",
         ):
+            if required in DISABLED_COGS or required in LEGACY_DISABLED_COGS:
+                logger.info("Skipping disabled fallback cog: %s", required)
+                continue
             if required not in loaded_names:
                 await self.load_extension(f"cogs.{required}")
 
