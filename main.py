@@ -6,11 +6,11 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Optional
 
 import discord
 
 from bot import RefugeBot
+from config import CRITICAL_LOG_CHANNEL_ID
 
 
 _RAILWAY_LEVELS = {
@@ -126,9 +126,8 @@ def main() -> None:
         raise RuntimeError("DISCORD_TOKEN environment variable not set")
     bot = RefugeBot(command_prefix="!", intents=intents)
 
-    channel_id: Optional[str] = os.getenv("CRITICAL_LOG_CHANNEL_ID")
-    if channel_id:
-        handler = DiscordCriticalHandler(bot, int(channel_id))
+    if CRITICAL_LOG_CHANNEL_ID:
+        handler = DiscordCriticalHandler(bot, CRITICAL_LOG_CHANNEL_ID)
         handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
         )
