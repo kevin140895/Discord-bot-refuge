@@ -67,7 +67,7 @@ def test_record_call_only_queues_and_uses_explicit_context(tmp_path):
 
     # The REST hot path only creates/enqueues the event. Aggregation and disk
     # persistence belong to the worker.
-    assert meter.events == meter.events.__class__()
+    assert not meter.events
     assert not meter.route_totals
     assert not meter.source_totals
     assert list(tmp_path.iterdir()) == []
