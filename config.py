@@ -1,5 +1,8 @@
 """Configuration des IDs spécifiques au serveur Discord.
-Modifiez les valeurs ci-dessous pour adapter le bot à votre serveur.
+
+Les variables d'environnement sont chargées et validées une seule fois via
+:class:`settings.Settings`. Les constantes historiques restent exposées pour
+préserver la compatibilité avec les cogs existants.
 """
 
 from __future__ import annotations
@@ -7,43 +10,24 @@ from __future__ import annotations
 import os
 import time
 
+from settings import ConfigError, Settings
+
+
+SETTINGS = Settings.from_env()
 
 # ── Channel trigger (création salons temporaires / views) ─────────────
-
-def _get_int_env(name: str, default: int = 0) -> int:
-    try:
-        return int(os.getenv(name, str(default)))
-    except ValueError:
-        return default
-
-TRIGGER_CHANNEL_ID: int = _get_int_env("TRIGGER_CHANNEL_ID", 0)
-
-
-def _resolve_data_dir() -> str:
-    """Résout le répertoire utilisé pour le stockage persistant.
-
-    Ordre de priorité :
-    1) Variable d'environnement ``DATA_DIR``
-    2) ``/app/data`` (montage par défaut Railway)
-    3) ``/data`` (chemin historique)
-    """
-    env = os.getenv("DATA_DIR")
-    if env:
-        return env
-    if os.path.isdir("/app/data"):
-        return "/app/data"
-    return "/data"
+TRIGGER_CHANNEL_ID: int = SETTINGS.trigger_channel_id
 
 
 # ── Informations globales ──────────────────────────────────────
-GUILD_ID: int = int(os.getenv("GUILD_ID", "0"))
+GUILD_ID: int = SETTINGS.guild_id
 
 # Fonctionnalités conservées dans le dépôt mais retirées du serveur actuel.
 # Le chargeur automatique ignore ces cogs afin qu'ils ne démarrent aucune
 # tâche de fond ni appel API tant qu'ils ne sont pas explicitement réactivés.
 DISABLED_COGS: frozenset[str] = frozenset({"f1_standings", "nhl_notifications"})
 
-TZ: str = os.getenv("TZ", "Europe/Paris")
+TZ: str = SETTINGS.tz
 os.environ["TZ"] = TZ
 try:
     time.tzset()
@@ -52,8 +36,8 @@ except AttributeError:
     pass
 
 # ── Horaires du casino ────────────────────────────────────────
-CASINO_OPEN_HOUR: int = int(os.getenv("CASINO_OPEN_HOUR", "10"))
-CASINO_CLOSE_HOUR: int = int(os.getenv("CASINO_CLOSE_HOUR", "6"))
+CASINO_OPEN_HOUR: int = SETTINGS.casino_open_hour
+CASINO_CLOSE_HOUR: int = SETTINGS.casino_close_hour
 CASINO_SCHEDULE_LABEL = f"{CASINO_OPEN_HOUR:02d}h00 - {CASINO_CLOSE_HOUR:02d}h00"
 
 
@@ -64,10 +48,8 @@ STATS_VOICE_CHANNEL_ID = 1406435190607184085
 
 
 # ── Salons de fonctionnalités ─────────────────────────────────
-ECONOMY_CHANNEL_ID: int = _get_int_env(
-    "ECONOMY_CHANNEL_ID", 1409633293791400108
-)
-F1_CHANNEL_ID: int = _get_int_env("F1_CHANNEL_ID", 0)
+ECONOMY_CHANNEL_ID: int = SETTINGS.economy_channel_id
+F1_CHANNEL_ID: int = SETTINGS.f1_channel_id
 
 
 # ── Rôles plateformes et notifications ────────────────────────
@@ -77,7 +59,7 @@ ROLE_MOBILE = 1404791652085928008
 ROLE_NOTIFICATION = 1404882154370109450
 ROLE_ANTHYX_COMMUNITY = 1453882345177219092
 ROLE_PARIS_SPORTIFS = 1458439939359510680
-VIP_24H_ROLE_ID: int = int(os.getenv("VIP_24H_ROLE_ID", "0"))
+VIP_24H_ROLE_ID: int = SETTINGS.vip_24h_role_id
 
 
 # ── Récompenses par niveau ────────────────────────────────────
@@ -111,30 +93,21 @@ STREAMER_VC_BASE_NAME = "Streamer"
 TRIGGER_VOICE_CHANNEL_ID = STREAMER_LOBBY_VC_ID
 ALLOWED_ROLE_ID = STREAMER_ROLE_ID
 
-# Catégorie où créer les salons vocaux (0 = à renseigner ou injecter via env)
-TEMP_VOICE_CATEGORY_ID: int = int(os.getenv("TEMP_VOICE_CATEGORY_ID", "0"))
+# Catégorie où créer les salons vocaux (0 = fallback sur la catégorie du trigger)
+TEMP_VOICE_CATEGORY_ID: int = SETTINGS.temp_voice_category_id
 
 # Délai avant suppression du salon si vide (secondes)
-DELETE_DELAY_SECONDS: int = int(os.getenv("DELETE_DELAY_SECONDS", "45"))
+DELETE_DELAY_SECONDS: int = SETTINGS.delete_delay_seconds
 
 
 RADIO_VC_ID = 1405695147114758245
 RADIO_TEXT_CHANNEL_ID = 1409333722754580571
-RADIO_STREAM_URL = os.getenv(
-    "RADIO_STREAM_URL",
-    "https://stream.laut.fm/hiphop-forever",
-)
+RADIO_STREAM_URL = SETTINGS.radio_stream_url
 RADIO_RAP_STREAM_URL = "https://stream.laut.fm/englishrap"
-RADIO_RAP_FR_STREAM_URL = os.getenv(
-    "RADIO_RAP_FR_STREAM_URL",
-    "https://icecast.skyrock.net/s/francais_aac_96k",
-)
+RADIO_RAP_FR_STREAM_URL = SETTINGS.radio_rap_fr_stream_url
 
 ROCK_RADIO_VC_ID = 1408081503707074650
-ROCK_RADIO_STREAM_URL = os.getenv(
-    "ROCK_RADIO_STREAM_URL",
-    "https://stream.laut.fm/rockworld",
-)
+ROCK_RADIO_STREAM_URL = SETTINGS.rock_radio_stream_url
 
 
 # ── Divers ────────────────────────────────────────────────────
@@ -143,35 +116,25 @@ TOP_MSG_ROLE_ID = 1406412171965104208
 TOP_VC_ROLE_ID = 1406412383878119485
 MVP_ROLE_ID = 1406412507433795595
 
-ANNOUNCE_CHANNEL_ID: int = _get_int_env(
-    "ANNOUNCE_CHANNEL_ID", 1400552164979507263
-)
+ANNOUNCE_CHANNEL_ID: int = SETTINGS.announce_channel_id
 """Salon utilisé pour les annonces de la machine à sous."""
 
-AWARD_ANNOUNCE_CHANNEL_ID: int = int(
-    os.getenv("AWARD_ANNOUNCE_CHANNEL_ID", str(ANNOUNCE_CHANNEL_ID))
-)
+AWARD_ANNOUNCE_CHANNEL_ID: int = SETTINGS.award_announce_channel_id
 
 WRITER_ROLE_ID = TOP_MSG_ROLE_ID
 VOICE_ROLE_ID = TOP_VC_ROLE_ID
-ENABLE_DAILY_AWARDS: bool = os.getenv("ENABLE_DAILY_AWARDS", "1") != "0"
+ENABLE_DAILY_AWARDS: bool = SETTINGS.enable_daily_awards
 
 LEVEL_UP_CHANNEL = 1402419913716531352
-LEVEL_FEED_CHANNEL_ID: int = int(
-    os.getenv("LEVEL_FEED_CHANNEL_ID", str(LEVEL_UP_CHANNEL))
-)
-ENABLE_GAME_LEVEL_FEED: bool = os.getenv("ENABLE_GAME_LEVEL_FEED", "1") != "0"
+LEVEL_FEED_CHANNEL_ID: int = SETTINGS.level_feed_channel_id
+ENABLE_GAME_LEVEL_FEED: bool = SETTINGS.enable_game_level_feed
 
 CHANNEL_ROLES = 1400560866478395512
 CHANNEL_WELCOME = 1400550333796716574
 LOBBY_TEXT_CHANNEL = 1402258805533970472
 
-TIKTOK_ANNOUNCE_CH: int = int(
-    os.getenv("TIKTOK_ANNOUNCE_CH", str(ANNOUNCE_CHANNEL_ID))
-)
-ACTIVITY_SUMMARY_CH: int = int(
-    os.getenv("ACTIVITY_SUMMARY_CH", str(ANNOUNCE_CHANNEL_ID))
-)
+TIKTOK_ANNOUNCE_CH: int = SETTINGS.tiktok_announce_ch
+ACTIVITY_SUMMARY_CH: int = SETTINGS.activity_summary_ch
 
 UPDATE_CHANNEL_ID = 1400550888246083585
 
@@ -183,9 +146,7 @@ FEEDBACK_STAFF_CHANNEL_ID = 1404224143330906222
 
 
 # ── Rappels de rôles et notifications ─────────────────────────
-REMINDER_CHANNEL_ID: int = int(
-    os.getenv("REMINDER_CHANNEL_ID", str(ANNOUNCE_CHANNEL_ID))
-)
+REMINDER_CHANNEL_ID: int = SETTINGS.reminder_channel_id
 """Salon unique où sont envoyés les rappels de rôles."""
 
 ROLE_CHOICE_CHANNEL_ID: int = 1400560866478395512
@@ -205,8 +166,8 @@ IGNORED_ROLE_IDS: set[int] = {
 MACHINE_A_SOUS_ROLE_ID: int = 1405170057792979025
 """Rôle attribué au gagnant de la machine à sous."""
 
-MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
-    os.getenv("MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES", "1")
+MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES: int = (
+    SETTINGS.machine_a_sous_boundary_check_interval_minutes
 )
 """Intervalle en minutes entre deux vérifications de l'état de la machine à sous."""
 
@@ -215,85 +176,73 @@ MACHINE_A_SOUS_BOUNDARY_CHECK_INTERVAL_MINUTES: int = int(
 PARI_XP_CHANNEL_ID: int = 1408834276228730900
 """Salon dédié à la roulette XP."""
 
-PARI_XP_ROLE_ID: int = int(os.getenv("PARI_XP_ROLE_ID", "0"))
+PARI_XP_ROLE_ID: int = SETTINGS.pari_xp_role_id
 """Rôle optionnel attribué au dernier gagnant de la roulette XP."""
 
 
 # ── Persistance et I/O ────────────────────────────────────────
-DATA_DIR: str = _resolve_data_dir()
+DATA_DIR: str = SETTINGS.data_dir
 """Répertoire de stockage persistant."""
 
 
 # ── Double XP vocal ───────────────────────────────────────────
 """Les sessions Double XP vocal ne sont plus générées automatiquement."""
 
-XP_DOUBLE_VOICE_DURATION_MINUTES: int = int(
-    os.getenv("XP_DOUBLE_VOICE_DURATION_MINUTES", "60")
-)
+XP_DOUBLE_VOICE_DURATION_MINUTES: int = SETTINGS.xp_double_voice_duration_minutes
 """Durée d'une session Double XP vocal en minutes."""
 
-XP_DOUBLE_VOICE_START_HOUR: int = int(
-    os.getenv("XP_DOUBLE_VOICE_START_HOUR", "10")
-)
+XP_DOUBLE_VOICE_START_HOUR: int = SETTINGS.xp_double_voice_start_hour
 """Heure de début minimale pour une session (Europe/Paris)."""
 
-XP_DOUBLE_VOICE_END_HOUR: int = int(
-    os.getenv("XP_DOUBLE_VOICE_END_HOUR", "23")
-)
+XP_DOUBLE_VOICE_END_HOUR: int = SETTINGS.xp_double_voice_end_hour
 """Heure de début maximale pour une session (Europe/Paris)."""
 
-XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID: int = int(
-    os.getenv("XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID", str(ANNOUNCE_CHANNEL_ID))
+XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID: int = (
+    SETTINGS.xp_double_voice_announce_channel_id
 )
 """Salon où sont annoncées les sessions Double XP vocal."""
 
 
 # ── Jeux organisés ────────────────────────────────────────────
-GAMES_DATA_DIR: str = os.getenv(
-    "GAMES_DATA_DIR", os.path.join(DATA_DIR, "games")
-)
+GAMES_DATA_DIR: str = SETTINGS.games_data_dir
 """Répertoire de persistance des événements de jeu, sous ``DATA_DIR`` par défaut."""
 
 
-# ── Renommage des salons ─────────────────────────────────────
-CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL: int = int(
-    os.getenv("CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL", "5")
+# ── Renommage des salons ──────────────────────────────────────
+CHANNEL_RENAME_MIN_INTERVAL_PER_CHANNEL: int = (
+    SETTINGS.channel_rename_min_interval_per_channel
 )
 """Intervalle minimal entre deux renommages du même salon."""
 
-CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = int(
-    os.getenv("CHANNEL_RENAME_MIN_INTERVAL_GLOBAL", "2")
-)
+CHANNEL_RENAME_MIN_INTERVAL_GLOBAL: int = SETTINGS.channel_rename_min_interval_global
 """Intervalle minimal global entre les renommages de salons."""
 
-CHANNEL_RENAME_DEBOUNCE_SECONDS: int = int(
-    os.getenv("CHANNEL_RENAME_DEBOUNCE_SECONDS", "2")
-)
+CHANNEL_RENAME_DEBOUNCE_SECONDS: int = SETTINGS.channel_rename_debounce_seconds
 """Délai appliqué avant le renommage d'un salon."""
 
-CHANNEL_RENAME_MAX_RETRIES: int = int(
-    os.getenv("CHANNEL_RENAME_MAX_RETRIES", "5")
-)
+CHANNEL_RENAME_MAX_RETRIES: int = SETTINGS.channel_rename_max_retries
 """Nombre maximum de tentatives de renommage en cas de 429."""
 
-CHANNEL_RENAME_BACKOFF_BASE: float = float(
-    os.getenv("CHANNEL_RENAME_BACKOFF_BASE", "2")
-)
+CHANNEL_RENAME_BACKOFF_BASE: float = SETTINGS.channel_rename_backoff_base
 """Base du délai exponentiel entre les tentatives de renommage."""
 
 
 # ── Propriétaire du bot ──────────────────────────────────────
-OWNER_ID: int = int(os.getenv("OWNER_ID", "541417878314942495"))
+OWNER_ID: int = SETTINGS.owner_id
 
 
 # ── API Metering ─────────────────────────────────────────────
-BOT_ALERTS_CHANNEL_ID: int = int(os.getenv("BOT_ALERTS_CHANNEL_ID", "0"))
-API_BUDGET_PER_10MIN: int = int(os.getenv("API_BUDGET_PER_10MIN", "10000"))
-API_SOFT_LIMIT_PCT: float = float(os.getenv("API_SOFT_LIMIT_PCT", "85"))
-API_HARD_LIMIT_PCT: float = float(os.getenv("API_HARD_LIMIT_PCT", "95"))
-API_SLOW_CALL_MS: int = int(os.getenv("API_SLOW_CALL_MS", "1000"))
-API_REPORT_INTERVAL_MIN: int = int(os.getenv("API_REPORT_INTERVAL_MIN", "1"))
-API_METER_PERSIST_INTERVAL_SECONDS: int = int(
-    os.getenv("API_METER_PERSIST_INTERVAL_SECONDS", "30")
+BOT_ALERTS_CHANNEL_ID: int = SETTINGS.bot_alerts_channel_id
+API_BUDGET_PER_10MIN: int = SETTINGS.api_budget_per_10min
+API_SOFT_LIMIT_PCT: float = SETTINGS.api_soft_limit_pct
+API_HARD_LIMIT_PCT: float = SETTINGS.api_hard_limit_pct
+API_SLOW_CALL_MS: int = SETTINGS.api_slow_call_ms
+API_REPORT_INTERVAL_MIN: int = SETTINGS.api_report_interval_min
+API_METER_PERSIST_INTERVAL_SECONDS: int = (
+    SETTINGS.api_meter_persist_interval_seconds
 )
 """Intervalle de persistance par lot des métriques API (secondes)."""
+
+
+# ── Logs critiques ────────────────────────────────────────────
+CRITICAL_LOG_CHANNEL_ID: int = SETTINGS.critical_log_channel_id
