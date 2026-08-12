@@ -22,6 +22,7 @@ class DummyChannel:
     def __init__(self, name: str = "📻・Radio-HipHop") -> None:
         self.name = name
         self.id = dynamic_rename.RADIO_VC_ID
+        self.edit = AsyncMock()
 
 
 class DummyBot:
@@ -72,8 +73,34 @@ def test_channel_name_uses_recording_dot_and_stays_within_discord_limit():
     assert len(name) == 100
 
 
+def test_voice_status_uses_track_title_and_stays_within_discord_limit():
+    track = SimpleNamespace(uploader="Artist", title="T" * 600)
+
+    status = dynamic_rename.Music2DynamicRenameCog._voice_status_for_track(track)
+
+    assert status.startswith("🎵 ")
+    assert len(status) == 500
+
+
+@pytest.mark.parametrize(
+    ("stream_url", "expected"),
+    [
+        (dynamic_rename.RADIO_STREAM_URL, "📻 Radio Hip-Hop"),
+        (dynamic_rename.RADIO_RAP_STREAM_URL, "🔘 Radio Rap US"),
+        (dynamic_rename.RADIO_RAP_FR_STREAM_URL, "🟣 Radio Rap FR"),
+        (dynamic_rename.ROCK_RADIO_STREAM_URL, "☢️ Radio Rock"),
+        ("https://radio.example/live", "📻 Radio"),
+    ],
+)
+def test_voice_status_for_stream(stream_url, expected):
+    assert (
+        dynamic_rename.Music2DynamicRenameCog._voice_status_for_stream(stream_url)
+        == expected
+    )
+
+
 @pytest.mark.asyncio
-async def test_active_custom_track_requests_dynamic_channel_name(monkeypatch):
+async def test_active_custom_track_requests_voice_status_and_dynamic_name(monkeypatch):
     track = SimpleNamespace(uploader="La Fouine - Topic", title="Du Ferme")
     music = SimpleNamespace(current=track)
     radio = SimpleNamespace(stream_url=None, voice=DummyVoice(playing=True))
@@ -87,11 +114,15 @@ async def test_active_custom_track_requests_dynamic_channel_name(monkeypatch):
 
     await cog._sync_current_track_name()
 
+    channel.edit.assert_awaited_once_with(
+        status="🎵 Du Ferme",
+        reason="RefugeBot: affichage dynamique Radio",
+    )
     request.assert_awaited_once_with(channel, "🔴・La Fouine")
 
 
 @pytest.mark.asyncio
-async def test_repeated_sync_does_not_queue_same_artist_while_cache_is_stale(monkeypatch):
+async def test_repeated_sync_does_not_repeat_same_status_or_artist(monkeypatch):
     track = SimpleNamespace(uploader="Bad Bunny - Topic", title="MONACO")
     music = SimpleNamespace(current=track)
     radio = SimpleNamespace(stream_url=None, voice=DummyVoice(playing=True))
@@ -107,11 +138,15 @@ async def test_repeated_sync_does_not_queue_same_artist_while_cache_is_stale(mon
     await cog._sync_current_track_name()
     await cog._sync_current_track_name()
 
+    channel.edit.assert_awaited_once_with(
+        status="🎵 MONACO",
+        reason="RefugeBot: affichage dynamique Radio",
+    )
     request.assert_awaited_once_with(channel, "🔴・Bad Bunny")
 
 
 @pytest.mark.asyncio
-async def test_radio_return_requests_station_name_after_custom_track(monkeypatch):
+async def test_radio_return_requests_station_status_and_name_after_custom_track(monkeypatch):
     track = SimpleNamespace(uploader="Bad Bunny - Topic", title="MONACO")
     music = SimpleNamespace(current=track)
     radio = SimpleNamespace(
@@ -128,14 +163,23 @@ async def test_radio_return_requests_station_name_after_custom_track(monkeypatch
     monkeypatch.setattr(dynamic_rename.rename_manager, "request", request)
 
     await cog._sync_current_track_name()
+    channel.edit.assert_awaited_once_with(
+        status="🎵 MONACO",
+        reason="RefugeBot: affichage dynamique Radio",
+    )
     request.assert_awaited_once_with(channel, "🔴・Bad Bunny")
 
     music.current = None
     radio.stream_url = "https://radio.example/live"
     channel.name = "🔴・Bad Bunny"
+    channel.edit.reset_mock()
 
     await cog._sync_current_track_name()
 
+    channel.edit.assert_awaited_once_with(
+        status="📻 Radio",
+        reason="RefugeBot: affichage dynamique Radio",
+    )
     radio._rename_for_stream.assert_awaited_once_with(
         channel, "https://radio.example/live"
     )
@@ -158,6 +202,10 @@ async def test_radio_station_sync_is_requested_once_per_stream(monkeypatch):
     await cog._sync_current_track_name()
     await cog._sync_current_track_name()
 
+    channel.edit.assert_awaited_once_with(
+        status="📻 Radio",
+        reason="RefugeBot: affichage dynamique Radio",
+    )
     radio._rename_for_stream.assert_awaited_once_with(
         channel, "https://radio.example/live"
     )
