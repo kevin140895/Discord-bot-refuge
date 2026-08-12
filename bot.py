@@ -183,12 +183,12 @@ class RefugeBot(commands.Bot):
 
     async def close(self) -> None:  # type: ignore[override]
         """Ensure background helpers are stopped before shutting down."""
+        # Cancel application-owned fire-and-forget work before closing the
+        # helpers/storage it may still depend on.
+        await background_tasks.aclose()
         await limiter.aclose()
         await api_meter.aclose()
         await rename_manager.aclose()
-        # Stop generic fire-and-forget work before closing storage so no
-        # checkpoint can outlive the resources it persists.
-        await background_tasks.aclose()
         await xp_store.aclose()
         await super().close()
 
