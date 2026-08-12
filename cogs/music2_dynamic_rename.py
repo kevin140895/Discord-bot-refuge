@@ -13,12 +13,10 @@ from config import (
     RADIO_VC_ID,
     ROCK_RADIO_STREAM_URL,
 )
-from utils.rename_manager import rename_manager
 
 
 logger = logging.getLogger(__name__)
 
-_RECORDING_PREFIX = "🔴・"
 _VOICE_STATUS_MAX_LENGTH = 500
 _TOPIC_SUFFIX_RE = re.compile(r"\s*-\s*topic\s*$", re.IGNORECASE)
 _VEVO_SUFFIX_RE = re.compile(r"\s*vevo\s*$", re.IGNORECASE)
@@ -32,13 +30,16 @@ _STREAM_STATUSES = {
 
 
 class Music2DynamicRenameCog(commands.Cog):
-    """Keep the shared radio voice channel display aligned with active audio."""
+    """Keep the shared radio voice channel status aligned with active audio.
+
+    The historical dynamic channel-name writes were deliberately removed: the
+    radio channel keeps its configured Discord name and only its ephemeral voice
+    status changes with the active station or Music2 track.
+    """
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._last_requested_name: str | None = None
         self._last_requested_status: str | None = None
-        self._last_radio_stream: str | None = None
 
     async def cog_load(self) -> None:
         self.sync_name.start()
@@ -68,12 +69,6 @@ class Music2DynamicRenameCog(commands.Cog):
                 if candidate:
                     return candidate
         return title or "Musique"
-
-    @classmethod
-    def _channel_name_for_track(cls, track: object) -> str:
-        artist = cls._artist_for_track(track)
-        max_artist_length = 100 - len(_RECORDING_PREFIX)
-        return f"{_RECORDING_PREFIX}{artist[:max_artist_length]}"
 
     @classmethod
     def _voice_status_for_track(cls, track: object) -> str:
@@ -118,9 +113,7 @@ class Music2DynamicRenameCog(commands.Cog):
         music = self.bot.get_cog("Music2Cog")
         radio = self.bot.get_cog("RadioCog")
         if music is None or radio is None:
-            self._last_requested_name = None
             self._last_requested_status = None
-            self._last_radio_stream = None
             return
 
         channel = self.bot.get_channel(RADIO_VC_ID)
@@ -129,24 +122,14 @@ class Music2DynamicRenameCog(commands.Cog):
 
         stream_url = getattr(radio, "stream_url", None)
         if stream_url is not None:
-            self._last_requested_name = None
             await self._request_voice_status(
                 channel,
                 self._voice_status_for_stream(stream_url),
             )
-            if stream_url == self._last_radio_stream:
-                return
-
-            rename_for_stream = getattr(radio, "_rename_for_stream", None)
-            if callable(rename_for_stream):
-                await rename_for_stream(channel, stream_url)
-                self._last_radio_stream = stream_url
             return
 
-        self._last_radio_stream = None
         track = getattr(music, "current", None)
         if track is None:
-            self._last_requested_name = None
             return
 
         voice = getattr(radio, "voice", None)
@@ -157,13 +140,6 @@ class Music2DynamicRenameCog(commands.Cog):
             channel,
             self._voice_status_for_track(track),
         )
-
-        new_name = self._channel_name_for_track(track)
-        if new_name == self._last_requested_name:
-            return
-
-        self._last_requested_name = new_name
-        await rename_manager.request(channel, new_name)
 
     @tasks.loop(seconds=1.0)
     async def sync_name(self) -> None:
