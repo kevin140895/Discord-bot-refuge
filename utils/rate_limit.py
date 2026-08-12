@@ -9,8 +9,23 @@ from collections import Counter
 from utils.metrics import errors
 
 
+def _read_positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer >= 1") from exc
+    if value < 1:
+        raise ValueError(f"{name} must be >= 1")
+    return value
+
+
 class TokenBucket:
     def __init__(self, capacity: int, refill_rate: float) -> None:
+        if capacity <= 0:
+            raise ValueError("TokenBucket capacity must be > 0")
+        if refill_rate <= 0:
+            raise ValueError("TokenBucket refill_rate must be > 0")
         self.capacity = float(capacity)
         self.refill_rate = float(refill_rate)
         self.tokens = float(capacity)
@@ -26,6 +41,10 @@ class TokenBucket:
 
     async def acquire(self, n: int = 1) -> None:
         n = float(n)
+        if n <= 0:
+            raise ValueError("TokenBucket acquire amount must be > 0")
+        if n > self.capacity:
+            raise ValueError("TokenBucket acquire amount must not exceed capacity")
         async with self.lock:
             while True:
                 self._refill()
@@ -33,7 +52,7 @@ class TokenBucket:
                     self.tokens -= n
                     return
                 needed = n - self.tokens
-                wait = needed / self.refill_rate if self.refill_rate > 0 else 0.0
+                wait = needed / self.refill_rate
                 await asyncio.sleep(wait)
 
 
@@ -42,7 +61,7 @@ class GlobalRateLimiter:
 
     def __init__(self) -> None:
         self.strict = os.getenv("RATE_LIMIT_STRICT", "true").lower() == "true"
-        self.global_rps = int(os.getenv("GLOBAL_RPS", "50"))
+        self.global_rps = _read_positive_int_env("GLOBAL_RPS", 50)
         self.buckets: Dict[str, TokenBucket] = {}
         self.logger = logging.getLogger("rate_limit")
         self._task: asyncio.Task | None = None

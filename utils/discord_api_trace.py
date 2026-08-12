@@ -123,6 +123,10 @@ def create_discord_http_trace(limiter: Any) -> aiohttp.TraceConfig:
         if not enabled:
             return
 
+        # Capture the trace event's wall-clock time before any local throttling.
+        # This is used only for deterministic day/month attribution.
+        trace_config_ctx.discord_api_started_wall = time.time()
+
         # Exclude local throttling time from measured Discord API latency.
         await limiter.acquire(bucket="global")
         trace_config_ctx.discord_api_started_at = time.perf_counter()
@@ -153,6 +157,9 @@ def create_discord_http_trace(limiter: Any) -> aiohttp.TraceConfig:
                 ratelimit_reset=_header_float(headers, "X-RateLimit-Reset"),
                 error_code=None,
                 size_bytes=getattr(response, "content_length", None),
+                started_at=getattr(
+                    trace_config_ctx, "discord_api_started_wall", None
+                ),
             )
         )
 
@@ -188,6 +195,9 @@ def create_discord_http_trace(limiter: Any) -> aiohttp.TraceConfig:
                 ratelimit_remaining=None,
                 ratelimit_reset=None,
                 error_code=error_code,
+                started_at=getattr(
+                    trace_config_ctx, "discord_api_started_wall", None
+                ),
             )
         )
 

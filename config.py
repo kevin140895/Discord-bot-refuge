@@ -293,3 +293,7 @@ API_SOFT_LIMIT_PCT: float = float(os.getenv("API_SOFT_LIMIT_PCT", "85"))
 API_HARD_LIMIT_PCT: float = float(os.getenv("API_HARD_LIMIT_PCT", "95"))
 API_SLOW_CALL_MS: int = int(os.getenv("API_SLOW_CALL_MS", "1000"))
 API_REPORT_INTERVAL_MIN: int = int(os.getenv("API_REPORT_INTERVAL_MIN", "1"))
+API_METER_PERSIST_INTERVAL_SECONDS: int = int(
+    os.getenv("API_METER_PERSIST_INTERVAL_SECONDS", "30")
+)
+"""Intervalle de persistance par lot des métriques API (secondes)."""
