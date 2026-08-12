@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import pytest
 
@@ -77,3 +78,39 @@ async def test_schedule_checkpoint_can_reschedule_after_completion():
     await asyncio.sleep(0)
 
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_schedule_checkpoint_uses_named_background_task():
+    release = asyncio.Event()
+
+    async def save() -> None:
+        await release.wait()
+
+    await persistence.schedule_checkpoint(save, delay=0)
+    task = persistence._checkpoint_tasks[save]
+
+    assert task.get_name().startswith("checkpoint:")
+    assert persistence.background_tasks.pending_count >= 1
+
+    release.set()
+    await task
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_schedule_checkpoint_exception_is_consumed_and_logged(caplog):
+    async def save() -> None:
+        raise RuntimeError("disk failure")
+
+    with caplog.at_level(logging.ERROR, logger="utils.background_tasks"):
+        await persistence.schedule_checkpoint(save, delay=0)
+        task = persistence._checkpoint_tasks[save]
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    assert task.done()
+    assert save not in persistence._checkpoint_tasks
+    assert "background task failed: checkpoint:" in caplog.text
+    assert "disk failure" in caplog.text

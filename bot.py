@@ -21,6 +21,7 @@ import cogs
 from storage.xp_store import xp_store
 from ui.radio_view import RadioView
 from utils.api_meter import api_meter
+from utils.background_tasks import background_tasks
 from utils.discord_api_trace import create_discord_http_trace
 from utils.rename_manager import rename_manager
 from utils.rate_limit import GlobalRateLimiter, limiter as _limiter
@@ -182,6 +183,9 @@ class RefugeBot(commands.Bot):
 
     async def close(self) -> None:  # type: ignore[override]
         """Ensure background helpers are stopped before shutting down."""
+        # Cancel application-owned fire-and-forget work before closing the
+        # helpers/storage it may still depend on.
+        await background_tasks.aclose()
         await limiter.aclose()
         await api_meter.aclose()
         await rename_manager.aclose()
@@ -214,6 +218,7 @@ __all__ = [
     "xp_store",
     "rename_manager",
     "api_meter",
+    "background_tasks",
     "limiter",
     "reset_http_error_counter",
     "create_bot",
