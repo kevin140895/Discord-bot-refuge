@@ -24,16 +24,19 @@ async def test_get_user_data_returns_copy_for_cached_user(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_get_user_data_returns_copy_after_disk_load(tmp_path: Path):
+async def test_get_user_data_returns_copy_after_boot_load(tmp_path: Path):
     path = tmp_path / "xp.json"
     path.write_text(
         json.dumps({"7": {"xp": 350, "level": 1}}),
         encoding="utf-8",
     )
     store = XPStore(path=str(path))
+    await store.start()
 
     payload = await store.get_user_data(7)
     payload["xp"] = 0
 
     assert store.data["7"]["xp"] == 350
     assert (await store.get_user_data(7))["xp"] == 350
+
+    await store.aclose()
