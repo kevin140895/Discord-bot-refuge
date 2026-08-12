@@ -1,9 +1,8 @@
 """Assistant Maître du jeu déclenché par une mention directe du bot.
 
-La V3 conserve toutes les réponses déterministes V2 en priorité et ajoute un
-fallback conversationnel OpenAI strictement en lecture seule pour les questions
-inconnues. Aucun chemin de cette cog ne donne à l'IA un accès métier à Discord,
-l'économie, l'XP, la boutique ou la radio.
+La V3 conserve les réponses déterministes en priorité et utilise le fallback
+conversationnel uniquement pour les questions inconnues. Les réponses métier
+restent en lecture seule et ne donnent aucun accès d'écriture à l'IA.
 """
 
 from __future__ import annotations
@@ -22,11 +21,15 @@ from discord.ext import commands
 
 from cogs.maitre_du_jeu_ai import AIReply, AIStatus, MaitreDuJeuAI
 from config import (
+    CASINO_CLOSE_HOUR,
+    CASINO_OPEN_HOUR,
+    GUILD_ID,
     RADIO_RAP_FR_STREAM_URL,
     RADIO_RAP_STREAM_URL,
     RADIO_STREAM_URL,
     ROCK_RADIO_STREAM_URL,
 )
+from services.refuge_casino import casino_is_open
 from storage.economy import SHOP_FILE
 from storage.xp_store import xp_store
 from utils.persistence import read_json_safe
@@ -42,6 +45,10 @@ class AssistantIntent(str, Enum):
     RADIO = "radio"
     COMMANDS = "commands"
     DIAGNOSTIC = "diagnostic"
+    BOT_CREATED = "bot_created"
+    MEMBER_COUNT = "member_count"
+    REFUGE_GUIDE = "refuge_guide"
+    CASINO_HOURS = "casino_hours"
     UNKNOWN = "unknown"
 
 
@@ -52,8 +59,8 @@ def _normalize_text(value: str) -> str:
     without_accents = "".join(
         char for char in decomposed if not unicodedata.combining(char)
     )
-    without_apostrophes = re.sub(r"['’]", " ", without_accents)
-    return " ".join(without_apostrophes.split())
+    normalized = re.sub(r"[^a-z0-9]+", " ", without_accents)
+    return " ".join(normalized.split())
 
 
 def extract_question(content: str, bot_user_id: int) -> str:
@@ -82,6 +89,50 @@ def classify_question(question: str) -> AssistantIntent:
     if any(marker in text for marker in diagnostic_markers):
         return AssistantIntent.DIAGNOSTIC
 
+    created_markers = (
+        "quand est ce qu on t a cree",
+        "quand est ce qu on ta cree",
+        "tu as ete cree quand",
+        "quand as tu ete cree",
+        "date de creation",
+        "tu existes depuis quand",
+        "depuis quand tu existes",
+    )
+    if any(marker in text for marker in created_markers):
+        return AssistantIntent.BOT_CREATED
+
+    member_markers = (
+        "combien de membres",
+        "combien sommes nous",
+        "on est combien",
+        "nous sommes combien",
+        "nombre de membres",
+    )
+    if any(marker in text for marker in member_markers):
+        return AssistantIntent.MEMBER_COUNT
+
+    refuge_markers = (
+        "refuge vivant",
+        "comment jouer au refuge",
+        "comment on joue au refuge",
+        "comment fonctionne le refuge",
+        "a quoi sert le refuge",
+    )
+    if any(marker in text for marker in refuge_markers):
+        return AssistantIntent.REFUGE_GUIDE
+
+    casino_time_markers = (
+        "heure",
+        "horaire",
+        "ouvre",
+        "ouverture",
+        "ferme",
+        "fermeture",
+        "ouvert",
+    )
+    if "casino" in text and any(marker in text for marker in casino_time_markers):
+        return AssistantIntent.CASINO_HOURS
+
     # Les intentions d'achat/prix passent avant Double XP :
     # « où acheter un double XP ? » doit être traité comme une question boutique.
     shop_markers = ("boutique", "acheter", "achat", "ticket royal", "ticket")
@@ -100,7 +151,6 @@ def classify_question(question: str) -> AssistantIntent:
             "commandes",
             "slash",
             "que peux tu faire",
-            "que peux-tu faire",
         )
     ):
         return AssistantIntent.COMMANDS
@@ -139,11 +189,7 @@ def classify_question(question: str) -> AssistantIntent:
 
 
 async def _read_xp_snapshot(user_id: int) -> dict:
-    """Lit l'état XP sans utiliser ``get_user_data`` qui modifie last_accessed.
-
-    Le cache mémoire est consulté sous le verrou du store. Si l'utilisateur n'y
-    figure pas, le fichier persistant est lu sans hydrater ni modifier le cache.
-    """
+    """Lit l'état XP sans utiliser ``get_user_data`` qui modifie last_accessed."""
 
     uid = str(user_id)
     async with xp_store.lock:
@@ -225,17 +271,21 @@ def build_response(intent: AssistantIntent) -> discord.Embed:
                 "Tape **`/`** dans Discord pour afficher les commandes auxquelles "
                 "tu as accès.\n\n"
                 "Je peux aussi consulter en direct **ton XP, ton niveau, ton Double XP, "
-                "le catalogue de la boutique et l'état de la radio**."
+                "le catalogue de la boutique, l'état de la radio et les informations "
+                "du Refuge**."
             ),
             colour=discord.Colour.teal(),
         )
+    elif intent is AssistantIntent.REFUGE_GUIDE:
+        embed = _build_refuge_guide_response()
     elif intent is AssistantIntent.UNKNOWN:
         embed = discord.Embed(
             title="🤖 Maître du jeu · V3",
             description=(
                 "Mon module conversationnel IA n'est pas disponible pour cette réponse.\n\n"
                 "Mes fonctions fiables restent disponibles pour **l'XP, les niveaux, "
-                "le Double XP, la boutique, le Ticket Royal, la radio et les commandes**."
+                "le Double XP, la boutique, le Ticket Royal, la radio, le casino et "
+                "le Refuge vivant**."
             ),
             colour=discord.Colour.orange(),
         )
@@ -249,13 +299,119 @@ def build_response(intent: AssistantIntent) -> discord.Embed:
                 "• `mon Double XP est actif ?`\n"
                 "• `combien coûte le Ticket Royal ?`\n"
                 "• `la radio fonctionne ?`\n"
-                "• `pourquoi je n'ai pas gagné d'XP ?`\n"
+                "• `combien sommes-nous ?`\n"
+                "• `comment jouer au Refuge vivant ?`\n"
+                "• `à quelle heure ouvre le casino ?`\n"
                 "• ou me poser une **question générale** pour utiliser le mode conversationnel."
             ),
             colour=discord.Colour.blurple(),
         )
 
-    embed.set_footer(text="Maître du jeu · Assistant V3 · lecture seule")
+    if not embed.footer.text:
+        embed.set_footer(text="Maître du jeu · Assistant V3 · lecture seule")
+    return embed
+
+
+def _build_bot_created_response(bot: commands.Bot) -> discord.Embed:
+    bot_user = getattr(bot, "user", None)
+    created_at = getattr(bot_user, "created_at", None)
+    if not isinstance(created_at, datetime):
+        description = (
+            "Je ne peux pas lire la date de création de mon compte Discord pour le moment."
+        )
+        colour = discord.Colour.orange()
+    else:
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        timestamp = int(created_at.timestamp())
+        description = (
+            f"Mon compte Discord a été créé le **<t:{timestamp}:D>** à "
+            f"**<t:{timestamp}:t>**.\nÇa remonte à <t:{timestamp}:R>."
+        )
+        colour = discord.Colour.blurple()
+
+    embed = discord.Embed(
+        title="🤖 Maître du jeu · Ma création",
+        description=description,
+        colour=colour,
+    )
+    embed.set_footer(text="Maître du jeu · Date fournie par Discord")
+    return embed
+
+
+def _build_member_count_response(bot: commands.Bot) -> discord.Embed:
+    count: int | None = None
+    guild_name = "Le Refuge"
+    guild = None
+    get_guild = getattr(bot, "get_guild", None)
+    if GUILD_ID and callable(get_guild):
+        guild = get_guild(GUILD_ID)
+    if guild is None:
+        guilds = list(getattr(bot, "guilds", ()) or ())
+        if len(guilds) == 1:
+            guild = guilds[0]
+    if guild is not None:
+        guild_name = str(getattr(guild, "name", guild_name))
+        raw_count = getattr(guild, "member_count", None)
+        if isinstance(raw_count, int):
+            count = max(0, raw_count)
+        elif getattr(guild, "members", None) is not None:
+            count = len(guild.members)
+
+    if count is None:
+        description = (
+            "Je ne peux pas lire le nombre de membres du serveur pour le moment."
+        )
+        colour = discord.Colour.orange()
+    else:
+        formatted = f"{count:,}".replace(",", " ")
+        description = f"Nous sommes actuellement **{formatted} membres** sur **{guild_name}**."
+        colour = discord.Colour.green()
+
+    embed = discord.Embed(
+        title="👥 Maître du jeu · Communauté",
+        description=description,
+        colour=colour,
+    )
+    embed.set_footer(text="Maître du jeu · Nombre de membres lu sur Discord")
+    return embed
+
+
+def _build_refuge_guide_response() -> discord.Embed:
+    embed = discord.Embed(
+        title="🏕️ Maître du jeu · Refuge vivant",
+        description=(
+            "Le **Refuge vivant** évolue grâce à l'activité réelle de la communauté.\n\n"
+            "🔥 Le temps passé en **vocal** fait vivre et évoluer le **Feu**.\n"
+            "🏆 Les **succès** débloqués par la communauté développent le **Hall**.\n"
+            "🎰 Les **paris et jackpots** font évoluer le **Casino**.\n"
+            "🏗️ Les **objectifs communautaires réussis** peuvent ouvrir un **Chantier** : "
+            "chaque membre vote alors pour une construction qui pourra devenir permanente.\n\n"
+            "Depuis le panneau du Refuge, utilise **Explorer**, **Mon empreinte**, "
+            "**Chronologie** et **Chantier** pour suivre ce que la communauté construit "
+            "et ce que ton activité laisse derrière elle."
+        ),
+        colour=discord.Colour.gold(),
+    )
+    embed.set_footer(text="Maître du jeu · Guide du Refuge vivant")
+    return embed
+
+
+def _build_casino_hours_response() -> discord.Embed:
+    is_open = casino_is_open()
+    state = "🟢 **actuellement ouvert**" if is_open else "🔴 **actuellement fermé**"
+    close_suffix = " le lendemain" if CASINO_OPEN_HOUR > CASINO_CLOSE_HOUR else ""
+    description = (
+        f"Le casino ouvre à **{CASINO_OPEN_HOUR:02d}h00** et ferme à "
+        f"**{CASINO_CLOSE_HOUR:02d}h00**{close_suffix}, heure de Paris.\n\n"
+        f"Il est {state}."
+    )
+    embed = discord.Embed(
+        title="🎰 Maître du jeu · Horaires du casino",
+        description=description,
+        colour=discord.Colour.green() if is_open else discord.Colour.red(),
+    )
+    embed.set_footer(text="Maître du jeu · Horaires lus depuis la configuration")
     return embed
 
 
@@ -263,9 +419,7 @@ async def _build_xp_response(user_id: int) -> discord.Embed:
     data = await _read_xp_snapshot(user_id)
     xp = max(0, int(data.get("xp", 0)))
     stored_level = int(data.get("level", 0))
-    level, current_threshold, next_threshold, remaining = _level_progress(
-        xp, stored_level
-    )
+    level, current_threshold, next_threshold, remaining = _level_progress(xp, stored_level)
     span = max(1, next_threshold - current_threshold)
     progress = max(0, xp - current_threshold)
     percent = min(100.0, progress / span * 100.0)
@@ -337,7 +491,9 @@ def _build_shop_response() -> discord.Embed:
             if "vip" in key.casefold() or "vip" in name.casefold():
                 continue
             price = item.get("price")
-            price_text = f"{int(price)} XP" if isinstance(price, (int, float)) else "prix non défini"
+            price_text = (
+                f"{int(price)} XP" if isinstance(price, (int, float)) else "prix non défini"
+            )
             lines.append(f"• **{name}** — {price_text}")
         if lines:
             description = (
@@ -403,11 +559,7 @@ def _build_radio_response(bot: commands.Bot) -> discord.Embed:
             detail = "Le flux est sélectionné mais aucune connexion vocale active n'est détectée."
             colour = discord.Colour.red()
 
-        description = (
-            f"{status}\n"
-            f"Station sélectionnée : **{station}**\n\n"
-            f"{detail}"
-        )
+        description = f"{status}\nStation sélectionnée : **{station}**\n\n{detail}"
 
     embed = discord.Embed(
         title="🎵 Maître du jeu · État radio",
@@ -421,14 +573,10 @@ def _build_radio_response(bot: commands.Bot) -> discord.Embed:
 async def _build_diagnostic_response(user_id: int) -> discord.Embed:
     data = await _read_xp_snapshot(user_id)
     xp = max(0, int(data.get("xp", 0)))
-    level, _, next_threshold, remaining = _level_progress(
-        xp, int(data.get("level", 0))
-    )
+    level, _, next_threshold, remaining = _level_progress(xp, int(data.get("level", 0)))
     boost_active, boost_seconds = _active_personal_boost(user_id)
     boost = (
-        f"actif ({_format_remaining(boost_seconds)} restant)"
-        if boost_active
-        else "inactif"
+        f"actif ({_format_remaining(boost_seconds)} restant)" if boost_active else "inactif"
     )
 
     embed = discord.Embed(
@@ -455,7 +603,7 @@ async def build_live_response(
     bot: commands.Bot,
     user_id: int,
 ) -> discord.Embed:
-    """Construit une réponse V2, contextuelle lorsque l'intention le permet."""
+    """Construit une réponse déterministe, contextuelle lorsque nécessaire."""
 
     if intent is AssistantIntent.XP:
         return await _build_xp_response(user_id)
@@ -467,6 +615,14 @@ async def build_live_response(
         return _build_radio_response(bot)
     if intent is AssistantIntent.DIAGNOSTIC:
         return await _build_diagnostic_response(user_id)
+    if intent is AssistantIntent.BOT_CREATED:
+        return _build_bot_created_response(bot)
+    if intent is AssistantIntent.MEMBER_COUNT:
+        return _build_member_count_response(bot)
+    if intent is AssistantIntent.REFUGE_GUIDE:
+        return _build_refuge_guide_response()
+    if intent is AssistantIntent.CASINO_HOURS:
+        return _build_casino_hours_response()
     return build_response(intent)
 
 
