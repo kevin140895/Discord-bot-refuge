@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
@@ -28,17 +28,14 @@ jobs:
       - name: Compile locks
         run: python scripts/compile_requirements.py --upgrade
 
-      - name: Emit compressed locks
-        shell: python
+      - name: Commit generated locks
         run: |
-          import base64
-          import gzip
-          import json
-          from pathlib import Path
-
-          payload = {
-              name: Path(name).read_text(encoding="utf-8")
-              for name in ("requirements.txt", "requirements-dev.txt")
-          }
-          data = gzip.compress(json.dumps(payload).encode("utf-8"), compresslevel=9)
-          print("LOCK_PAYLOAD=" + base64.b64encode(data).decode("ascii"))
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements.txt requirements-dev.txt
+          if git diff --cached --quiet; then
+            echo "Dependency locks already current."
+          else
+            git commit -m "build: refresh dependency locks"
+            git push
+          fi
