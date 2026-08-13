@@ -65,6 +65,7 @@ class RadioCog(commands.Cog):
         # ``asyncio.run_coroutine_threadsafe`` instead of an ``asyncio.Task``.
         self._reconnect_task: Optional[asyncio.Future] = None
         self._previous_stream: Optional[str] = None
+        self._radio_message_lock = asyncio.Lock()
         self.store = RadioStore(data_dir=DATA_DIR)
 
     async def cog_load(self) -> None:
@@ -132,6 +133,13 @@ class RadioCog(commands.Cog):
         )
 
     async def _ensure_radio_message(
+        self, channel: discord.abc.Messageable
+    ) -> None:
+        """Ensure exactly one radio panel even when lifecycle hooks race."""
+        async with self._radio_message_lock:
+            await self._ensure_radio_message_locked(channel)
+
+    async def _ensure_radio_message_locked(
         self, channel: discord.abc.Messageable
     ) -> None:
         stored = self.store.get_radio_message()

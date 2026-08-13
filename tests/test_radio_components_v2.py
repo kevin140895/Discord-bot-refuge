@@ -68,11 +68,10 @@ async def test_stored_legacy_radio_message_is_upgraded_in_place() -> None:
         ),
         set_radio_message=Mock(),
     )
-    cog = object.__new__(RadioCog)
-    cog.bot = SimpleNamespace(user=SimpleNamespace(id=999))
+    cog = RadioCog(SimpleNamespace(user=SimpleNamespace(id=999)))
     cog.store = store
 
-    await RadioCog._ensure_radio_message(cog, channel)
+    await cog._ensure_radio_message(channel)
 
     message.edit.assert_awaited_once()
     kwargs = message.edit.await_args.kwargs

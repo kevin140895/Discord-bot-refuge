@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -149,3 +150,40 @@ async def test_unexpected_panel_render_error_propagates():
 
     history.assert_not_called()
     channel.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_radio_message_ensure_creates_only_one_panel():
+    bot = SimpleNamespace(user=SimpleNamespace(id=1))
+    cog = RadioCog(bot)
+    messages = []
+    set_radio_message = MagicMock()
+    cog.store = SimpleNamespace(
+        get_radio_message=lambda: None,
+        set_radio_message=set_radio_message,
+    )
+
+    async def history(limit=None):
+        assert limit == 100
+        for message in list(messages)[:limit]:
+            yield message
+
+    async def send(*, view):
+        await asyncio.sleep(0)
+        panel = _radio_message(1000 + len(messages))
+        messages.insert(0, panel)
+        return panel
+
+    channel = SimpleNamespace(
+        id=123,
+        history=history,
+        send=AsyncMock(side_effect=send),
+    )
+
+    await asyncio.gather(
+        cog._ensure_radio_message(channel),
+        cog._ensure_radio_message(channel),
+    )
+
+    channel.send.assert_awaited_once()
+    assert len(messages) == 1
