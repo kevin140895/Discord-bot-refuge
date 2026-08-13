@@ -1,6 +1,6 @@
 import asyncio
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import sys
 
@@ -10,6 +10,19 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import cogs.radio as radio_mod
 from cogs.radio import RadioCog
 from config import ROCK_RADIO_STREAM_URL, RADIO_STREAM_URL, RADIO_VC_ID
+
+
+class FakeResponse:
+    def __init__(self) -> None:
+        self._done = False
+        self.defer = AsyncMock(side_effect=self._mark_done)
+        self.send_message = AsyncMock()
+
+    def _mark_done(self, *args, **kwargs) -> None:
+        self._done = True
+
+    def is_done(self) -> bool:
+        return self._done
 
 
 def test_radio_module_no_longer_depends_on_rename_manager():
@@ -35,9 +48,12 @@ async def test_radio_rock_toggles_stream_without_renaming_channel():
     cog = RadioCog(bot)
     cog._connect_and_play = AsyncMock()
 
+    response = FakeResponse()
+    followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         user=SimpleNamespace(id=123),
-        response=SimpleNamespace(send_message=AsyncMock()),
+        response=response,
+        followup=followup,
     )
 
     await cog.radio_rock(interaction)
@@ -46,9 +62,11 @@ async def test_radio_rock_toggles_stream_without_renaming_channel():
     assert cog._previous_stream == RADIO_STREAM_URL
     assert channel.name == "📻・Radio"
     channel.edit.assert_not_awaited()
-    interaction.response.send_message.assert_awaited_once()
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    followup.send.assert_awaited_once()
+    response.send_message.assert_not_awaited()
 
-    interaction.response.send_message.reset_mock()
+    followup.send.reset_mock()
 
     await cog.radio_rock(interaction)
 
@@ -56,4 +74,6 @@ async def test_radio_rock_toggles_stream_without_renaming_channel():
     assert cog._previous_stream is None
     assert channel.name == "📻・Radio"
     channel.edit.assert_not_awaited()
-    interaction.response.send_message.assert_awaited_once()
+    response.defer.assert_awaited_once()
+    followup.send.assert_awaited_once()
+    response.send_message.assert_not_awaited()
