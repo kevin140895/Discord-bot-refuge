@@ -12,24 +12,39 @@ def _requirements(path: str) -> list[str]:
     ]
 
 
-def test_runtime_requirements_exclude_test_only_dependencies():
-    runtime = _requirements("requirements.txt")
+def _locked_requirement_starts(path: str) -> list[str]:
+    return [
+        line
+        for line in (ROOT / path).read_text(encoding="utf-8").splitlines()
+        if line
+        and not line[0].isspace()
+        and not line.startswith("#")
+        and not line.startswith("--")
+        and not line.startswith("-r ")
+    ]
+
+
+def test_runtime_manifest_excludes_test_only_dependencies():
+    runtime = _requirements("requirements.in")
 
     assert not any(line.lower().startswith("pytest") for line in runtime)
     assert not any(line.lower().startswith("freezegun") for line in runtime)
 
 
-def test_dev_requirements_extend_runtime_and_include_test_tools():
-    dev = _requirements("requirements-dev.txt")
+def test_dev_manifest_extends_runtime_and_includes_test_tools():
+    dev = _requirements("requirements-dev.in")
 
-    assert "-r requirements.txt" in dev
+    assert "-r requirements.in" in dev
     assert "pytest" in dev
     assert "pytest-asyncio" in dev
     assert "freezegun" in dev
+    assert "mypy" in dev
+    assert "ruff" in dev
+    assert "pip-audit" in dev
 
 
-def test_runtime_dependencies_have_breaking_change_guards():
-    runtime = set(_requirements("requirements.txt"))
+def test_runtime_manifest_keeps_breaking_change_guards():
+    runtime = set(_requirements("requirements.in"))
 
     assert "discord.py>=2.7,<3" in runtime
     assert "PyNaCl>=1.6.2,<1.7" in runtime
@@ -41,11 +56,30 @@ def test_runtime_dependencies_have_breaking_change_guards():
     assert "tzdata>=2024.1" in runtime
 
 
+def test_generated_locks_are_exact_and_hashed():
+    for path in ("requirements.txt", "requirements-dev.txt"):
+        text = (ROOT / path).read_text(encoding="utf-8")
+        starts = _locked_requirement_starts(path)
+
+        assert starts, f"{path} must contain locked packages"
+        assert "--hash=sha256:" in text
+        assert all("==" in line for line in starts), starts
+
+
+def test_lock_toolchain_is_pinned():
+    tools = set(_requirements("requirements-tools.txt"))
+
+    assert "pip==26.1.2" in tools
+    assert "pip-tools==7.6.0" in tools
+
+
 def test_music2_uses_known_good_youtube_runtime():
-    runtime = set(_requirements("requirements.txt"))
+    runtime = set(_requirements("requirements.in"))
+    runtime_lock = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert "yt-dlp[default]>=2025.11.12" in runtime
+    assert "yt-dlp==" in runtime_lock
     assert not any(line.startswith("bgutil-ytdlp-pot-provider") for line in runtime)
 
     # Deno must stay explicit and reproducible. The old DENO_INSTALL marker
@@ -58,5 +92,6 @@ def test_music2_uses_known_good_youtube_runtime():
     assert "COPY --from=deno-fetcher /usr/local/bin/deno /usr/local/bin/deno" in dockerfile
     assert "deno --version" in dockerfile
 
+    assert "--require-hashes -r requirements.txt" in dockerfile
     assert 'CMD ["python", "main.py"]' in dockerfile
     assert "bgutil-ytdlp-pot-provider" not in dockerfile

@@ -7,13 +7,16 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
 CODEQL_WORKFLOW = ROOT / ".github" / "workflows" / "codeql.yml"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
-DEV_REQUIREMENTS = ROOT / "requirements-dev.txt"
-RUNTIME_REQUIREMENTS = ROOT / "requirements.txt"
+DEV_MANIFEST = ROOT / "requirements-dev.in"
+RUNTIME_MANIFEST = ROOT / "requirements.in"
 
 
 def test_python_quality_gate_runs_all_required_checks() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
+    assert "python scripts/compile_requirements.py" in workflow
+    assert "git diff --exit-code -- requirements.txt requirements-dev.txt" in workflow
+    assert "--require-hashes -r requirements-dev.txt" in workflow
     assert "python -m ruff check ." in workflow
     assert "python -m mypy main.py bot.py config.py" in workflow
     assert "python -m compileall -q main.py bot.py config.py cogs utils" in workflow
@@ -21,16 +24,16 @@ def test_python_quality_gate_runs_all_required_checks() -> None:
     assert "python -m pip_audit -r requirements.txt" in workflow
 
 
-def test_development_requirements_include_quality_tools() -> None:
-    requirements = DEV_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+def test_development_manifest_includes_quality_tools() -> None:
+    requirements = DEV_MANIFEST.read_text(encoding="utf-8").splitlines()
 
     assert "mypy" in requirements
     assert "ruff" in requirements
     assert "pip-audit" in requirements
 
 
-def test_voice_dependency_uses_patched_pynacl_range() -> None:
-    requirements = RUNTIME_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+def test_voice_dependency_policy_uses_patched_pynacl_range() -> None:
+    requirements = RUNTIME_MANIFEST.read_text(encoding="utf-8").splitlines()
 
     assert "discord.py>=2.7,<3" in requirements
     assert "PyNaCl>=1.6.2,<1.7" in requirements
@@ -44,6 +47,9 @@ def test_dependabot_covers_python_actions_and_docker_dependencies() -> None:
     assert 'package-ecosystem: "pip"' in dependabot
     assert 'package-ecosystem: "github-actions"' in dependabot
     assert 'package-ecosystem: "docker"' in dependabot
+    assert "yt-dlp:" in dependabot
+    assert '          - "yt-dlp"' in dependabot
+    assert "exclude-patterns:" in dependabot
 
 
 def test_codeql_scans_python_with_current_major_action() -> None:

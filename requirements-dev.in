@@ -1,0 +1,11 @@
+-r requirements.in
+
+# Test dependencies
+pytest
+pytest-asyncio
+freezegun
+
+# Static analysis and CI quality gates
+mypy
+ruff
+pip-audit

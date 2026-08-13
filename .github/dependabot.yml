@@ -9,9 +9,14 @@ updates:
       timezone: "Europe/Paris"
     open-pull-requests-limit: 10
     groups:
+      yt-dlp:
+        patterns:
+          - "yt-dlp"
       python-minor-patch:
         patterns:
           - "*"
+        exclude-patterns:
+          - "yt-dlp"
         update-types:
           - "minor"
           - "patch"

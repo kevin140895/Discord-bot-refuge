@@ -1,0 +1,5 @@
+# Toolchain used only to regenerate dependency lockfiles.
+# Update these pins deliberately and let the lock verification job validate
+# compatibility before merging the change.
+pip==26.1.2
+pip-tools==7.6.0
