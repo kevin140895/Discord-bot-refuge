@@ -1,0 +1,41 @@
+# Version-control metadata
+.git/
+.github/
+
+# Local secrets and environment files. Keep only the public reference file.
+.env
+.env.*
+!.env.example
+cookies*.txt
+**/cookies*.txt
+
+# Python virtual environments, caches and local tooling
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime/persistent state must come from the Railway volume, never the image.
+data/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Developer/editor artefacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tests are executed from the repository/CI, not shipped in the runtime image.
+tests/
+requirements-dev.txt
