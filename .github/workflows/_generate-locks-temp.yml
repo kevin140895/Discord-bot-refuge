@@ -1,0 +1,46 @@
+name: Generate dependency locks (temporary)
+
+on:
+  push:
+    branches:
+      - agent/reproducible-deps-xp-cleanup
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install lock compiler
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-tools==7.5.3
+
+      - name: Compile locks
+        run: python scripts/compile_requirements.py --upgrade
+
+      - name: Emit compressed locks
+        shell: python
+        run: |
+          import base64
+          import gzip
+          import json
+          from pathlib import Path
+
+          payload = {
+              name: Path(name).read_text(encoding="utf-8")
+              for name in ("requirements.txt", "requirements-dev.txt")
+          }
+          data = gzip.compress(json.dumps(payload).encode("utf-8"), compresslevel=9)
+          print("LOCK_PAYLOAD=" + base64.b64encode(data).decode("ascii"))
