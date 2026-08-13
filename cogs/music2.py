@@ -54,6 +54,13 @@ MUSIC2_SEARCH_SUFFIX = "audio"
 # the cached resolution is old enough that expiry becomes plausible.
 MUSIC2_STREAM_CACHE_TTL_SECONDS = 300.0
 
+# Product-level admission policy for on-demand music. Keep the deque itself
+# unbounded so an accidental overrun never evicts the oldest track silently;
+# admission is enforced explicitly and atomically before yt-dlp work starts.
+MUSIC2_QUEUE_MAX_TRACKS = 25
+MUSIC2_MAX_TRACKS_PER_MEMBER = 5
+MUSIC2_ADD_COOLDOWN_SECONDS = 5.0
+
 
 @dataclass(slots=True)
 class MusicTrack:
@@ -190,7 +197,10 @@ class Music2View(discord.ui.LayoutView):
         container.add_item(
             discord.ui.TextDisplay(
                 "### 🎛️ Contrôles de lecture\n"
-                "Ajoute un morceau, mets la lecture en pause ou passe directement au suivant."
+                "Ajoute un morceau, mets la lecture en pause ou passe directement au suivant.\n"
+                f"-# Limites : {MUSIC2_QUEUE_MAX_TRACKS} titres en attente · "
+                f"{MUSIC2_MAX_TRACKS_PER_MEMBER} titres max par membre (lecture comprise) · "
+                f"{MUSIC2_ADD_COOLDOWN_SECONDS:g} s entre deux ajouts."
             )
         )
         container.add_item(
@@ -262,6 +272,9 @@ class Music2Cog(commands.Cog):
         self._generation = 0
         self._extract_lock = asyncio.Lock()
         self._play_lock = asyncio.Lock()
+        self._queue_admission_lock = asyncio.Lock()
+        self._pending_adds: dict[int, int] = {}
+        self._last_add_at: dict[int, float] = {}
         self.store = RadioStore(data_dir=DATA_DIR)
         self.view = Music2View(self)
         self._panel_message: discord.Message | None = None
@@ -285,6 +298,75 @@ class Music2Cog(commands.Cog):
         if hours:
             return f"{hours:d}:{minutes:02d}:{seconds:02d}"
         return f"{minutes:d}:{seconds:02d}"
+
+    def _active_tracks_for_member(self, member_id: int) -> int:
+        active = sum(
+            1 for track in self.queue if track.requester_id == member_id
+        )
+        if self.current is not None and self.current.requester_id == member_id:
+            active += 1
+        active += self._pending_adds.get(member_id, 0)
+        return active
+
+    async def _reserve_queue_slot(self, member_id: int) -> str | None:
+        """Reserve capacity before yt-dlp work, or return a user-facing rejection."""
+        async with self._queue_admission_lock:
+            now = time.monotonic()
+            stale_ids = [
+                requester_id
+                for requester_id, added_at in self._last_add_at.items()
+                if now - added_at >= MUSIC2_ADD_COOLDOWN_SECONDS
+            ]
+            for requester_id in stale_ids:
+                self._last_add_at.pop(requester_id, None)
+
+            pending_total = sum(self._pending_adds.values())
+            if len(self.queue) + pending_total >= MUSIC2_QUEUE_MAX_TRACKS:
+                return (
+                    "❌ La file Music 2.0 est pleine "
+                    f"({MUSIC2_QUEUE_MAX_TRACKS} titres en attente)."
+                )
+
+            if self._active_tracks_for_member(member_id) >= MUSIC2_MAX_TRACKS_PER_MEMBER:
+                return (
+                    "❌ Limite atteinte : "
+                    f"{MUSIC2_MAX_TRACKS_PER_MEMBER} titres maximum par membre "
+                    "(lecture en cours comprise)."
+                )
+
+            last_add = self._last_add_at.get(member_id)
+            if last_add is not None:
+                remaining = max(
+                    MUSIC2_ADD_COOLDOWN_SECONDS - (now - last_add),
+                    0.0,
+                )
+                return (
+                    "⏳ Attends encore "
+                    f"{remaining:.1f} s avant d'ajouter un autre titre."
+                )
+
+            self._pending_adds[member_id] = self._pending_adds.get(member_id, 0) + 1
+            self._last_add_at[member_id] = now
+            return None
+
+    async def _release_queue_reservation(self, member_id: int) -> None:
+        async with self._queue_admission_lock:
+            pending = self._pending_adds.get(member_id, 0)
+            if pending <= 1:
+                self._pending_adds.pop(member_id, None)
+            else:
+                self._pending_adds[member_id] = pending - 1
+
+    async def _commit_reserved_track(self, track: MusicTrack) -> None:
+        async with self._queue_admission_lock:
+            pending = self._pending_adds.get(track.requester_id, 0)
+            if pending <= 0:
+                raise RuntimeError("Réservation Music 2.0 absente")
+            if pending == 1:
+                self._pending_adds.pop(track.requester_id, None)
+            else:
+                self._pending_adds[track.requester_id] = pending - 1
+            self.queue.append(track)
 
     def build_panel_embed(self) -> discord.Embed:
         """Legacy data projection kept for compatibility with existing callers/tests."""
@@ -755,7 +837,17 @@ class Music2Cog(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        rejection = await self._reserve_queue_slot(member.id)
+        if rejection is not None:
+            await interaction.response.send_message(rejection, ephemeral=True)
+            return
+
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        except Exception:
+            await self._release_queue_reservation(member.id)
+            raise
+
         target = query.strip()
         is_url = urlparse(target).scheme in {"http", "https"}
         mode = "url" if is_url else "texte"
@@ -773,6 +865,7 @@ class Music2Cog(commands.Cog):
                 info = await self._search_info(target)
             track = self._track_from_info(info, member.id)
         except Exception as exc:
+            await self._release_queue_reservation(member.id)
             logger.warning("[music2] recherche impossible: %s", exc)
             await interaction.followup.send(
                 "❌ Impossible de trouver ou lire ce titre.",
@@ -786,7 +879,7 @@ class Music2Cog(commands.Cog):
             track.title,
             bool(track.cached_stream_url),
         )
-        self.queue.append(track)
+        await self._commit_reserved_track(track)
         position = len(self.queue)
         if self.current is None:
             await self._play_next()
