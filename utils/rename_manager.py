@@ -220,6 +220,7 @@ class _RenameManager:
                 await channel.edit(name=name)
             except discord.NotFound:
                 logging.warning("[rename_manager] channel %s not found", cid)
+                self.forget_channel(cid)
                 return
             except discord.HTTPException as exc:
                 if exc.status == 429 and attempt < CHANNEL_RENAME_MAX_RETRIES:
