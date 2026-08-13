@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Dict
 
@@ -151,7 +151,7 @@ class StatsCog(commands.Cog):
         """Met à jour le nombre de membres une fois par jour."""
         await self.bot.wait_until_ready()
         # Reset du cache au début de chaque mois
-        if datetime.utcnow().day == 1:
+        if datetime.now(timezone.utc).day == 1:
             for p in [STATS_CACHE_FILE, STATS_CACHE_FILE.with_suffix(STATS_CACHE_FILE.suffix + ".bak")]:
                 try:
                     p.unlink()
