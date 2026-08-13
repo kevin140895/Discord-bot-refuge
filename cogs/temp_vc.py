@@ -15,20 +15,29 @@ from config import (
     RENAME_DELAY,
     TEMP_VC_CHECK_INTERVAL_SECONDS,
 )
+from storage.temp_vc_control_store import load_temp_vc_owners
 from storage.temp_vc_store import (
+    GENERIC_TEMP_VC_TYPE,
+    TempVCRecord,
+    build_temp_vc_record,
     load_temp_vc_ids,
+    load_temp_vc_registry,
     load_last_names_cache,
     save_last_names_cache,
-    save_temp_vc_ids,
-    save_temp_vc_ids_async,
+    save_temp_vc_registry_async,
 )
-from utils.temp_vc_cleanup import delete_untracked_temp_vcs, TEMP_VC_NAME_RE
+from utils.temp_vc_cleanup import delete_empty_managed_temp_vcs
 from utils.rename_manager import rename_manager
 
 logger = logging.getLogger(__name__)
 
-# IDs des salons vocaux temporaires connus
-TEMP_VC_IDS: Set[int] = set(load_temp_vc_ids())
+# Registre de provenance: seule source d'autorité pour les suppressions automatiques.
+TEMP_VC_REGISTRY: Dict[int, TempVCRecord] = load_temp_vc_registry()
+TEMP_VC_IDS: Set[int] = {
+    channel_id
+    for channel_id, record in TEMP_VC_REGISTRY.items()
+    if record["type"] == GENERIC_TEMP_VC_TYPE
+}
 
 # Mapping « rôle principal → nom de base du salon »
 ROLE_NAMES: Dict[int, str] = {
@@ -46,23 +55,7 @@ class TempVCCog(commands.Cog):
         self._rename_tasks: Dict[int, asyncio.Task] = {}
         self._last_names: Dict[int, str] = {}
 
-        # Récupération “best effort” si la liste en storage est vide
-        if not TEMP_VC_IDS:
-            getter = getattr(bot, "get_channel", lambda _id: None)
-            category = getter(TEMP_VC_CATEGORY)
-            if isinstance(category, discord.CategoryChannel):
-                for ch in category.voice_channels:
-                    base = ch.name.split("•", 1)[0].strip()
-                    if TEMP_VC_NAME_RE.match(base):
-                        TEMP_VC_IDS.add(ch.id)
-                        self._last_names[ch.id] = ch.name
-
-                if TEMP_VC_IDS:
-                    save_temp_vc_ids(TEMP_VC_IDS.copy())
-                    loop = getattr(bot, "loop", None)
-                    if loop:
-                        loop.create_task(self._save_last_names_cache())
-
+        # Aucun salon n'est découvert/adopté depuis son nom ou sa catégorie.
         self.cleanup.start()
         self.monitor_rename_worker.start()
         self.health_check.start()
@@ -71,6 +64,7 @@ class TempVCCog(commands.Cog):
     async def on_ready(self) -> None:
         """Démarrage garanti du rename_manager et chargement du cache."""
         await self._ensure_rename_worker()
+        await self._migrate_legacy_temp_vcs()
         await self._load_last_names_cache()
 
     def cog_unload(self) -> None:
@@ -112,6 +106,58 @@ class TempVCCog(commands.Cog):
         else:
             if data:
                 self._last_names.update(data)
+
+    async def _migrate_legacy_temp_vcs(self) -> None:
+        """Migrate legacy IDs only when independent provenance can be reconstructed.
+
+        An ID from the old file is never enough on its own. Migration requires an
+        existing generic voice channel in the configured category plus a persisted
+        owner from the controls store. ``created_at`` comes from the Discord
+        snowflake-backed channel property. Names are deliberately ignored.
+        """
+        try:
+            legacy_ids = load_temp_vc_ids()
+            legacy_owners = load_temp_vc_owners()
+        except Exception:
+            logger.exception("[temp_vc] échec de lecture des stores legacy")
+            return
+
+        changed = False
+        for channel_id in legacy_ids:
+            if channel_id in TEMP_VC_REGISTRY:
+                continue
+
+            channel = self.bot.get_channel(channel_id)
+            owner_id = legacy_owners.get(channel_id)
+            if not isinstance(channel, discord.VoiceChannel) or owner_id is None:
+                continue
+            if channel.category_id != TEMP_VC_CATEGORY:
+                continue
+
+            try:
+                record = build_temp_vc_record(
+                    channel.id,
+                    owner_id,
+                    channel.created_at.isoformat(),
+                    record_type=GENERIC_TEMP_VC_TYPE,
+                )
+            except (TypeError, ValueError):
+                logger.warning(
+                    "[temp_vc] migration legacy ignorée pour %s: provenance invalide",
+                    channel_id,
+                )
+                continue
+
+            TEMP_VC_REGISTRY[channel_id] = record
+            TEMP_VC_IDS.add(channel_id)
+            changed = True
+
+        if changed:
+            await save_temp_vc_registry_async(TEMP_VC_REGISTRY.copy())
+            logger.info(
+                "[temp_vc] migration legacy sûre terminée: %d salon(s) géré(s)",
+                len(TEMP_VC_IDS),
+            )
 
     # ---------- outils internes ----------
 
@@ -261,7 +307,7 @@ class TempVCCog(commands.Cog):
         return None
 
     async def _create_temp_vc(self, member: discord.Member) -> discord.VoiceChannel:
-        """Crée un salon vocal temporaire et l'enregistre."""
+        """Crée un salon vocal temporaire et persiste sa preuve de provenance."""
         category = self.bot.get_channel(TEMP_VC_CATEGORY)
         if not isinstance(category, discord.CategoryChannel):
             raise RuntimeError("TEMP_VC_CATEGORY invalide")
@@ -270,10 +316,31 @@ class TempVCCog(commands.Cog):
         limit = self._resolve_user_limit(base)
 
         channel = await category.create_voice_channel(base, user_limit=limit)
+        record = build_temp_vc_record(
+            channel.id,
+            member.id,
+            channel.created_at.isoformat(),
+            record_type=GENERIC_TEMP_VC_TYPE,
+        )
 
+        TEMP_VC_REGISTRY[channel.id] = record
         TEMP_VC_IDS.add(channel.id)
         self._last_names[channel.id] = channel.name
-        await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+        try:
+            await save_temp_vc_registry_async(TEMP_VC_REGISTRY.copy())
+        except Exception:
+            TEMP_VC_REGISTRY.pop(channel.id, None)
+            TEMP_VC_IDS.discard(channel.id)
+            self._last_names.pop(channel.id, None)
+            try:
+                await channel.delete(reason="Échec enregistrement provenance Temp VC")
+            except discord.HTTPException:
+                logger.exception(
+                    "[temp_vc] suppression du salon %s après échec du registre impossible",
+                    channel.id,
+                )
+            raise
+
         await self._save_last_names_cache()
         return channel
 
@@ -307,9 +374,10 @@ class TempVCCog(commands.Cog):
                     new_vc.id,
                 )
                 await new_vc.delete(reason="Échec du déplacement du membre")
+                TEMP_VC_REGISTRY.pop(new_vc.id, None)
                 TEMP_VC_IDS.discard(new_vc.id)
                 self._last_names.pop(new_vc.id, None)
-                await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                await save_temp_vc_registry_async(TEMP_VC_REGISTRY.copy())
                 await self._save_last_names_cache()
                 return
 
@@ -328,9 +396,10 @@ class TempVCCog(commands.Cog):
                     if task:
                         task.cancel()
 
+                    TEMP_VC_REGISTRY.pop(before.channel.id, None)
                     TEMP_VC_IDS.discard(before.channel.id)
                     self._last_names.pop(before.channel.id, None)
-                    await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                    await save_temp_vc_registry_async(TEMP_VC_REGISTRY.copy())
                     await self._save_last_names_cache()
 
         # 3) Renommage sur changement d'état vocal
@@ -372,11 +441,12 @@ class TempVCCog(commands.Cog):
             removed = False
             for cid in list(TEMP_VC_IDS):
                 if self.bot.get_channel(cid) is None:
+                    TEMP_VC_REGISTRY.pop(cid, None)
                     TEMP_VC_IDS.discard(cid)
                     self._last_names.pop(cid, None)
                     removed = True
             if removed:
-                await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+                await save_temp_vc_registry_async(TEMP_VC_REGISTRY.copy())
                 await self._save_last_names_cache()
 
             stale = False
@@ -407,8 +477,20 @@ class TempVCCog(commands.Cog):
                 if isinstance(channel, discord.VoiceChannel):
                     await self._update_channel_name(channel)
 
-            await delete_untracked_temp_vcs(self.bot, TEMP_VC_CATEGORY, TEMP_VC_IDS.copy())
-            await save_temp_vc_ids_async(TEMP_VC_IDS.copy())
+            deleted_ids = await delete_empty_managed_temp_vcs(
+                self.bot,
+                TEMP_VC_REGISTRY.copy(),
+            )
+            if deleted_ids:
+                for channel_id in deleted_ids:
+                    task = self._rename_tasks.pop(channel_id, None)
+                    if task:
+                        task.cancel()
+                    TEMP_VC_REGISTRY.pop(channel_id, None)
+                    TEMP_VC_IDS.discard(channel_id)
+                    self._last_names.pop(channel_id, None)
+                await save_temp_vc_registry_async(TEMP_VC_REGISTRY.copy())
+
             await self._save_last_names_cache()
         except Exception:
             logger.exception("Erreur dans cleanup")
