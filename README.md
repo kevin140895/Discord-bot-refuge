@@ -2,35 +2,48 @@
 
 This Discord bot requires the Opus audio codec library and FFmpeg for voice features.
 
-## Entrypoint
+## Entrypoint et architecture runtime
 
-The bot launches via [`main.py`](./main.py). Docker images and Procfile run:
+Le bot démarre via [`main.py`](./main.py). Le Dockerfile et le Procfile lancent :
 
 ```bash
 python main.py
 ```
 
+`main.py` est l'entrypoint de production : il configure les logs Railway, les intents Discord, les alertes critiques, charge le token puis instancie [`RefugeBot`](./bot.py).
+
+`bot.py` contient la classe `RefugeBot` réellement utilisée en production. Elle possède le lifecycle principal du bot : initialisation du tracing HTTP Discord, démarrage des services partagés, découverte/chargement des cogs, synchronisation des commandes et fermeture ordonnée. Les tests importent et instrumentent cette même classe ; il ne s'agit pas d'une implémentation parallèle réservée aux tests.
+
 ## System dependencies
 
-Install `libopus0` and `ffmpeg` on Debian/Ubuntu:
+Le build de production est défini par le [`Dockerfile`](./Dockerfile) racine. Il installe notamment `libopus0` et `ffmpeg` dans l'image runtime, ainsi que les autres dépendances système nécessaires au bot.
+
+Pour un lancement local sur Debian/Ubuntu :
 
 ```bash
 sudo apt install libopus0 ffmpeg
 ```
 
-The `nixpacks.toml` build configuration already lists `libopus0` to ensure the library is present in production environments. The Python dependencies in [`requirements.txt`](./requirements.txt) include `discord.py[voice]` and `imageio-ffmpeg` so FFmpeg support is available.
+Les dépendances Python de [`requirements.txt`](./requirements.txt) incluent `discord.py[voice]` et `imageio-ffmpeg`.
 
 ## FFmpeg options
 
-Audio playback relies on FFmpeg. Some useful parameters can be tuned in
-`bot.py`:
+Les profils FFmpeg ne sont pas définis dans `bot.py`.
 
-- `-fflags nobuffer` : désactive le tampon d'entrée pour réduire la latence.
-- `-probesize 32k` : diminue les données analysées afin d'accélérer le démarrage du flux.
+Les constantes audio sont centralisées dans [`utils/audio.py`](./utils/audio.py) :
+
+- `FFMPEG_BEFORE` / `FFMPEG_OPTIONS` pour les radios live à faible latence ;
+- `FFMPEG_VOD_BEFORE` / `FFMPEG_VOD_OPTIONS` pour les morceaux à la demande avec buffering normal et reconnexion réseau.
+
+[`utils/voice.py`](./utils/voice.py) sélectionne ensuite le profil approprié dans `play_stream()` et le transmet à `discord.FFmpegPCMAudio`.
+
+Les paramètres historiques suivants sont donc toujours utilisés pour le profil radio live, mais leur propriétaire est désormais `utils/audio.py` :
+
+- `-fflags nobuffer` : désactive le tampon d'entrée pour réduire la latence ;
+- `-probesize 32k` : réduit les données analysées au démarrage du flux ;
 - `-filter:a loudnorm` : applique une normalisation du volume.
 
-Ces valeurs peuvent être ajustées dans la fonction `_before_opts()` et dans
-la variable `audio_opts` selon vos besoins.
+Toute évolution des options FFmpeg doit être faite dans `utils/audio.py`, puis validée via les tests de profils audio/voice.
 
 ## Configuration
 
@@ -45,6 +58,8 @@ Pour récupérer un ID dans Discord, activez le *Mode développeur* puis utilise
 ### Railway
 
 Railway fournit les variables du service au processus sous forme de variables d'environnement. Railway détecte également les fichiers `.env.example` présents à la racine d'un dépôt GitHub afin de proposer les variables à configurer dans l'onglet **Variables** du service.
+
+Le build de ce dépôt est volontairement piloté par le [`Dockerfile`](./Dockerfile) racine. Railway détecte automatiquement ce fichier et l'utilise pour construire le service. L'ancien `nixpacks.toml` a été retiré afin qu'il ne suggère plus l'existence d'un second chemin de build.
 
 Après l'ajout, la modification ou la suppression d'une variable Railway, appliquez les changements staged via un nouveau déploiement pour qu'ils soient pris en compte par le conteneur.
 
