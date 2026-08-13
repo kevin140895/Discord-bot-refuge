@@ -143,16 +143,39 @@ class RadioCog(commands.Cog):
             if fetch:
                 try:
                     msg = await fetch(int(stored.get("message_id", 0)))
+                except discord.NotFound as e:  # pragma: no cover - Discord REST
+                    logger.debug("Message radio enregistré introuvable: %s", e)
+                except discord.Forbidden as e:  # pragma: no cover - Discord REST
+                    logger.warning(
+                        "Accès refusé au message radio enregistré: %s", e
+                    )
+                except discord.HTTPException as e:  # pragma: no cover - Discord REST
+                    logger.warning(
+                        "Échec Discord lors de la récupération du panneau radio: %s",
+                        e,
+                    )
+                else:
                     if _is_radio_message(msg):
                         try:
                             await self._render_radio_message(msg)
-                        except Exception as e:  # pragma: no cover - network issues
+                        except discord.NotFound as e:  # pragma: no cover - Discord REST
+                            logger.debug(
+                                "Panneau radio supprimé pendant son actualisation: %s",
+                                e,
+                            )
+                        except discord.Forbidden as e:  # pragma: no cover - Discord REST
+                            logger.warning(
+                                "Accès refusé pour actualiser le panneau radio: %s",
+                                e,
+                            )
+                            return
+                        except discord.HTTPException as e:  # pragma: no cover - Discord REST
                             logger.warning(
                                 "Impossible de mettre à jour le panneau radio: %s", e
                             )
-                        return
-                except Exception as e:  # pragma: no cover - network issues
-                    logger.debug("Failed to fetch stored radio message: %s", e)
+                            return
+                        else:
+                            return
 
         # 2) Search a bounded recent history for an existing radio message.
         found = None
@@ -167,27 +190,58 @@ class RadioCog(commands.Cog):
                 else:
                     try:
                         await msg.delete()
-                    except Exception as e:  # pragma: no cover - best effort
+                    except discord.NotFound as e:  # pragma: no cover - Discord REST
                         logger.debug(
-                            "Failed to delete duplicate radio message: %s", e
+                            "Doublon du panneau radio déjà supprimé: %s", e
                         )
-        except Exception as e:
+                    except discord.Forbidden as e:  # pragma: no cover - Discord REST
+                        logger.warning(
+                            "Accès refusé pour supprimer un doublon radio: %s", e
+                        )
+                    except discord.HTTPException as e:  # pragma: no cover - Discord REST
+                        logger.debug(
+                            "Échec Discord lors de la suppression d'un doublon radio: %s",
+                            e,
+                        )
+        except discord.NotFound as e:  # pragma: no cover - Discord REST
+            logger.warning("Salon radio introuvable pendant la recherche: %s", e)
+            return
+        except discord.Forbidden as e:  # pragma: no cover - Discord REST
+            logger.warning("Accès refusé à l'historique du salon radio: %s", e)
+            return
+        except discord.HTTPException as e:  # pragma: no cover - Discord REST
             logger.warning("Impossible de vérifier le message radio: %s", e)
             return
 
         if found:
             try:
                 await self._render_radio_message(found)
-            except Exception as e:  # pragma: no cover - best effort
+            except discord.NotFound as e:  # pragma: no cover - Discord REST
+                logger.debug(
+                    "Panneau radio récent supprimé pendant son actualisation: %s", e
+                )
+                found = None
+            except discord.Forbidden as e:  # pragma: no cover - Discord REST
+                logger.warning(
+                    "Accès refusé pour actualiser le panneau radio récent: %s", e
+                )
+                return
+            except discord.HTTPException as e:  # pragma: no cover - Discord REST
                 logger.warning("Impossible de mettre à jour le panneau radio: %s", e)
-            self.store.set_radio_message(channel_id, found.id)
-            return
+                return
+            else:
+                self.store.set_radio_message(channel_id, found.id)
+                return
 
         # 3) No message found in the recent window -> create the Components V2 panel.
         try:
             msg = await channel.send(view=RadioView())
             self.store.set_radio_message(channel_id, msg.id)
-        except Exception as e:
+        except discord.NotFound as e:  # pragma: no cover - Discord REST
+            logger.warning("Salon radio introuvable lors de l'envoi du panneau: %s", e)
+        except discord.Forbidden as e:  # pragma: no cover - Discord REST
+            logger.warning("Accès refusé pour envoyer le panneau radio: %s", e)
+        except discord.HTTPException as e:  # pragma: no cover - Discord REST
             logger.warning("Impossible d'envoyer le message radio: %s", e)
 
     @commands.Cog.listener()
@@ -220,7 +274,9 @@ class RadioCog(commands.Cog):
         if not is_done():
             try:
                 await interaction.response.defer(ephemeral=True)
-            except Exception:
+            except discord.InteractionResponded:
+                logger.debug("Interaction radio déjà acquittée avant defer")
+            except discord.HTTPException:
                 logger.debug("Impossible de defer la réponse radio", exc_info=True)
 
         if self.stream_url == stream_url and self._previous_stream:
@@ -286,7 +342,9 @@ class RadioCog(commands.Cog):
 
         try:
             await responder(message, ephemeral=True)
-        except Exception:
+        except discord.InteractionResponded:
+            logger.debug("Interaction radio déjà répondue")
+        except discord.HTTPException:
             logger.warning("Réponse radio impossible", exc_info=True)
 
     @commands.Cog.listener()
