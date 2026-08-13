@@ -118,7 +118,7 @@ jobs:
         run: python -m pytest -q
 
   static-analysis:
-    name: mypy-core (Python 3.11 production)
+    name: quality-gate (Python 3.11 production)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -141,5 +141,44 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip check
 
+      - name: Run Ruff
+        run: python -m ruff check .
+
       - name: Run mypy on production entrypoints and configuration
+        if: always()
         run: python -m mypy main.py bot.py config.py
+
+      - name: Compile Python sources
+        if: always()
+        run: python -m compileall -q main.py bot.py config.py cogs utils
+
+      - name: Smoke-test core imports
+        if: always()
+        run: python -c "import bot, config, main; print('core imports ok')"
+
+  dependency-audit:
+    name: pip-audit (runtime dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install audit tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip check
+
+      - name: Audit runtime dependency requirements
+        run: python -m pip_audit -r requirements.txt
