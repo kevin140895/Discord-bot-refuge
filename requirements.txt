@@ -9,4 +9,4 @@ Pillow>=10.0,<13
 yt-dlp[default]>=2025.11.12
 imageio-ffmpeg>=0.4,<1
 aiohttp>=3.8,<4
-tzdata>=2024.1
+tzdata>=2026.3
