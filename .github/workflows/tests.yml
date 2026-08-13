@@ -27,18 +27,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build hardened Docker image
         run: docker build --tag refuge-bot:ci .
 
       - name: Verify production Python runtime
-        run: |
-          docker run --rm --entrypoint python refuge-bot:ci -c '
-            import sys
-            assert sys.version_info[:2] == (3, 11), sys.version
-            print(sys.version)
-          '
+        run: docker run --rm --entrypoint python refuge-bot:ci -c 'import sys; assert sys.version_info[:2] == (3, 11), sys.version; print(sys.version)'
 
       - name: Verify Docker non-root runtime
         run: |
@@ -88,10 +83,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -129,10 +124,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
