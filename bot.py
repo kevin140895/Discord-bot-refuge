@@ -133,6 +133,12 @@ class RefugeBot(commands.Bot):
             self.add_view(StreamerTempVoiceView(self))
             self._streamer_temp_vc_view_added = True
 
+    async def on_guild_channel_delete(
+        self, channel: discord.abc.GuildChannel
+    ) -> None:
+        """Release rename history when Discord confirms a channel deletion."""
+        rename_manager.forget_channel(channel.id)
+
     async def announce_level_up(
         self,
         guild: discord.Guild,
