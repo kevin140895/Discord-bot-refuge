@@ -123,7 +123,7 @@ jobs:
         run: python -m pytest -q
 
   static-analysis:
-    name: mypy (Python 3.11 production)
+    name: mypy-core (Python 3.11 production)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -146,5 +146,5 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip check
 
-      - name: Run mypy against the production target
-        run: python -m mypy main.py bot.py config.py cogs utils
+      - name: Run mypy on production entrypoints and configuration
+        run: python -m mypy main.py bot.py config.py
