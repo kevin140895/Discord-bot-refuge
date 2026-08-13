@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import time
 
-from settings import ConfigError, Settings
+from settings import Settings
 
 
 SETTINGS = Settings.from_env()
