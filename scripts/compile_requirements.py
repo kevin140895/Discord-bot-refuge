@@ -37,7 +37,8 @@ def _compile(source: str, output: str, extra_args: list[str]) -> None:
 def main() -> int:
     if importlib.util.find_spec("piptools") is None:
         print(
-            "pip-tools is required; install pip==26.1.2 and pip-tools==7.6.0 first.",
+            "pip-tools is required; install the pinned toolchain with "
+            "'python -m pip install -r requirements-tools.txt'.",
             file=sys.stderr,
         )
         return 2
