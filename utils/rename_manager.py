@@ -33,7 +33,6 @@ class _RenameManager:
         self._queued_ids: set[int] = set()
         self._pending: Dict[int, Tuple[discord.abc.GuildChannel, str]] = {}
         self._last_per_channel: Dict[int, float] = {}
-        # TODO: consider periodic cleanup for IDs that are never reused
         self._last_global: float = 0.0
         self._global_dispatch_lock = asyncio.Lock()
         self._channel_tasks: Dict[int, asyncio.Task] = {}
@@ -77,6 +76,10 @@ class _RenameManager:
             self._queued_ids.discard(cid)
             self._queue.task_done()
         self._queued_ids.clear()
+
+    def forget_channel(self, channel_id: int) -> None:
+        """Forget rename history for a channel that no longer exists."""
+        self._last_per_channel.pop(channel_id, None)
 
     async def request(
         self, channel: discord.abc.GuildChannel, new_name: str
@@ -185,7 +188,7 @@ class _RenameManager:
                     "[rename_manager] channel %s deleted before rename; skipping",
                     cid,
                 )
-                self._last_per_channel.pop(cid, None)
+                self.forget_channel(cid)
                 continue
 
             await self._edit_with_retries(channel, cid, name)
