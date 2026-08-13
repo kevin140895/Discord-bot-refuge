@@ -46,22 +46,33 @@ class F1Standings(commands.Cog):
         self.bot = bot
         self.session: Optional[aiohttp.ClientSession] = None
         self._task: Optional[asyncio.Task] = None
-        self._current_year = datetime.now().year
+        self._current_year = datetime.now(timezone.utc).year
         self._driver_cache: Dict[int, Dict[str, str]] = {}
         self._state_lock = asyncio.Lock()
-        # Démarrer la surveillance
-        self._task = asyncio.create_task(self._f1_monitor())
 
-    def cog_unload(self) -> None:
-        # Annuler la tâche et fermer la session HTTP
-        if self._task:
-            self._task.cancel()
-        if self.session and not self.session.closed:
+    async def cog_load(self) -> None:
+        """Démarre la surveillance uniquement lorsque discord.py charge le Cog."""
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(
+                self._f1_monitor(),
+                name="f1-standings-monitor",
+            )
+
+    async def cog_unload(self) -> None:
+        """Arrête la surveillance et ferme proprement la session HTTP."""
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            task.cancel()
             try:
-                asyncio.create_task(self.session.close())
-            except RuntimeError:
-                # Pas de boucle d'événements active
+                await task
+            except asyncio.CancelledError:
                 pass
+
+        session = self.session
+        self.session = None
+        if session is not None and not session.closed:
+            await session.close()
 
     # ── Méthodes de persistance ──────────────────────────────
     def _read_state(self) -> Dict[str, Any]:
@@ -122,7 +133,7 @@ class F1Standings(commands.Cog):
             messages = state.get("messages", {})
             entry = messages.setdefault(session_type, {})
             entry["message_id"] = new_id
-            entry["last_update"] = datetime.now().isoformat()
+            entry["last_update"] = datetime.now(timezone.utc).isoformat()
             state["messages"] = messages
             self._write_state(state)
 
@@ -136,7 +147,7 @@ class F1Standings(commands.Cog):
         embed = discord.Embed(
             title=f"{session_info['emoji']} {session_info['name']} - GP {gp_name} {self._current_year}",
             color=0xFF1801,  # Rouge F1
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Ajouter les résultats
