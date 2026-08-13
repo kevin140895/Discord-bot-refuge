@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from utils.background_tasks import BackgroundTaskRegistry
+
 
 _MAIN_PATH = Path(__file__).resolve().parents[1] / "main.py"
 _MAIN_SPEC = importlib.util.spec_from_file_location("refuge_entrypoint", _MAIN_PATH)
@@ -137,6 +139,7 @@ async def test_emit_from_worker_thread_schedules_on_bot_loop():
     loop = asyncio.get_running_loop()
     sent = asyncio.Event()
     messages: list[str] = []
+    registry = BackgroundTaskRegistry()
 
     class Channel:
         async def send(self, message: str) -> None:
@@ -148,21 +151,63 @@ async def test_emit_from_worker_thread_schedules_on_bot_loop():
         loop=loop,
         get_channel=lambda channel_id: channel if channel_id == 123 else None,
     )
-    handler = DiscordCriticalHandler(bot, 123)
+    handler = DiscordCriticalHandler(bot, 123, task_registry=registry)
     handler.setFormatter(logging.Formatter("%(message)s"))
 
     await asyncio.to_thread(handler.emit, _record("critical from thread"))
     await asyncio.wait_for(sent.wait(), timeout=1)
+    await asyncio.sleep(0)
 
     assert messages == ["```critical from thread```"]
+    assert registry.pending_count == 0
 
 
 @pytest.mark.asyncio
-async def test_send_failure_is_consumed_without_loop_error():
+async def test_cache_miss_falls_back_to_fetch_channel():
+    loop = asyncio.get_running_loop()
+    sent = asyncio.Event()
+    fetched: list[int] = []
+    messages: list[str] = []
+    registry = BackgroundTaskRegistry()
+
+    class Channel:
+        async def send(self, message: str) -> None:
+            messages.append(message)
+            sent.set()
+
+    channel = Channel()
+
+    class Bot:
+        def __init__(self) -> None:
+            self.loop = loop
+
+        def get_channel(self, _channel_id: int):
+            return None
+
+        async def fetch_channel(self, channel_id: int):
+            fetched.append(channel_id)
+            return channel
+
+    handler = DiscordCriticalHandler(Bot(), 123, task_registry=registry)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+
+    await asyncio.to_thread(handler.emit, _record("cache miss"))
+    await asyncio.wait_for(sent.wait(), timeout=1)
+    await asyncio.sleep(0)
+
+    assert fetched == [123]
+    assert messages == ["```cache miss```"]
+    assert registry.pending_count == 0
+
+
+@pytest.mark.asyncio
+async def test_send_failure_is_logged_without_loop_error(caplog):
     loop = asyncio.get_running_loop()
     attempted = asyncio.Event()
     loop_errors: list[dict] = []
     previous_handler = loop.get_exception_handler()
+    delivery_logger = logging.getLogger("test.critical.delivery")
+    registry = BackgroundTaskRegistry(logger=delivery_logger)
 
     class FailingChannel:
         async def send(self, _message: str) -> None:
@@ -171,15 +216,20 @@ async def test_send_failure_is_consumed_without_loop_error():
 
     channel = FailingChannel()
     bot = SimpleNamespace(loop=loop, get_channel=lambda _channel_id: channel)
-    handler = DiscordCriticalHandler(bot, 123)
+    handler = DiscordCriticalHandler(bot, 123, task_registry=registry)
     handler.setFormatter(logging.Formatter("%(message)s"))
 
     loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
     try:
-        await asyncio.to_thread(handler.emit, _record("delivery failure"))
-        await asyncio.wait_for(attempted.wait(), timeout=1)
-        await asyncio.sleep(0)
+        with caplog.at_level(logging.ERROR, logger="test.critical.delivery"):
+            await asyncio.to_thread(handler.emit, _record("delivery failure"))
+            await asyncio.wait_for(attempted.wait(), timeout=1)
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
     finally:
         loop.set_exception_handler(previous_handler)
 
     assert loop_errors == []
+    assert registry.pending_count == 0
+    assert "background task failed: discord-critical-alert:123" in caplog.text
+    assert "discord unavailable" in caplog.text
