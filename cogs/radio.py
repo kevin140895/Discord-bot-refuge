@@ -154,10 +154,10 @@ class RadioCog(commands.Cog):
                 except Exception as e:  # pragma: no cover - network issues
                     logger.debug("Failed to fetch stored radio message: %s", e)
 
-        # 2) Search the history for an existing radio message.
+        # 2) Search a bounded recent history for an existing radio message.
         found = None
         try:
-            async for msg in channel.history(limit=None):
+            async for msg in channel.history(limit=100):
                 if msg.author.id != self.bot.user.id:
                     continue
                 if not _is_radio_message(msg):
@@ -183,7 +183,7 @@ class RadioCog(commands.Cog):
             self.store.set_radio_message(channel_id, found.id)
             return
 
-        # 3) No message found -> create the Components V2 panel.
+        # 3) No message found in the recent window -> create the Components V2 panel.
         try:
             msg = await channel.send(view=RadioView())
             self.store.set_radio_message(channel_id, msg.id)
