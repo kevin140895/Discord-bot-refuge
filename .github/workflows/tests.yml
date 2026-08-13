@@ -23,11 +23,47 @@ jobs:
   pytest:
     name: pytest
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Build hardened Docker image
+        run: docker build --tag refuge-bot:ci .
+
+      - name: Verify Docker non-root runtime
+        run: |
+          docker run --rm --entrypoint sh refuge-bot:ci -c '
+            test "$(id -u)" = "10001"
+            test "$(id -g)" = "10001"
+            test ! -e /app/.git
+            deno --version
+            ffmpeg -version >/dev/null
+          '
+
+      - name: Verify Railway volume bootstrap drops root
+        run: |
+          docker run --rm \
+            --user 0:0 \
+            --tmpfs /app/data:rw \
+            -e RAILWAY_VOLUME_MOUNT_PATH=/app/data \
+            refuge-bot:ci \
+            sh -c '
+              test "$(id -u)" = "10001"
+              test "$(id -g)" = "10001"
+              touch /app/data/.write-test
+            '
+
+      - name: Verify unexpected volume path is rejected
+        run: |
+          if docker run --rm \
+            --user 0:0 \
+            -e RAILWAY_VOLUME_MOUNT_PATH=/etc \
+            refuge-bot:ci true; then
+            echo "Unexpected Railway volume path was accepted" >&2
+            exit 1
+          fi
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
