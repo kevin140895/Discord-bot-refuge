@@ -1,32 +1,80 @@
-# Utilise une image Python légère
-FROM python:3.11-slim
+# Deno is downloaded in an isolated build stage so curl/unzip never reach the
+# runtime image. The release and archive checksums are pinned deliberately.
+FROM python:3.11-slim AS deno-fetcher
 
-# Installation des dépendances système nécessaires pour ffmpeg, opus, Pillow, etc.
+ARG TARGETARCH
+ARG DENO_VERSION=2.9.5
+ARG DENO_SHA256_AMD64=8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530
+ARG DENO_SHA256_ARM64=6b7cae3a8fc4385a59dea3146fcb8bad7fea4230e0ad36a8c692afacbc254be0
+
 RUN apt-get update && \
-    apt-get install -y \
-    libopus0 \
-    ffmpeg \
-    libjpeg-dev \
-    zlib1g-dev \
-    curl \
-    ca-certificates \
-    unzip \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
 
-# yt-dlp requiert désormais un runtime JavaScript externe pour une prise en
-# charge complète de YouTube. Deno est le runtime recommandé et activé par
-# défaut par yt-dlp.
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
+        amd64) deno_arch="x86_64"; deno_sha256="$DENO_SHA256_AMD64" ;; \
+        arm64) deno_arch="aarch64"; deno_sha256="$DENO_SHA256_ARM64" ;; \
+        *) echo "Architecture Deno non supportée: $arch" >&2; exit 1 ;; \
+    esac; \
+    archive="deno-${deno_arch}-unknown-linux-gnu.zip"; \
+    curl -fsSLo "/tmp/$archive" \
+        "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/${archive}"; \
+    echo "${deno_sha256}  /tmp/$archive" | sha256sum -c -; \
+    unzip -q "/tmp/$archive" -d /usr/local/bin; \
+    rm -f "/tmp/$archive"; \
     deno --version
 
-# Répertoire de travail dans le conteneur
+
+FROM python:3.11-slim
+
+ARG APP_UID=10001
+ARG APP_GID=10001
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/refuge \
+    DENO_DIR=/home/refuge/.cache/deno
+
+# Runtime dependencies only. gosu is used by the entrypoint solely when
+# Railway starts the container as root to initialise its root-owned volume;
+# the bot itself is then exec'd as the unprivileged refuge user.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ffmpeg \
+        gosu \
+        libjpeg-dev \
+        libopus0 \
+        passwd \
+        zlib1g-dev \
+    && groupadd --gid "$APP_GID" refuge \
+    && useradd --uid "$APP_UID" --gid "$APP_GID" --create-home \
+        --home-dir /home/refuge --shell /usr/sbin/nologin --no-log-init refuge \
+    && mkdir -p /app/data "$DENO_DIR" \
+    && chown -R refuge:refuge /app /home/refuge \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=deno-fetcher /usr/local/bin/deno /usr/local/bin/deno
+RUN deno --version
+
 WORKDIR /app
 
-# Copie tous les fichiers du projet
-COPY . .
-
-# Installation des dépendances Python
+# Keep dependency installation cacheable when application code changes.
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Lancement du bot
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+
+# .dockerignore prevents local secrets/runtime state from entering this COPY.
+COPY --chown=refuge:refuge . .
+
+USER refuge:refuge
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["python", "main.py"]
