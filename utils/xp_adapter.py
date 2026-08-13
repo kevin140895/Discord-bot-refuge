@@ -1,7 +1,7 @@
 """XP adapter bridging Machine à sous with the global XP store."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from storage.xp_store import xp_store
@@ -125,7 +125,7 @@ async def refund_xp_exact(
 
         user["xp"] = new_xp
         user["level"] = new_level
-        user["last_accessed"] = datetime.utcnow().isoformat()
+        user["last_accessed"] = datetime.now(timezone.utc).isoformat()
         xp_store.stats["total_updates"] += 1
 
     # A compensation must survive a process crash immediately after the failed
