@@ -38,7 +38,8 @@ async def delete_empty_managed_temp_vcs(
     The cleanup deliberately never discovers channels from category membership or
     channel names. A channel is eligible for deletion only when its ``channel_id``
     is present in the persisted registry with ``owner_id``, ``created_at`` and the
-    expected ``type``.
+    expected ``type``. The stored creation timestamp must also match Discord's
+    snowflake-backed ``created_at`` value for the live channel.
     """
     deleted: set[int] = set()
 
@@ -56,6 +57,14 @@ async def delete_empty_managed_temp_vcs(
 
         channel = bot.get_channel(channel_id)
         if not isinstance(channel, discord.VoiceChannel):
+            continue
+        if channel.id != int(record["channel_id"]):
+            continue
+        if channel.created_at.isoformat() != str(record["created_at"]):
+            logger.warning(
+                "[temp_vc_cleanup] created_at incohérent pour le salon %s; suppression ignorée",
+                channel_id,
+            )
             continue
         if channel.members:
             continue
