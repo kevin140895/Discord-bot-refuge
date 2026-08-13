@@ -46,8 +46,8 @@ async def test_cleanup_only_deletes_empty_registered_channels():
     }
     bot = SimpleNamespace(get_channel=channels.get)
     records = {
-        1: build_temp_vc_record(1, 101, "2026-08-13T00:00:00+00:00"),
-        2: build_temp_vc_record(2, 102, "2026-08-13T00:00:01+00:00"),
+        1: build_temp_vc_record(1, 101, registered_empty.created_at.isoformat()),
+        2: build_temp_vc_record(2, 102, registered_populated.created_at.isoformat()),
     }
 
     with patch("utils.temp_vc_cleanup.discord.VoiceChannel", DummyVoiceChannel):
@@ -61,10 +61,13 @@ async def test_cleanup_only_deletes_empty_registered_channels():
 
 
 @pytest.mark.asyncio
-async def test_cleanup_rejects_incomplete_or_wrong_type_provenance():
+async def test_cleanup_rejects_incomplete_wrong_type_or_timestamp_provenance():
     incomplete = DummyVoiceChannel(10, "Chat")
     wrong_type = DummyVoiceChannel(11, "PC")
-    bot = SimpleNamespace(get_channel={10: incomplete, 11: wrong_type}.get)
+    wrong_timestamp = DummyVoiceChannel(12, "Console")
+    bot = SimpleNamespace(
+        get_channel={10: incomplete, 11: wrong_type, 12: wrong_timestamp}.get
+    )
     records = {
         10: {
             "channel_id": 10,
@@ -75,8 +78,13 @@ async def test_cleanup_rejects_incomplete_or_wrong_type_provenance():
         11: build_temp_vc_record(
             11,
             111,
-            "2026-08-13T00:00:00+00:00",
+            wrong_type.created_at.isoformat(),
             record_type="streamer",
+        ),
+        12: build_temp_vc_record(
+            12,
+            112,
+            "2026-08-13T00:00:00+00:00",
         ),
     }
 
@@ -86,6 +94,7 @@ async def test_cleanup_rejects_incomplete_or_wrong_type_provenance():
     assert deleted == set()
     incomplete.delete.assert_not_awaited()
     wrong_type.delete.assert_not_awaited()
+    wrong_timestamp.delete.assert_not_awaited()
 
 
 def test_constructor_never_adopts_channels_from_name_or_category():
