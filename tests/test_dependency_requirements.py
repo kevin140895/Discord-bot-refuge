@@ -31,7 +31,9 @@ def test_dev_requirements_extend_runtime_and_include_test_tools():
 def test_runtime_dependencies_have_breaking_change_guards():
     runtime = set(_requirements("requirements.txt"))
 
-    assert "discord.py[voice]>=2.7,<3" in runtime
+    assert "discord.py>=2.7,<3" in runtime
+    assert "PyNaCl>=1.6.2,<1.7" in runtime
+    assert "davey>=0.1.0" in runtime
     assert "python-dotenv>=1.0,<2" in runtime
     assert "Pillow>=10.0,<13" in runtime
     assert "imageio-ffmpeg>=0.4,<1" in runtime
