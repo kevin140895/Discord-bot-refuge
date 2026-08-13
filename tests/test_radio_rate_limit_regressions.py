@@ -181,6 +181,40 @@ async def test_radio_station_command_never_edits_radio_channel(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_radio_defer_unexpected_error_propagates(monkeypatch) -> None:
+    bot = SimpleNamespace(loop=asyncio.get_running_loop())
+    cog = RadioCog(bot)
+    monkeypatch.setattr(cog, "_connect_and_play", AsyncMock())
+
+    response = FakeResponse()
+    response.defer = AsyncMock(side_effect=RuntimeError("radio defer bug"))
+    interaction = SimpleNamespace(
+        response=response,
+        followup=SimpleNamespace(send=AsyncMock()),
+    )
+
+    with pytest.raises(RuntimeError, match="radio defer bug"):
+        await cog.radio_rock(interaction)
+
+
+@pytest.mark.asyncio
+async def test_radio_response_unexpected_error_propagates() -> None:
+    bot = SimpleNamespace(loop=asyncio.get_running_loop())
+    cog = RadioCog(bot)
+    response = FakeResponse()
+    response._done = True
+    interaction = SimpleNamespace(
+        response=response,
+        followup=SimpleNamespace(
+            send=AsyncMock(side_effect=RuntimeError("radio response bug"))
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="radio response bug"):
+        await cog._send_radio_response(interaction, "test")
+
+
+@pytest.mark.asyncio
 async def test_compatibility_rename_helper_is_a_strict_noop() -> None:
     channel = DummyVoiceChannel()
     bot = SimpleNamespace(loop=asyncio.get_running_loop())
