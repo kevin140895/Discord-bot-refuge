@@ -48,6 +48,23 @@ Railway fournit les variables du service au processus sous forme de variables d'
 
 Après l'ajout, la modification ou la suppression d'une variable Railway, appliquez les changements staged via un nouveau déploiement pour qu'ils soient pris en compte par le conteneur.
 
+### Alertes critiques et observabilité
+
+`CRITICAL_LOG_CHANNEL_ID` fournit uniquement une **notification secondaire** dans Discord. Le handler essaie d'abord le cache `get_channel()`, puis `fetch_channel()` si le salon n'est pas présent en cache. Les tâches d'envoi sont enregistrées dans le registre commun de tâches d'arrière-plan : une erreur de récupération ou d'envoi est donc récupérée et journalisée au lieu d'être absorbée silencieusement.
+
+Discord ne doit pas être considéré comme la source d'alerte principale : si le processus Python tombe, si Discord est indisponible ou si l'event loop ne tourne plus, le bot peut être incapable d'envoyer sa propre alerte.
+
+En production Railway, la stratégie recommandée est :
+
+- conserver les logs structurés stdout/stderr comme source de diagnostic principale ;
+- utiliser une **Restart Policy** adaptée au service pour les crashes process ;
+- s'appuyer sur les statuts de déploiement et notifications Railway lorsqu'un déploiement devient `Crashed` ;
+- configurer des monitors Railway pour CPU, RAM, disque et egress lorsque des seuils opérationnels sont utiles ;
+- utiliser si nécessaire les Webhooks Railway vers un système externe pour les changements d'état de déploiement et les alertes ;
+- ajouter éventuellement un outil applicatif externe comme Sentry/APM pour la collecte d'exceptions et le suivi applicatif fin.
+
+Le healthcheck Railway est utile au moment du déploiement pour valider que la nouvelle instance devient prête, mais il ne constitue pas un monitoring continu après activation du déploiement.
+
 ### Principales familles de variables
 
 La liste exhaustive et les valeurs de référence restent dans [`.env.example`](./.env.example). Elle est organisée par familles :
