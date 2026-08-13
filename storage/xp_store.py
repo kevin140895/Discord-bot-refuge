@@ -5,9 +5,8 @@ import logging
 import math
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Tuple, TypedDict, Optional
-from functools import lru_cache
 
 from config import DATA_DIR
 from utils.persistence import ensure_dir, read_json_safe, atomic_write_json_async

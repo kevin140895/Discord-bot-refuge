@@ -9,7 +9,6 @@ commands with an explicit ``manage_guild`` permission check.
 from __future__ import annotations
 
 import discord
-from discord import app_commands
 from discord.app_commands.errors import MissingPermissions, NoPrivateMessage
 from discord.ext import commands
 

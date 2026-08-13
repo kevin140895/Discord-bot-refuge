@@ -10,7 +10,6 @@ from PIL import Image, ImageDraw
 
 from models.refuge_world import RefugeBuildingState, RefugeWorldState
 from rendering.refuge_world import (
-    REFUGE_CANVAS_SIZE,
     RefugeRenderContext,
     RefugeWorldRenderer,
     refuge_world_renderer as base_world_renderer,
@@ -36,7 +35,7 @@ def _mix(
     clamped = max(0.0, min(1.0, ratio))
     return tuple(
         int(round(a + (b - a) * clamped))
-        for a, b in zip(left, right)
+        for a, b in zip(left, right, strict=False)
     )
 
 
@@ -111,7 +110,7 @@ def _draw_glow(
 
     ratios = (0.12, 0.19, 0.28)
     radii = (base_radius + 20, base_radius + 10, base_radius)
-    for radius, ratio in zip(radii, ratios):
+    for radius, ratio in zip(radii, ratios, strict=False):
         glow = _mix(ground_color, (247, 141, 57), ratio)
         draw.ellipse(
             (x - radius, y - radius // 2, x + radius, y + radius // 2),

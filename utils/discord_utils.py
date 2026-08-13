@@ -74,7 +74,7 @@ async def safe_message_edit(message: discord.Message, **kwargs) -> discord.Messa
     elif "embeds" in kwargs:
         new_embeds = kwargs.get("embeds") or []
         same_embed = len(current_embeds) == len(new_embeds) and all(
-            m.to_dict() == n.to_dict() for m, n in zip(current_embeds, new_embeds)
+            m.to_dict() == n.to_dict() for m, n in zip(current_embeds, new_embeds, strict=False)
         )
 
     same_view = "view" not in kwargs

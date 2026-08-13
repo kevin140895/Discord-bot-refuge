@@ -343,7 +343,7 @@ def calculate_voice_xp(
 
     total_xp = 0.0
     base_event_multiplier = float(event_multiplier)
-    for segment_start, segment_end in zip(ordered, ordered[1:]):
+    for segment_start, segment_end in zip(ordered, ordered[1:], strict=False):
         if segment_end <= segment_start:
             continue
         midpoint = segment_start + (segment_end - segment_start) / 2

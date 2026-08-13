@@ -491,7 +491,7 @@ class QueueCog(commands.Cog):
                 async for msg in channel.history(limit=50):
                     if msg.author == self.bot.user and msg.embeds:
                         embed = msg.embeds[0]
-                        if f"File d'attente" in embed.title:
+                        if "File d'attente" in embed.title:
                             view = QueueView(self, channel_id)
                             view.update_options(queue)
                             new_embed = self._build_embed(queue)
