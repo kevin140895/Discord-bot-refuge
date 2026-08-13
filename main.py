@@ -11,6 +11,7 @@ import discord
 
 from bot import RefugeBot
 from config import CRITICAL_LOG_CHANNEL_ID
+from utils.background_tasks import BackgroundTaskRegistry, background_tasks
 
 
 _RAILWAY_LEVELS = {
@@ -59,10 +60,19 @@ def configure_logging() -> None:
 
 
 class DiscordCriticalHandler(logging.Handler):
-    def __init__(self, bot: discord.Client, channel_id: int) -> None:
+    """Forward CRITICAL logs to Discord as a best-effort secondary alert."""
+
+    def __init__(
+        self,
+        bot: discord.Client,
+        channel_id: int,
+        *,
+        task_registry: BackgroundTaskRegistry | None = None,
+    ) -> None:
         super().__init__(level=logging.CRITICAL)
         self.bot = bot
         self.channel_id = channel_id
+        self._task_registry = task_registry or background_tasks
 
     def _get_running_loop(self) -> asyncio.AbstractEventLoop | None:
         loop = getattr(self.bot, "loop", None)
@@ -74,26 +84,34 @@ class DiscordCriticalHandler(logging.Handler):
 
     async def _send(self, message: str) -> None:
         channel = self.bot.get_channel(self.channel_id)
-        if channel:
-            await channel.send(f"```{message}```")
+        if channel is None:
+            channel = await self.bot.fetch_channel(self.channel_id)
 
-    @staticmethod
-    def _consume_send_result(task: asyncio.Task[None]) -> None:
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            # A logging handler must never surface delivery failures back into
-            # the application or create "Task exception was never retrieved".
-            pass
+        send = getattr(channel, "send", None)
+        if not callable(send):
+            raise TypeError(
+                f"configured CRITICAL_LOG_CHANNEL_ID={self.channel_id} "
+                "is not messageable"
+            )
+
+        await send(f"```{message}```")
 
     def _schedule_send(self, message: str) -> None:
         loop = self._get_running_loop()
         if loop is None:
             return
-        task = loop.create_task(self._send(message))
-        task.add_done_callback(self._consume_send_result)
+
+        try:
+            self._task_registry.create_task(
+                self._send(message),
+                name=f"discord-critical-alert:{self.channel_id}",
+            )
+        except Exception:
+            # Keep the logging pipeline fail-safe, but never hide a scheduling
+            # failure: Railway/stdout remains the primary observability path.
+            logging.getLogger(__name__).exception(
+                "failed to schedule Discord CRITICAL alert"
+            )
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
