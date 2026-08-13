@@ -5,7 +5,7 @@ import logging
 import math
 import os
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Tuple, TypedDict, Optional
 
 from config import DATA_DIR
@@ -13,6 +13,19 @@ from utils.persistence import ensure_dir, read_json_safe, atomic_write_json_asyn
 
 XP_PATH = os.path.join(DATA_DIR, "data.json")
 logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    """Return the current timezone-aware UTC datetime."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_utc_datetime(value: str) -> datetime:
+    """Parse an ISO datetime and normalize legacy naive values to UTC."""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class XPUserData(TypedDict, total=False):
@@ -51,7 +64,7 @@ class XPStore:
         self._flush_task: Optional[asyncio.Task] = None
         self._periodic_task: Optional[asyncio.Task] = None
         self._batch_updates = BatchUpdate()
-        self._last_cleanup = datetime.utcnow()
+        self._last_cleanup = _utc_now()
         self._last_flushed_update_count = 0
         
         # Statistiques pour monitoring
@@ -132,8 +145,8 @@ class XPStore:
                 await self._process_batch_updates()
                 
                 # Vérifier périodiquement la taille sans évincer de données.
-                now = datetime.utcnow()
-                if (now - self._last_cleanup).seconds > 600:
+                now = _utc_now()
+                if (now - self._last_cleanup).total_seconds() > 600:
                     await self._cleanup_cache()
                     self._last_cleanup = now
                 
@@ -158,7 +171,7 @@ class XPStore:
                 new_xp = max(0, old_xp + amount)
                 user["xp"] = new_xp
                 user["level"] = self._calc_level(new_xp)
-                user["last_accessed"] = datetime.utcnow().isoformat()
+                user["last_accessed"] = _utc_now().isoformat()
                 
             self.stats["batch_flushes"] += 1
             self.stats["total_updates"] += len(updates)
@@ -268,8 +281,8 @@ class XPStore:
                 double_until = user.get("double_xp_until")
                 if double_until:
                     try:
-                        exp_dt = datetime.fromisoformat(double_until)
-                        if exp_dt > datetime.utcnow():
+                        exp_dt = _parse_utc_datetime(double_until)
+                        if exp_dt > _utc_now():
                             amount *= 2
                             logger.info("Double XP appliqué pour %s: %d XP", uid, amount)
                         else:
@@ -284,7 +297,7 @@ class XPStore:
             # Mettre à jour
             user["xp"] = new_xp
             user["level"] = new_level
-            user["last_accessed"] = datetime.utcnow().isoformat()
+            user["last_accessed"] = _utc_now().isoformat()
             
             self.stats["total_updates"] += 1
         
@@ -353,14 +366,14 @@ class XPStore:
             old_level = int(user.get("level", self._calc_level(old_xp)))
 
             if old_xp < amount:
-                user["last_accessed"] = datetime.utcnow().isoformat()
+                user["last_accessed"] = _utc_now().isoformat()
                 return False
 
             new_xp = old_xp - amount
             new_level = self._calc_level(new_xp)
             user["xp"] = new_xp
             user["level"] = new_level
-            user["last_accessed"] = datetime.utcnow().isoformat()
+            user["last_accessed"] = _utc_now().isoformat()
             self.stats["total_updates"] += 1
 
         self._schedule_flush()
@@ -395,7 +408,7 @@ class XPStore:
                 should_check_size = len(self.data) > self.cache_size * 1.2
 
             user = self.data[uid]
-            user["last_accessed"] = datetime.utcnow().isoformat()
+            user["last_accessed"] = _utc_now().isoformat()
             user_data = dict(user)
 
         # ``_cleanup_cache`` est un no-op d'intégrité aujourd'hui, mais on garde
