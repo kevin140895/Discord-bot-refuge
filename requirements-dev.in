@@ -1,0 +1,14 @@
+-r requirements.in
+
+# Test dependencies
+pytest
+pytest-asyncio
+freezegun
+
+# Static analysis and CI quality gates
+mypy
+ruff
+pip-audit
+
+# Lockfile compiler. Keep this explicit so lock regeneration itself is stable.
+pip-tools==7.5.3
