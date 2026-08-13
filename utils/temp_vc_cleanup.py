@@ -1,36 +1,79 @@
 import logging
-import re
-from typing import Iterable
+from typing import Mapping
 
 import discord
 from discord.ext import commands
 
+from storage.temp_vc_store import GENERIC_TEMP_VC_TYPE, TempVCRecord
+
 logger = logging.getLogger(__name__)
 
-TEMP_VC_NAME_RE = re.compile(r"^(PC|Console|Mobile|Crossplay|Chat)(?:\b.*)?$", re.I)
+
+def _is_complete_provenance_record(
+    channel_id: int,
+    record: TempVCRecord,
+    *,
+    expected_type: str,
+) -> bool:
+    """Return whether ``record`` is sufficient proof for destructive cleanup."""
+    try:
+        return (
+            int(record["channel_id"]) == int(channel_id)
+            and int(record["owner_id"]) > 0
+            and bool(str(record["created_at"]).strip())
+            and str(record["type"]) == expected_type
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
-async def delete_untracked_temp_vcs(
-    bot: commands.Bot, category_id: int, tracked_ids: Iterable[int]
-) -> None:
-    """Supprime les salons temporaires non répertoriés.
+async def delete_empty_managed_temp_vcs(
+    bot: commands.Bot,
+    records: Mapping[int, TempVCRecord],
+    *,
+    expected_type: str = GENERIC_TEMP_VC_TYPE,
+) -> set[int]:
+    """Delete only empty Temp VCs backed by complete provenance records.
 
-    Parcourt la catégorie ``category_id`` et supprime tout salon vocal dont le
-    nom correspond au schéma temporaire mais dont l'identifiant n'est pas dans
-    ``tracked_ids``. Les erreurs HTTP sont journalisées sans interrompre le
-    traitement.
+    The cleanup deliberately never discovers channels from category membership or
+    channel names. A channel is eligible for deletion only when its ``channel_id``
+    is present in the persisted registry with ``owner_id``, ``created_at`` and the
+    expected ``type``. The stored creation timestamp must also match Discord's
+    snowflake-backed ``created_at`` value for the live channel.
     """
-    category = bot.get_channel(category_id)
-    if not isinstance(category, discord.CategoryChannel):
-        return
+    deleted: set[int] = set()
 
-    tracked = set(tracked_ids)
-    for ch in list(category.voice_channels):
-        base = ch.name.split("•", 1)[0].strip()
-        if TEMP_VC_NAME_RE.match(base) and ch.id not in tracked:
-            if ch.members:
-                continue
-            try:
-                await ch.delete(reason="Salon temporaire orphelin")
-            except discord.HTTPException as exc:
-                logger.warning("Suppression salon %s échouée: %s", ch.id, exc)
+    for channel_id, record in records.items():
+        if not _is_complete_provenance_record(
+            channel_id,
+            record,
+            expected_type=expected_type,
+        ):
+            logger.warning(
+                "[temp_vc_cleanup] preuve incomplète pour le salon %s; suppression ignorée",
+                channel_id,
+            )
+            continue
+
+        channel = bot.get_channel(channel_id)
+        if not isinstance(channel, discord.VoiceChannel):
+            continue
+        if channel.id != int(record["channel_id"]):
+            continue
+        if channel.created_at.isoformat() != str(record["created_at"]):
+            logger.warning(
+                "[temp_vc_cleanup] created_at incohérent pour le salon %s; suppression ignorée",
+                channel_id,
+            )
+            continue
+        if channel.members:
+            continue
+
+        try:
+            await channel.delete(reason="Salon temporaire vide (registre bot)")
+        except discord.HTTPException as exc:
+            logger.warning("Suppression salon %s échouée: %s", channel.id, exc)
+        else:
+            deleted.add(channel.id)
+
+    return deleted

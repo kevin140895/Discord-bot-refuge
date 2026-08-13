@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from settings import Settings
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -9,8 +11,11 @@ def test_active_feature_channel_ids_are_centralized_in_config() -> None:
     economy_text = (ROOT / "cogs" / "economy_ui.py").read_text(encoding="utf-8")
     f1_text = (ROOT / "cogs" / "f1_standings.py").read_text(encoding="utf-8")
 
-    assert '"ECONOMY_CHANNEL_ID", 1409633293791400108' in config_text
-    assert '"F1_CHANNEL_ID", 0' in config_text
+    defaults = Settings.from_env({})
+    assert defaults.economy_channel_id == 1409633293791400108
+    assert defaults.f1_channel_id == 0
+    assert "ECONOMY_CHANNEL_ID: int = SETTINGS.economy_channel_id" in config_text
+    assert "F1_CHANNEL_ID: int = SETTINGS.f1_channel_id" in config_text
 
     assert "1409633293791400108" not in economy_text
     assert "CHANNEL_ID = config.ECONOMY_CHANNEL_ID" in economy_text

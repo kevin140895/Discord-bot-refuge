@@ -14,13 +14,13 @@ async def test_channel_name_truncated(monkeypatch):
     bot = SimpleNamespace(get_channel=lambda _id: None, loop=loop)
     monkeypatch.setattr(temp_vc.rename_manager, "start", AsyncMock())
 
-    async def no_save_ids(ids, max_retries=3):
+    async def no_save_registry(records, max_retries=3):
         return None
 
     async def no_save_cache(cache, max_retries=3):
         return None
 
-    monkeypatch.setattr(temp_vc, "save_temp_vc_ids_async", no_save_ids)
+    monkeypatch.setattr(temp_vc, "save_temp_vc_registry_async", no_save_registry)
     monkeypatch.setattr(temp_vc, "save_last_names_cache", no_save_cache)
 
     with patch.object(temp_vc.tasks.Loop, "start", lambda self, *a, **k: None):
@@ -35,4 +35,3 @@ async def test_channel_name_truncated(monkeypatch):
     name = cog._compute_channel_name(channel)
     assert len(name) == 100
     assert name == "Base • " + long_name[:93]
-
