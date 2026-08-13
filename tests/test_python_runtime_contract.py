@@ -27,7 +27,7 @@ def test_ci_covers_production_and_next_migration_runtime_only() -> None:
     assert 'name: docker-runtime (Python 3.11 production)' in workflow
     assert '- python-version: "3.11"\n            target: production' in workflow
     assert '- python-version: "3.12"\n            target: migration' in workflow
-    assert 'name: mypy (Python 3.11 production)' in workflow
+    assert 'name: mypy-core (Python 3.11 production)' in workflow
     assert 'python-version: "3.13"' not in workflow
     assert 'python-version: "3.14"' not in workflow
 
