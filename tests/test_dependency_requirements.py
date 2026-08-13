@@ -45,7 +45,16 @@ def test_music2_uses_known_good_youtube_runtime():
 
     assert "yt-dlp[default]>=2025.11.12" in runtime
     assert not any(line.startswith("bgutil-ytdlp-pot-provider") for line in runtime)
-    assert "DENO_INSTALL=/usr/local" in dockerfile
+
+    # Deno must stay explicit and reproducible. The old DENO_INSTALL marker
+    # represented the remote install.sh path and must not become the contract.
+    assert "deno.land/install.sh" not in dockerfile
+    assert "ARG DENO_VERSION=" in dockerfile
+    assert "DENO_SHA256_AMD64=" in dockerfile
+    assert "DENO_SHA256_ARM64=" in dockerfile
+    assert "sha256sum -c -" in dockerfile
+    assert "COPY --from=deno-fetcher /usr/local/bin/deno /usr/local/bin/deno" in dockerfile
     assert "deno --version" in dockerfile
+
     assert 'CMD ["python", "main.py"]' in dockerfile
     assert "bgutil-ytdlp-pot-provider" not in dockerfile
