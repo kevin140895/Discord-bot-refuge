@@ -37,8 +37,7 @@ def _compile(source: str, output: str, extra_args: list[str]) -> None:
 def main() -> int:
     if importlib.util.find_spec("piptools") is None:
         print(
-            "pip-tools is required; install the development lock or "
-            "pip-tools==7.5.3 first.",
+            "pip-tools is required; install pip==26.1.2 and pip-tools==7.6.0 first.",
             file=sys.stderr,
         )
         return 2
