@@ -666,6 +666,16 @@ def build_ai_response(reply: AIReply) -> discord.Embed:
             ),
             colour=discord.Colour.orange(),
         )
+    elif reply.status is AIStatus.GLOBAL_QUOTA:
+        embed = discord.Embed(
+            title="🛡️ Maître du jeu · Capacité IA",
+            description=(
+                "La limite globale temporaire du mode conversationnel est atteinte. "
+                f"Le service devrait se libérer dans environ **{_format_retry_after(reply.retry_after)}**.\n\n"
+                "Les réponses déterministes XP, boutique, radio et Double XP restent disponibles."
+            ),
+            colour=discord.Colour.orange(),
+        )
     elif reply.status is AIStatus.TOO_LONG:
         embed = discord.Embed(
             title="✂️ Maître du jeu · Question trop longue",
@@ -688,6 +698,11 @@ class MaitreDuJeuCog(commands.Cog):
         self.bot = bot
         self._last_reply_at: dict[int, float] = {}
         self.ai = MaitreDuJeuAI()
+
+    async def cog_unload(self) -> None:
+        """Ferme proprement le client HTTP Mistral lors du retrait du Cog."""
+
+        await self.ai.aclose()
 
     def _is_on_cooldown(self, user_id: int) -> bool:
         now = time.monotonic()
