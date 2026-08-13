@@ -1,9 +1,9 @@
-"""Main bot implementation for tests.
+"""Core RefugeBot implementation shared by production and tests.
 
-This module provides a minimal :class:`RefugeBot` used in the test
-suite.  It exposes a few global helpers (``xp_store``
-``rename_manager`` etc.) so tests can monkeypatch them and verify
-interaction with the bot.
+`main.py` is the production entrypoint and instantiates :class:`RefugeBot`.
+This module owns the bot lifecycle and exposes shared services such as
+``xp_store``, ``rename_manager`` and ``api_meter``. Tests import the same
+production class and monkeypatch those services when isolation is required.
 """
 
 from __future__ import annotations
@@ -48,13 +48,13 @@ COG_SUPPORT_MODULES: Final[frozenset[str]] = frozenset({"maitre_du_jeu_ai"})
 
 async def reset_http_error_counter() -> None:
     """Reset the HTTP error counter (placeholder)."""
-    # Real implementation would reset metrics.  In tests this coroutine is
-    # monkeypatched, so the body can stay empty.
+    # Kept as an explicit lifecycle hook so monitoring code can replace or
+    # extend the reset behaviour without changing RefugeBot.setup_hook().
     return None
 
 
 class RefugeBot(commands.Bot):
-    """Discord bot with minimal startup and shutdown logic for tests."""
+    """Production Discord bot lifecycle used by the Refuge service."""
 
     def __init__(self, *args, **kwargs) -> None:
         # discord.py creates its shared aiohttp ClientSession from Client
@@ -69,9 +69,9 @@ class RefugeBot(commands.Bot):
         # stream resolution without exposing the cookie contents to the cogs.
         configure_ytdlp_auth()
 
-        # Start background helpers. In the real project these are asynchronous
-        # coroutines, hence we ``await`` them so the test suite can verify
-        # they have been invoked.
+        # Start application-wide services before loading cogs that depend on
+        # them. Await each asynchronous startup so failures abort startup rather
+        # than leaving the bot partially initialised.
         await xp_store.start()
         await rename_manager.start()
         await api_meter.start(self)
@@ -202,9 +202,8 @@ class RefugeBot(commands.Bot):
 def create_bot() -> RefugeBot:
     """Create a :class:`RefugeBot` with default intents.
 
-    Having a factory function makes it easier for tests and static type
-    checkers to create a bot instance without executing side effects at module
-    import time.
+    This side-effect-free factory is useful for tests and tooling that need a
+    configured bot instance without executing the production entrypoint.
     """
 
     intents: discord.Intents = discord.Intents(
