@@ -131,8 +131,6 @@ async def test_force_reset_clears_sessions(monkeypatch):
             return datetime(2025, 1, 1, 0, 0, tzinfo=tz)
 
     monkeypatch.setattr(dx, "datetime", FixedDatetime)
-    monkeypatch.setattr(dx, "XP_DOUBLE_VOICE_START_HOUR", 0)
-    monkeypatch.setattr(dx, "XP_DOUBLE_VOICE_END_HOUR", 1)
 
     with patch.object(dx, "_read_state", return_value={"date": "", "sessions": []}):
         with patch.object(dx, "_write_state", AsyncMock()) as write_mock:
