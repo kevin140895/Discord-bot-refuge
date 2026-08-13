@@ -1,3 +1,4 @@
+target-version = "py311"
 line-length = 150
 exclude = ["venv"]
 

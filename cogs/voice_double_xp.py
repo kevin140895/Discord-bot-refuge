@@ -19,8 +19,6 @@ from discord.ext import commands, tasks
 from config import (
     DATA_DIR,
     XP_DOUBLE_VOICE_DURATION_MINUTES,
-    XP_DOUBLE_VOICE_START_HOUR,
-    XP_DOUBLE_VOICE_END_HOUR,
     XP_DOUBLE_VOICE_ANNOUNCE_CHANNEL_ID,
 )
 from utils.persistence import read_json_safe, atomic_write_json_async, ensure_dir

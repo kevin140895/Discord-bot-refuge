@@ -94,7 +94,7 @@ def _mix(left: tuple[int, int, int], right: tuple[int, int, int], ratio: float) 
     clamped = max(0.0, min(1.0, ratio))
     return tuple(
         int(round(a + (b - a) * clamped))
-        for a, b in zip(left, right)
+        for a, b in zip(left, right, strict=False)
     )
 
 
@@ -226,7 +226,7 @@ def _draw_tree(
     widths = (44, 36, 27)
     heights = (44, 40, 36)
     offsets = (30, 55, 78)
-    for index, (width, height, offset) in enumerate(zip(widths, heights, offsets)):
+    for index, (width, height, offset) in enumerate(zip(widths, heights, offsets, strict=False)):
         half = int(width * scale)
         top_y = y - int((offset + height) * scale)
         base_y = y - int(offset * scale)

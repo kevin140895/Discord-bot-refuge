@@ -5,5 +5,7 @@ pytest
 pytest-asyncio
 freezegun
 
-# Static analysis
+# Static analysis and CI quality gates
 mypy
+ruff
+pip-audit

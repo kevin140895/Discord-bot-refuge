@@ -320,7 +320,7 @@ class MachineASousView(discord.ui.LayoutView):
     ) -> None:
         if free:
             choices = [r for r in REWARDS if r != 0]
-            weights = [w for r, w in zip(REWARDS, WEIGHTS) if r != 0]
+            weights = [w for r, w in zip(REWARDS, WEIGHTS, strict=False) if r != 0]
             gain = random.choices(choices, weights=weights, k=1)[0]
         else:
             gain = random.choices(REWARDS, weights=WEIGHTS, k=1)[0]
