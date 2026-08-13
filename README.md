@@ -48,6 +48,20 @@ Railway fournit les variables du service au processus sous forme de variables d'
 
 Après l'ajout, la modification ou la suppression d'une variable Railway, appliquez les changements staged via un nouveau déploiement pour qu'ils soient pris en compte par le conteneur.
 
+#### Docker non-root et volume persistant
+
+L'image Docker exécute le bot avec l'utilisateur non privilégié `refuge` (`UID/GID 10001`). Deno, yt-dlp, FFmpeg et Python héritent donc de cet utilisateur pendant le fonctionnement normal du bot.
+
+Railway monte toutefois les volumes persistants avec `root` comme propriétaire. Pour un service utilisant le volume `/app/data`, ajoutez la variable Railway spéciale :
+
+```text
+RAILWAY_RUN_UID=0
+```
+
+Cette valeur autorise uniquement l'entrypoint du conteneur à démarrer avec les privilèges nécessaires pour corriger la propriété du volume. `docker-entrypoint.sh` refuse les chemins de volume hors de `/app/data`, applique les permissions à ce volume puis remplace immédiatement le processus root par `refuge` via `gosu` avant le lancement de `python main.py`.
+
+Le volume Railway doit donc rester monté sur `/app/data`. `RAILWAY_VOLUME_MOUNT_PATH` est fourni automatiquement par Railway et ne doit pas être créé manuellement. `RAILWAY_RUN_UID` est une variable d'infrastructure Railway, pas une variable applicative du bot ; elle n'est donc pas ajoutée à `.env.example`.
+
 ### Alertes critiques et observabilité
 
 `CRITICAL_LOG_CHANNEL_ID` fournit uniquement une **notification secondaire** dans Discord. Le handler essaie d'abord le cache `get_channel()`, puis `fetch_channel()` si le salon n'est pas présent en cache. Les tâches d'envoi sont enregistrées dans le registre commun de tâches d'arrière-plan : une erreur de récupération ou d'envoi est donc récupérée et journalisée au lieu d'être absorbée silencieusement.
