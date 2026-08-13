@@ -26,7 +26,9 @@ async def test_exact_refund_ignores_double_xp_and_flushes(tmp_path, monkeypatch)
     store.data["7"] = {
         "xp": 500,
         "level": store._calc_level(500),
-        "double_xp_until": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+        "double_xp_until": (
+            datetime.now(timezone.utc) + timedelta(hours=1)
+        ).isoformat(),
     }
     monkeypatch.setattr(xp_adapter, "xp_store", store)
 
@@ -38,9 +40,35 @@ async def test_exact_refund_ignores_double_xp_and_flushes(tmp_path, monkeypatch)
     )
 
     assert store.data["7"]["xp"] == 600
+    last_accessed = datetime.fromisoformat(store.data["7"]["last_accessed"])
+    assert last_accessed.tzinfo is not None
+    assert last_accessed.utcoffset() == timedelta(0)
     persisted = xp_adapter.read_json_safe(store.path)
     assert persisted["7"]["xp"] == 600
     await store.aclose()
+
+
+@pytest.mark.asyncio
+async def test_xp_store_accepts_legacy_naive_double_xp_timestamp(tmp_path, monkeypatch):
+    store = XPStore(path=str(tmp_path / "xp.json"), cache_size=10)
+    legacy_expiry = (
+        datetime.now(timezone.utc) + timedelta(hours=1)
+    ).replace(tzinfo=None)
+    store.data["7"] = {
+        "xp": 500,
+        "level": store._calc_level(500),
+        "double_xp_until": legacy_expiry.isoformat(),
+    }
+    monkeypatch.setattr(store, "_schedule_flush", lambda: None)
+
+    _old_level, _new_level, old_xp, new_xp = await store.add_xp(7, 100)
+
+    assert old_xp == 500
+    assert new_xp == 700
+    last_accessed = datetime.fromisoformat(store.data["7"]["last_accessed"])
+    assert last_accessed.tzinfo is not None
+    assert last_accessed.utcoffset() == timedelta(0)
+
 
 
 def test_boost_snapshot_restore_round_trip(monkeypatch):
