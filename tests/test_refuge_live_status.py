@@ -10,6 +10,7 @@ from cogs.refuge_panel import (
     build_refuge_live_status,
     refuge_ambience,
     refuge_day_number,
+    refuge_live_visual_signature,
     refuge_member_count,
     refuge_radio_status,
     refuge_voice_count,
@@ -116,6 +117,19 @@ def test_refuge_activity_state_uses_simple_voice_thresholds(
 def test_refuge_activity_state_normalizes_negative_voice_count() -> None:
     presentation = refuge_activity_presentation(-10)
     assert presentation.key == "endormi"
+
+
+def test_live_visual_signature_changes_only_when_activity_bucket_changes() -> None:
+    world = "world-signature"
+
+    vivant_two = refuge_live_visual_signature(world, 2)
+    vivant_five = refuge_live_visual_signature(world, 5)
+    calme = refuge_live_visual_signature(world, 1)
+    effervescent = refuge_live_visual_signature(world, 6)
+
+    assert vivant_two == vivant_five
+    assert calme != vivant_two
+    assert effervescent != vivant_two
 
 
 def test_live_counts_exclude_bots() -> None:
