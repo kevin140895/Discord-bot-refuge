@@ -237,3 +237,22 @@ def test_live_signature_changes_when_runtime_state_changes() -> None:
     )
 
     assert base.signature != changed.signature
+
+
+def test_hidden_legacy_ambience_does_not_trigger_panel_edit() -> None:
+    evening = RefugeLiveStatus(
+        day_number=1,
+        member_count=10,
+        voice_count=1,
+        radio_status="En ligne",
+        ambience="Les habitants se retrouvent autour du feu.",
+    )
+    night = RefugeLiveStatus(
+        day_number=1,
+        member_count=10,
+        voice_count=1,
+        radio_status="En ligne",
+        ambience="Le Refuge s’endort, mais quelques lumières restent allumées.",
+    )
+
+    assert evening.signature == night.signature
