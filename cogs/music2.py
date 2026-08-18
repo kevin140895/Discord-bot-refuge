@@ -24,6 +24,11 @@ from config import (
 from storage.radio_store import RadioStore
 from ui.radio_view import RadioView
 from utils.voice import ensure_voice, play_stream
+from utils.ytdlp_auth import (
+    get_ytdlp_metadata_cache,
+    make_ytdlp_metadata_cache_key,
+    set_ytdlp_metadata_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -683,7 +688,17 @@ class Music2Cog(commands.Cog):
         raise RuntimeError("Aucun des résultats YouTube n'est exploitable")
 
     async def _extract_info(self, target: str, *, purpose: str = "extraction") -> dict:
+        cache_key = (
+            make_ytdlp_metadata_cache_key("url", target)
+            if purpose == "recherche URL"
+            else None
+        )
         async with self._extract_lock:
+            if cache_key is not None:
+                cached = get_ytdlp_metadata_cache(cache_key)
+                if cached is not None:
+                    return cached
+
             last_error: Exception | None = None
             for attempt in range(1, MUSIC2_EXTRACTION_ATTEMPTS + 1):
                 try:
@@ -699,6 +714,12 @@ class Music2Cog(commands.Cog):
                             "[music2] yt-dlp %s rétabli à la tentative %d",
                             purpose,
                             attempt,
+                        )
+                    if cache_key is not None:
+                        set_ytdlp_metadata_cache(
+                            cache_key,
+                            info,
+                            fallback_url=target,
                         )
                     return info
                 except Exception as exc:
@@ -724,7 +745,12 @@ class Music2Cog(commands.Cog):
             raise RuntimeError("Extraction yt-dlp impossible")
 
     async def _search_info(self, target: str) -> dict:
+        cache_key = make_ytdlp_metadata_cache_key("search", target)
         async with self._extract_lock:
+            cached = get_ytdlp_metadata_cache(cache_key)
+            if cached is not None:
+                return cached
+
             last_error: Exception | None = None
             for attempt in range(1, MUSIC2_EXTRACTION_ATTEMPTS + 1):
                 try:
@@ -739,6 +765,7 @@ class Music2Cog(commands.Cog):
                             "[music2] recherche multi-résultats rétablie à la tentative %d",
                             attempt,
                         )
+                    set_ytdlp_metadata_cache(cache_key, info)
                     return info
                 except Exception as exc:
                     last_error = exc

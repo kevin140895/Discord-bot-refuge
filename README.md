@@ -26,6 +26,14 @@ sudo apt install libopus0 ffmpeg
 
 Les dépendances Python de [`requirements.txt`](./requirements.txt) incluent `discord.py[voice]` et `imageio-ffmpeg`.
 
+## Cache YouTube / yt-dlp
+
+Music 2.0 conserve en mémoire les métadonnées stables des résolutions yt-dlp pendant **1 heure**, avec une limite de **128 entrées** et éviction des entrées les moins récemment utilisées. Les recherches texte équivalentes sont normalisées afin d'éviter des extractions répétées pour une simple différence de casse ou d'espaces.
+
+Le cache longue durée ne stocke jamais les URL média directes, les formats ni les en-têtes HTTP retournés par yt-dlp : ces valeurs peuvent être signées et expirer rapidement. La résolution du flux audio conserve donc son mécanisme court existant et effectue une extraction fraîche lorsqu'il est expiré.
+
+Ce cache est local au processus Python. Il est volontairement perdu lors d'un redémarrage ou d'un redéploiement Railway et ne nécessite ni nouvelle variable d'environnement ni service Redis.
+
 ## FFmpeg options
 
 Les profils FFmpeg ne sont pas définis dans `bot.py`.

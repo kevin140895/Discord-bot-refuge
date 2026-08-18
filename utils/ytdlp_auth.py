@@ -8,17 +8,26 @@ temporaire avec des permissions 0600 et son contenu n'est jamais journalisé.
 La configuration est appliquée au ``YoutubeDL`` global afin que tous les appels
 (recherche, validation d'un candidat et résolution du flux) partagent la même
 authentification sans dupliquer la logique dans les cogs.
+
+Ce module expose aussi un petit cache TTL borné pour les métadonnées yt-dlp.
+Seuls les champs stables utiles à l'interface (titre, page, durée, uploader...) y
+sont conservés. Les URL média directes, formats et en-têtes HTTP ne sont jamais
+mis en cache ici car ils peuvent être signés et expirer rapidement.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import os
 import tempfile
+import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 import yt_dlp
 
@@ -33,6 +42,20 @@ _VALID_COOKIE_HEADERS = {
     "# HTTP Cookie File",
 }
 
+YTDLP_METADATA_CACHE_TTL_SECONDS = 3600.0
+YTDLP_METADATA_CACHE_MAX_ENTRIES = 128
+_YTDLP_METADATA_FIELDS = (
+    "id",
+    "title",
+    "webpage_url",
+    "original_url",
+    "duration",
+    "uploader",
+    "channel",
+    "extractor",
+    "extractor_key",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class YTDLPAuthConfig:
@@ -41,8 +64,16 @@ class YTDLPAuthConfig:
     source: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _YTDLPMetadataCacheEntry:
+    value: dict[str, Any]
+    expires_at: float
+
+
 _ACTIVE_CONFIG = YTDLPAuthConfig()
 _ORIGINAL_YOUTUBE_DL = yt_dlp.YoutubeDL
+_YTDLP_METADATA_CACHE: OrderedDict[str, _YTDLPMetadataCacheEntry] = OrderedDict()
+_YTDLP_METADATA_CACHE_LOCK = threading.Lock()
 
 
 def _normalise_cookie_text(raw: bytes) -> str:
@@ -151,6 +182,91 @@ def augment_ytdlp_options(options: Mapping[str, object] | None) -> dict[str, obj
     return merged
 
 
+def make_ytdlp_metadata_cache_key(kind: str, target: str) -> str:
+    """Construit une clé opaque et stable sans journaliser la requête utilisateur."""
+
+    namespace = str(kind).strip().lower() or "metadata"
+    raw_target = str(target).strip()
+    if namespace == "search":
+        raw_target = " ".join(raw_target.split()).casefold()
+    digest = hashlib.sha256(raw_target.encode("utf-8", errors="replace")).hexdigest()
+    return f"{namespace}:{digest}"
+
+
+def _metadata_projection(
+    info: Mapping[str, Any], *, fallback_url: str | None = None
+) -> dict[str, Any] | None:
+    projection = {
+        field: info[field]
+        for field in _YTDLP_METADATA_FIELDS
+        if field in info and info[field] is not None
+    }
+
+    webpage_url = str(
+        projection.get("webpage_url") or projection.get("original_url") or ""
+    ).strip()
+    if not webpage_url and fallback_url:
+        fallback = str(fallback_url).strip()
+        if fallback.startswith(("http://", "https://")):
+            projection["webpage_url"] = fallback
+            webpage_url = fallback
+
+    if not webpage_url:
+        return None
+    if not projection.get("title"):
+        projection["title"] = "Titre inconnu"
+    return projection
+
+
+def get_ytdlp_metadata_cache(cache_key: str) -> dict[str, Any] | None:
+    """Retourne une copie des métadonnées encore valides, sinon ``None``."""
+
+    now = time.monotonic()
+    with _YTDLP_METADATA_CACHE_LOCK:
+        entry = _YTDLP_METADATA_CACHE.get(cache_key)
+        if entry is None:
+            logger.info("[ytdlp] metadata cache miss key=%s", cache_key[:17])
+            return None
+        if entry.expires_at <= now:
+            _YTDLP_METADATA_CACHE.pop(cache_key, None)
+            logger.info("[ytdlp] metadata cache expired key=%s", cache_key[:17])
+            return None
+        _YTDLP_METADATA_CACHE.move_to_end(cache_key)
+        logger.info("[ytdlp] metadata cache hit key=%s", cache_key[:17])
+        return dict(entry.value)
+
+
+def set_ytdlp_metadata_cache(
+    cache_key: str,
+    info: Mapping[str, Any],
+    *,
+    fallback_url: str | None = None,
+) -> bool:
+    """Stocke uniquement la projection stable d'un résultat yt-dlp."""
+
+    projection = _metadata_projection(info, fallback_url=fallback_url)
+    if projection is None:
+        return False
+
+    entry = _YTDLPMetadataCacheEntry(
+        value=projection,
+        expires_at=time.monotonic() + YTDLP_METADATA_CACHE_TTL_SECONDS,
+    )
+    with _YTDLP_METADATA_CACHE_LOCK:
+        _YTDLP_METADATA_CACHE[cache_key] = entry
+        _YTDLP_METADATA_CACHE.move_to_end(cache_key)
+        while len(_YTDLP_METADATA_CACHE) > YTDLP_METADATA_CACHE_MAX_ENTRIES:
+            _YTDLP_METADATA_CACHE.popitem(last=False)
+    return True
+
+
+def clear_ytdlp_metadata_cache() -> None:
+    """Vide le cache de métadonnées du processus courant."""
+
+    with _YTDLP_METADATA_CACHE_LOCK:
+        _YTDLP_METADATA_CACHE.clear()
+
+
 class RefugeYoutubeDL(_ORIGINAL_YOUTUBE_DL):
     """YoutubeDL qui applique automatiquement l'auth Railway du bot."""
 
@@ -167,6 +283,7 @@ def configure_ytdlp_auth(
 
     global _ACTIVE_CONFIG
     _ACTIVE_CONFIG = load_ytdlp_auth_config(environ, temp_dir=temp_dir)
+    clear_ytdlp_metadata_cache()
     yt_dlp.YoutubeDL = RefugeYoutubeDL
 
     if _ACTIVE_CONFIG.cookiefile:
@@ -180,12 +297,23 @@ def configure_ytdlp_auth(
     else:
         logger.info("[ytdlp] extraction YouTube anonyme (aucun cookie configuré)")
 
+    logger.info(
+        "[ytdlp] metadata cache actif ttl=%ss max_entries=%d",
+        int(YTDLP_METADATA_CACHE_TTL_SECONDS),
+        YTDLP_METADATA_CACHE_MAX_ENTRIES,
+    )
     return _ACTIVE_CONFIG
 
 
 __all__ = [
     "YTDLPAuthConfig",
+    "YTDLP_METADATA_CACHE_MAX_ENTRIES",
+    "YTDLP_METADATA_CACHE_TTL_SECONDS",
     "augment_ytdlp_options",
+    "clear_ytdlp_metadata_cache",
     "configure_ytdlp_auth",
+    "get_ytdlp_metadata_cache",
     "load_ytdlp_auth_config",
+    "make_ytdlp_metadata_cache_key",
+    "set_ytdlp_metadata_cache",
 ]
