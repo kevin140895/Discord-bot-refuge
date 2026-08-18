@@ -8,17 +8,28 @@ temporaire avec des permissions 0600 et son contenu n'est jamais journalisé.
 La configuration est appliquée au ``YoutubeDL`` global afin que tous les appels
 (recherche, validation d'un candidat et résolution du flux) partagent la même
 authentification sans dupliquer la logique dans les cogs.
+
+Un petit cache TTL en mémoire est également appliqué aux extractions sans
+téléchargement. Les recherches ``ytsearch`` peuvent être réutilisées pendant une
+heure. Les extractions d'URL directes ne sont conservées que cinq minutes, car
+les résultats yt-dlp contiennent souvent des URL média signées et éphémères.
+Le cache est borné et synchronisé entre threads afin d'éviter les extractions
+redondantes pour une même clé sans bloquer l'event loop Discord.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import os
 import tempfile
+import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 import yt_dlp
 
@@ -33,6 +44,25 @@ _VALID_COOKIE_HEADERS = {
     "# HTTP Cookie File",
 }
 
+YTDLP_SEARCH_CACHE_TTL_SECONDS = 3600.0
+YTDLP_DIRECT_CACHE_TTL_SECONDS = 300.0
+YTDLP_CACHE_MAX_ENTRIES = 128
+_YTDLP_CACHE_STRIPES = 32
+_YTDLP_CACHE_OPTION_KEYS = (
+    "format",
+    "noplaylist",
+    "extract_flat",
+    "ignoreerrors",
+    "skip_download",
+    "cookiefile",
+    "http_headers",
+    "extractor_args",
+    "playliststart",
+    "playlistend",
+    "playlist_items",
+)
+_CACHE_MISS = object()
+
 
 @dataclass(frozen=True, slots=True)
 class YTDLPAuthConfig:
@@ -41,8 +71,17 @@ class YTDLPAuthConfig:
     source: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _YTDLPCacheEntry:
+    value: Any
+    expires_at: float
+
+
 _ACTIVE_CONFIG = YTDLPAuthConfig()
 _ORIGINAL_YOUTUBE_DL = yt_dlp.YoutubeDL
+_YTDLP_CACHE: OrderedDict[tuple[Any, ...], _YTDLPCacheEntry] = OrderedDict()
+_YTDLP_CACHE_LOCK = threading.Lock()
+_YTDLP_KEY_LOCKS = tuple(threading.Lock() for _ in range(_YTDLP_CACHE_STRIPES))
 
 
 def _normalise_cookie_text(raw: bytes) -> str:
@@ -151,11 +190,115 @@ def augment_ytdlp_options(options: Mapping[str, object] | None) -> dict[str, obj
     return merged
 
 
+def _freeze_cache_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return tuple(
+            sorted((str(key), _freeze_cache_value(item)) for key, item in value.items())
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_cache_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return tuple(sorted(repr(_freeze_cache_value(item)) for item in value))
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    return repr(value)
+
+
+def _cache_ttl_for_extract(url: object, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> float:
+    """Retourne le TTL uniquement pour les appels simples ``download=False``."""
+
+    if len(args) > 1:
+        return 0.0
+    if any(key != "download" for key in kwargs):
+        return 0.0
+
+    download = args[0] if args else kwargs.get("download", True)
+    if download is not False:
+        return 0.0
+
+    target = str(url).strip()
+    lowered = target.lower()
+    if lowered.startswith("ytsearch"):
+        return YTDLP_SEARCH_CACHE_TTL_SECONDS
+    if lowered.startswith(("http://", "https://")):
+        return YTDLP_DIRECT_CACHE_TTL_SECONDS
+    return 0.0
+
+
+def _build_cache_key(url: object, params: Mapping[str, Any]) -> tuple[Any, ...]:
+    option_fingerprint = tuple(
+        (key, _freeze_cache_value(params.get(key)))
+        for key in _YTDLP_CACHE_OPTION_KEYS
+        if key in params
+    )
+    return str(url).strip(), option_fingerprint
+
+
+def _cache_log_id(cache_key: tuple[Any, ...]) -> str:
+    digest = hashlib.sha256(repr(cache_key).encode("utf-8", errors="replace")).hexdigest()
+    return digest[:10]
+
+
+def _cache_get(cache_key: tuple[Any, ...], *, now: float | None = None) -> Any:
+    current = time.monotonic() if now is None else now
+    with _YTDLP_CACHE_LOCK:
+        entry = _YTDLP_CACHE.get(cache_key)
+        if entry is None:
+            return _CACHE_MISS
+        if entry.expires_at <= current:
+            _YTDLP_CACHE.pop(cache_key, None)
+            return _CACHE_MISS
+        _YTDLP_CACHE.move_to_end(cache_key)
+        return entry.value
+
+
+def _cache_set(cache_key: tuple[Any, ...], value: Any, ttl: float) -> None:
+    expires_at = time.monotonic() + ttl
+    with _YTDLP_CACHE_LOCK:
+        _YTDLP_CACHE[cache_key] = _YTDLPCacheEntry(value=value, expires_at=expires_at)
+        _YTDLP_CACHE.move_to_end(cache_key)
+        while len(_YTDLP_CACHE) > YTDLP_CACHE_MAX_ENTRIES:
+            _YTDLP_CACHE.popitem(last=False)
+
+
+def clear_ytdlp_cache() -> None:
+    """Vide le cache yt-dlp du processus courant."""
+
+    with _YTDLP_CACHE_LOCK:
+        _YTDLP_CACHE.clear()
+
+
 class RefugeYoutubeDL(_ORIGINAL_YOUTUBE_DL):
-    """YoutubeDL qui applique automatiquement l'auth Railway du bot."""
+    """YoutubeDL qui applique l'auth Railway et un cache borné aux extractions."""
 
     def __init__(self, params=None, auto_init=True):
         super().__init__(augment_ytdlp_options(params), auto_init=auto_init)
+
+    def extract_info(self, url, *args, **kwargs):
+        ttl = _cache_ttl_for_extract(url, args, kwargs)
+        if ttl <= 0:
+            return super().extract_info(url, *args, **kwargs)
+
+        cache_key = _build_cache_key(url, self.params)
+        cached = _cache_get(cache_key)
+        kind = "search" if str(url).lower().startswith("ytsearch") else "direct"
+        cache_id = _cache_log_id(cache_key)
+        if cached is not _CACHE_MISS:
+            logger.info("[ytdlp] cache hit kind=%s key=%s", kind, cache_id)
+            return cached
+
+        key_lock = _YTDLP_KEY_LOCKS[hash(cache_key) % len(_YTDLP_KEY_LOCKS)]
+        with key_lock:
+            cached = _cache_get(cache_key)
+            if cached is not _CACHE_MISS:
+                logger.info("[ytdlp] cache hit kind=%s key=%s", kind, cache_id)
+                return cached
+
+            logger.info("[ytdlp] cache miss kind=%s key=%s", kind, cache_id)
+            info = super().extract_info(url, *args, **kwargs)
+            if info is not None:
+                _cache_set(cache_key, info, ttl)
+            return info
 
 
 def configure_ytdlp_auth(
@@ -167,6 +310,7 @@ def configure_ytdlp_auth(
 
     global _ACTIVE_CONFIG
     _ACTIVE_CONFIG = load_ytdlp_auth_config(environ, temp_dir=temp_dir)
+    clear_ytdlp_cache()
     yt_dlp.YoutubeDL = RefugeYoutubeDL
 
     if _ACTIVE_CONFIG.cookiefile:
@@ -180,12 +324,22 @@ def configure_ytdlp_auth(
     else:
         logger.info("[ytdlp] extraction YouTube anonyme (aucun cookie configuré)")
 
+    logger.info(
+        "[ytdlp] cache actif search_ttl=%ss direct_ttl=%ss max_entries=%d",
+        int(YTDLP_SEARCH_CACHE_TTL_SECONDS),
+        int(YTDLP_DIRECT_CACHE_TTL_SECONDS),
+        YTDLP_CACHE_MAX_ENTRIES,
+    )
     return _ACTIVE_CONFIG
 
 
 __all__ = [
     "YTDLPAuthConfig",
+    "YTDLP_CACHE_MAX_ENTRIES",
+    "YTDLP_DIRECT_CACHE_TTL_SECONDS",
+    "YTDLP_SEARCH_CACHE_TTL_SECONDS",
     "augment_ytdlp_options",
+    "clear_ytdlp_cache",
     "configure_ytdlp_auth",
     "load_ytdlp_auth_config",
 ]
