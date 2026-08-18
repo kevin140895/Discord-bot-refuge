@@ -115,3 +115,112 @@ def test_no_cookie_secret_keeps_anonymous_mode_but_can_keep_user_agent(tmp_path)
     options = ytdlp_auth.augment_ytdlp_options({"quiet": True})
     assert options["quiet"] is True
     assert options["http_headers"]["User-Agent"] == "Browser UA/2.0"
+
+
+def _install_fake_extractor(monkeypatch):
+    calls: list[tuple[str, tuple, dict]] = []
+
+    def fake_init(self, params=None, auto_init=True):
+        self.params = dict(params or {})
+
+    def fake_extract_info(self, url, *args, **kwargs):
+        calls.append((str(url), args, dict(kwargs)))
+        return {
+            "id": f"result-{len(calls)}",
+            "title": f"Result {len(calls)}",
+            "url": f"https://media.invalid/{len(calls)}",
+            "webpage_url": str(url),
+        }
+
+    monkeypatch.setattr(ytdlp_auth._ORIGINAL_YOUTUBE_DL, "__init__", fake_init)
+    monkeypatch.setattr(
+        ytdlp_auth._ORIGINAL_YOUTUBE_DL,
+        "extract_info",
+        fake_extract_info,
+    )
+    ytdlp_auth.clear_ytdlp_cache()
+    return calls
+
+
+def test_search_extract_info_is_cached_for_one_hour(monkeypatch, caplog):
+    calls = _install_fake_extractor(monkeypatch)
+    clock = [1_000.0]
+    monkeypatch.setattr(ytdlp_auth.time, "monotonic", lambda: clock[0])
+    caplog.set_level(logging.INFO)
+
+    ydl = ytdlp_auth.RefugeYoutubeDL(
+        {"extract_flat": "in_playlist", "skip_download": True}
+    )
+    first = ydl.extract_info("ytsearch5:daft punk audio", download=False)
+    second = ydl.extract_info("ytsearch5:daft punk audio", download=False)
+
+    assert first == second
+    assert len(calls) == 1
+    assert "cache miss kind=search" in caplog.text
+    assert "cache hit kind=search" in caplog.text
+
+    clock[0] += ytdlp_auth.YTDLP_SEARCH_CACHE_TTL_SECONDS + 1
+    third = ydl.extract_info("ytsearch5:daft punk audio", download=False)
+
+    assert third["id"] == "result-2"
+    assert len(calls) == 2
+
+
+def test_direct_extract_info_uses_short_stream_safe_ttl(monkeypatch):
+    calls = _install_fake_extractor(monkeypatch)
+    clock = [5_000.0]
+    monkeypatch.setattr(ytdlp_auth.time, "monotonic", lambda: clock[0])
+
+    ydl = ytdlp_auth.RefugeYoutubeDL(
+        {
+            "format": "bestaudio/best",
+            "noplaylist": True,
+            "skip_download": True,
+        }
+    )
+    url = "https://www.youtube.com/watch?v=test"
+
+    first = ydl.extract_info(url, download=False)
+    second = ydl.extract_info(url, download=False)
+    assert first == second
+    assert len(calls) == 1
+
+    clock[0] += ytdlp_auth.YTDLP_DIRECT_CACHE_TTL_SECONDS + 1
+    refreshed = ydl.extract_info(url, download=False)
+    assert refreshed["id"] == "result-2"
+    assert len(calls) == 2
+
+
+def test_download_calls_bypass_result_cache(monkeypatch):
+    calls = _install_fake_extractor(monkeypatch)
+    ydl = ytdlp_auth.RefugeYoutubeDL({"format": "bestaudio/best"})
+    url = "https://www.youtube.com/watch?v=test"
+
+    ydl.extract_info(url, download=True)
+    ydl.extract_info(url, download=True)
+
+    assert len(calls) == 2
+
+
+def test_cache_key_separates_different_extractor_options(monkeypatch):
+    calls = _install_fake_extractor(monkeypatch)
+    url = "https://www.youtube.com/watch?v=test"
+    audio = ytdlp_auth.RefugeYoutubeDL({"format": "bestaudio/best"})
+    flat = ytdlp_auth.RefugeYoutubeDL({"extract_flat": "in_playlist"})
+
+    audio.extract_info(url, download=False)
+    flat.extract_info(url, download=False)
+
+    assert len(calls) == 2
+
+
+def test_cache_is_bounded(monkeypatch):
+    _install_fake_extractor(monkeypatch)
+    monkeypatch.setattr(ytdlp_auth, "YTDLP_CACHE_MAX_ENTRIES", 2)
+    ydl = ytdlp_auth.RefugeYoutubeDL({"extract_flat": "in_playlist"})
+
+    ydl.extract_info("ytsearch1:first", download=False)
+    ydl.extract_info("ytsearch1:second", download=False)
+    ydl.extract_info("ytsearch1:third", download=False)
+
+    assert len(ytdlp_auth._YTDLP_CACHE) == 2
