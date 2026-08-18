@@ -24,11 +24,19 @@ async def main() -> int:
     voice_imported = await db.migrate_legacy_voice_times(
         data_dir / "voice_times.json"
     )
+    daily_imported = await db.migrate_legacy_daily_stats(
+        data_dir / "daily_stats.json"
+    )
+    boosts_imported = await db.migrate_legacy_xp_boosts(
+        data_dir / "xp_boosts.json"
+    )
     integrity = await db.quick_check()
 
     print(f"SQLite: {DB_PATH}")
     print(f"XP importés: {xp_imported}")
     print(f"Checkpoints vocaux importés: {voice_imported}")
+    print(f"Stats quotidiennes importées: {daily_imported}")
+    print(f"Boosts XP importés: {boosts_imported}")
     print(f"PRAGMA quick_check: {integrity}")
 
     return 0 if integrity == "ok" else 1
