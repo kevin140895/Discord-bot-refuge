@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import logging
 
 from storage.xp_store import xp_store
+from utils.persistence import read_json_safe as read_json_safe
 from utils.refuge_casino_observer import observe_casino_xp_transaction
 
 logger = logging.getLogger(__name__)
@@ -146,4 +147,5 @@ __all__ = [
     "get_balance",
     "add_xp",
     "refund_xp_exact",
+    "read_json_safe",
 ]
