@@ -1,9 +1,9 @@
 """Système d'XP du serveur : messages, voix et statistiques quotidiennes.
 
 La cog enregistre l'activité des membres, calcule l'XP et gère les
-statistiques journalières. L'XP et les checkpoints vocaux actifs sont
-persistés dans SQLite. Les statistiques quotidiennes et les boosts personnels
-restent en JSON pendant cette première phase de migration.
+statistiques journalières. L'XP, les checkpoints vocaux actifs, les
+statistiques quotidiennes et les boosts personnels sont persistés dans SQLite.
+Les anciens JSON restent uniquement des sources de migration legacy.
 """
 
 import asyncio
@@ -25,8 +25,6 @@ from config import (
 from utils.timezones import PARIS_TZ
 from utils.interactions import safe_respond
 from utils.persistence import (
-    atomic_write_json_async,
-    read_json_safe,
     ensure_dir,
     schedule_checkpoint,
 )
@@ -40,8 +38,8 @@ from utils.seasons import should_count_xp_source
 from utils.refuge_casino_observer import observe_casino_xp_transaction
 logger = logging.getLogger(__name__)
 
-# Fichiers de persistance. VOICE_TIMES_FILE est conservé uniquement comme
-# source de migration legacy ; les nouvelles écritures vont dans refuge.db.
+# Fichiers conservés uniquement comme sources de migration legacy ; toutes les
+# nouvelles écritures de ces états vont dans ``refuge.db``.
 VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
 DAILY_STATS_FILE = os.path.join(DATA_DIR, "daily_stats.json")
 XP_BOOSTS_FILE = os.path.join(DATA_DIR, "xp_boosts.json")
@@ -104,23 +102,37 @@ async def save_voice_times_to_disk() -> None:
         logger.exception("[xp] Échec sauvegarde SQLite voice times: %s", e)
 
 
-def load_daily_stats() -> dict:
-    return read_json_safe(DAILY_STATS_FILE)
+async def load_daily_stats() -> dict:
+    """Load daily statistics from SQLite after one-time JSON import."""
+    await database.migrate_legacy_daily_stats(DAILY_STATS_FILE)
+    return await database.load_daily_stats()
 
 
 async def save_daily_stats_to_disk() -> None:
+    """Persist one immutable snapshot of the in-memory daily statistics."""
     async with DAILY_LOCK:
-        data = DAILY_STATS
-    await atomic_write_json_async(DAILY_STATS_FILE, data)
+        data = {
+            day: {
+                uid: dict(payload)
+                for uid, payload in users.items()
+            }
+            for day, users in DAILY_STATS.items()
+        }
+    try:
+        await database.replace_daily_stats(data)
+        logger.info("[xp] Daily stats sauvegardées dans SQLite")
+    except (sqlite3.Error, ValueError) as e:
+        logger.exception("[xp] Échec sauvegarde SQLite daily stats: %s", e)
 
 
-def load_xp_boosts() -> tuple[
+async def load_xp_boosts() -> tuple[
     dict[str, datetime],
     dict[str, datetime],
     dict[str, list[tuple[datetime, datetime]]],
 ]:
-    """Load personal Double XP state, including legacy expiry-only files."""
-    data = read_json_safe(XP_BOOSTS_FILE)
+    """Load personal Double XP state after one-time legacy JSON import."""
+    await database.migrate_legacy_xp_boosts(XP_BOOSTS_FILE)
+    data = await database.load_xp_boosts()
     expiries: dict[str, datetime] = {}
     starts: dict[str, datetime] = {}
     history: dict[str, list[tuple[datetime, datetime]]] = {}
@@ -128,23 +140,13 @@ def load_xp_boosts() -> tuple[
 
     for uid, raw in data.items():
         try:
-            if isinstance(raw, str):
-                # Legacy format only knew the expiry. Do not guess a historical
-                # start and accidentally grant retroactive vocal XP: an active
-                # legacy boost starts being tracked from this bootstrap onward.
-                expiry = _as_utc(datetime.fromisoformat(raw))
-                expiries[uid] = expiry
-                if expiry > now:
-                    starts[uid] = now
-                continue
-
             if not isinstance(raw, dict):
                 raise ValueError("unsupported boost record")
 
-            expiry = _as_utc(datetime.fromisoformat(raw["expires_at"]))
+            expiry = _as_utc(datetime.fromisoformat(str(raw["expires_at"])))
             start_raw = raw.get("started_at")
             start = (
-                _as_utc(datetime.fromisoformat(start_raw))
+                _as_utc(datetime.fromisoformat(str(start_raw)))
                 if start_raw
                 else min(now, expiry)
             )
@@ -186,10 +188,10 @@ async def save_xp_boosts_to_disk() -> None:
                     for window_start, window_end in XP_BOOST_HISTORY.get(uid, [])[-64:]
                 ],
             }
-        await atomic_write_json_async(XP_BOOSTS_FILE, serializable)
-        logger.info("[xp] XP boosts sauvegardés (%s)", XP_BOOSTS_FILE)
-    except OSError as e:
-        logger.exception("[xp] Échec sauvegarde XP boosts: %s", e)
+        await database.replace_xp_boosts(serializable)
+        logger.info("[xp] XP boosts sauvegardés dans SQLite")
+    except (sqlite3.Error, ValueError) as e:
+        logger.exception("[xp] Échec sauvegarde SQLite XP boosts: %s", e)
 
 
 async def xp_bootstrap_cache() -> None:
@@ -198,10 +200,10 @@ async def xp_bootstrap_cache() -> None:
     XP_CACHE = xp_store.data
     XP_LOCK = xp_store.lock
     voice_times = await load_voice_times()
-    DAILY_STATS = load_daily_stats()
+    DAILY_STATS = await load_daily_stats()
     today = datetime.now(PARIS_TZ).date().isoformat()
     _prune_stale_daily_stats(today)
-    XP_BOOSTS, XP_BOOST_STARTS, XP_BOOST_HISTORY = load_xp_boosts()
+    XP_BOOSTS, XP_BOOST_STARTS, XP_BOOST_HISTORY = await load_xp_boosts()
     logger.info("🎒 XP cache chargé (%d utilisateurs).", len(XP_CACHE))
 
 
