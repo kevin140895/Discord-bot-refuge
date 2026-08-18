@@ -17,7 +17,11 @@ from cogs.refuge_panel import (
 from models.refuge_world import RefugeWorldState
 from rendering.refuge_world import RefugeRenderContext
 from services.refuge_panel import RefugePanelSnapshot
-from ui.refuge_panel_view import RefugeLiveStatus, RefugePublicPanelView
+from ui.refuge_panel_view import (
+    RefugeLiveStatus,
+    RefugePublicPanelView,
+    refuge_activity_presentation,
+)
 
 
 def _snapshot(*, created_at: str = "2026-08-18T00:00:00+00:00") -> RefugePanelSnapshot:
@@ -83,6 +87,35 @@ def test_refuge_ambience_follows_paris_daypart(hour_utc: int, expected: str) -> 
     assert refuge_ambience(
         at=datetime(2026, 8, 18, hour_utc, tzinfo=timezone.utc)
     ) == expected
+
+
+@pytest.mark.parametrize(
+    ("voice_count", "key", "emoji", "label"),
+    [
+        (0, "endormi", "🌙", "Refuge endormi"),
+        (1, "calme", "🌿", "Refuge calme"),
+        (2, "vivant", "🔥", "Refuge vivant"),
+        (5, "vivant", "🔥", "Refuge vivant"),
+        (6, "effervescent", "⚡", "Refuge effervescent"),
+        (25, "effervescent", "⚡", "Refuge effervescent"),
+    ],
+)
+def test_refuge_activity_state_uses_simple_voice_thresholds(
+    voice_count: int,
+    key: str,
+    emoji: str,
+    label: str,
+) -> None:
+    presentation = refuge_activity_presentation(voice_count)
+    assert presentation.key == key
+    assert presentation.emoji == emoji
+    assert presentation.label == label
+    assert presentation.description
+
+
+def test_refuge_activity_state_normalizes_negative_voice_count() -> None:
+    presentation = refuge_activity_presentation(-10)
+    assert presentation.key == "endormi"
 
 
 def test_live_counts_exclude_bots() -> None:
@@ -165,7 +198,26 @@ def test_live_status_is_displayed_on_existing_public_panel() -> None:
     assert "1 habitants" in text
     assert "1 au feu de camp" in text
     assert "Radio : En ligne" in text
-    assert "Les habitants se retrouvent autour du feu." in text
+    assert "🌿 **Refuge calme**" in text
+    assert "Quelques habitants veillent encore autour du feu." in text
+
+
+def test_public_panel_promotes_high_voice_activity_without_extra_component() -> None:
+    snapshot = _snapshot()
+    status = RefugeLiveStatus(
+        day_number=1,
+        member_count=95,
+        voice_count=6,
+        radio_status="En ligne",
+        ambience="Les habitants se retrouvent autour du feu.",
+    )
+
+    view = RefugePublicPanelView(snapshot, live_status=status)
+    text = _panel_text(view)
+
+    assert "⚡ **Refuge effervescent**" in text
+    assert "Le camp résonne de voix jusque dans les cabanes." in text
+    assert len(view.children) == 1
 
 
 def test_live_signature_changes_when_runtime_state_changes() -> None:
