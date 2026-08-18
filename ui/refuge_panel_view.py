@@ -48,12 +48,12 @@ class RefugeLiveStatus:
 
     @property
     def signature(self) -> str:
-        """Return a stable value used to avoid unnecessary panel edits."""
+        """Return visible runtime values used to avoid unnecessary panel edits."""
 
         day = self.day_number if self.day_number is not None else 0
         return (
             f"day={day}|members={self.member_count}|voice={self.voice_count}|"
-            f"radio={self.radio_status}|ambience={self.ambience}"
+            f"radio={self.radio_status}"
         )
 
 
