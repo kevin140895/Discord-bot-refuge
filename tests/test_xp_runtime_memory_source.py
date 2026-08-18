@@ -1,24 +1,26 @@
 import threading
+from pathlib import Path
 
 import pytest
 
-import storage.xp_store as xp_store_module
+import storage.db as db_module
 from storage.xp_store import XPStore
 from utils.persistence import atomic_write_json
 
 
 @pytest.mark.asyncio
-async def test_start_offloads_json_read_from_event_loop(tmp_path, monkeypatch):
+async def test_start_offloads_legacy_import_from_event_loop(tmp_path, monkeypatch):
     path = tmp_path / "xp.json"
     event_loop_thread = threading.current_thread()
     read_threads = []
 
-    def checked_read_json(read_path):
-        assert read_path == str(path)
+    def checked_read_json(read_path, default=None):
+        assert Path(read_path) == path
+        assert default is None
         read_threads.append(threading.current_thread())
         return {"1": {"xp": 100, "level": 1}}
 
-    monkeypatch.setattr(xp_store_module, "read_json_safe", checked_read_json)
+    monkeypatch.setattr(db_module, "read_json_safe", checked_read_json)
     store = XPStore(path=str(path))
 
     await store.start()
@@ -31,16 +33,18 @@ async def test_start_offloads_json_read_from_event_loop(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_runtime_operations_use_memory_without_rereading_disk(tmp_path, monkeypatch):
+async def test_runtime_operations_use_memory_without_rereading_legacy_json(
+    tmp_path, monkeypatch
+):
     path = tmp_path / "xp.json"
     atomic_write_json(path, {"1": {"xp": 100, "level": 1}})
     store = XPStore(path=str(path))
     await store.start()
 
-    def unexpected_disk_read(_path):
-        pytest.fail("read_json_safe must not be called during normal XP runtime")
+    def unexpected_disk_read(*_args, **_kwargs):
+        pytest.fail("legacy JSON must not be read during normal XP runtime")
 
-    monkeypatch.setattr(xp_store_module, "read_json_safe", unexpected_disk_read)
+    monkeypatch.setattr(db_module, "read_json_safe", unexpected_disk_read)
 
     await store.add_xp(2, 50)
     assert await store.try_spend_xp(3, 10) is False

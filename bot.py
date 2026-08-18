@@ -18,6 +18,7 @@ from discord.ext import commands
 from config import DISABLED_COGS, GUILD_ID, LEVEL_FEED_CHANNEL_ID
 import cogs
 
+from storage.db import database
 from storage.xp_store import xp_store
 from ui.radio_view import RadioView
 from utils.api_meter import api_meter
@@ -72,6 +73,7 @@ class RefugeBot(commands.Bot):
         # Start application-wide services before loading cogs that depend on
         # them. Await each asynchronous startup so failures abort startup rather
         # than leaving the bot partially initialised.
+        await database.start()
         await xp_store.start()
         await rename_manager.start()
         await api_meter.start(self)
@@ -196,6 +198,7 @@ class RefugeBot(commands.Bot):
         await api_meter.aclose()
         await rename_manager.aclose()
         await xp_store.aclose()
+        await database.aclose()
         await super().close()
 
 

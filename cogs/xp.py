@@ -1,15 +1,16 @@
 """Système d'XP du serveur : messages, voix et statistiques quotidiennes.
 
 La cog enregistre l'activité des membres, calcule l'XP et gère les
-statistiques journalières. La persistance repose sur ``xp_store`` pour
-les données d'XP et sur des fichiers JSON pour les temps vocaux et les
-statistiques quotidiennes.
+statistiques journalières. L'XP et les checkpoints vocaux actifs sont
+persistés dans SQLite. Les statistiques quotidiennes et les boosts personnels
+restent en JSON pendant cette première phase de migration.
 """
 
 import asyncio
 import io
 import logging
 import os
+import sqlite3
 from datetime import datetime, timezone, timedelta
 
 import discord
@@ -30,6 +31,7 @@ from utils.persistence import (
     schedule_checkpoint,
 )
 from utils.metrics import measure
+from storage.db import database
 from storage.xp_store import xp_store
 from storage.season_store import season_store
 from utils.game_events import get_multiplier, record_participant
@@ -38,7 +40,8 @@ from utils.seasons import should_count_xp_source
 from utils.refuge_casino_observer import observe_casino_xp_transaction
 logger = logging.getLogger(__name__)
 
-# Fichiers de persistance
+# Fichiers de persistance. VOICE_TIMES_FILE est conservé uniquement comme
+# source de migration legacy ; les nouvelles écritures vont dans refuge.db.
 VOICE_TIMES_FILE = os.path.join(DATA_DIR, "voice_times.json")
 DAILY_STATS_FILE = os.path.join(DATA_DIR, "daily_stats.json")
 XP_BOOSTS_FILE = os.path.join(DATA_DIR, "xp_boosts.json")
@@ -74,8 +77,10 @@ def _prune_stale_daily_stats(current_day: str) -> None:
         DAILY_STATS.pop(day, None)
 
 
-def load_voice_times() -> dict[str, datetime]:
-    data = read_json_safe(VOICE_TIMES_FILE)
+async def load_voice_times() -> dict[str, datetime]:
+    """Load active voice checkpoints from SQLite after one-time JSON import."""
+    await database.migrate_legacy_voice_times(VOICE_TIMES_FILE)
+    data = await database.load_voice_times()
     out: dict[str, datetime] = {}
     for uid, iso in data.items():
         try:
@@ -87,16 +92,16 @@ def load_voice_times() -> dict[str, datetime]:
 
 
 async def save_voice_times_to_disk() -> None:
-    """Sauvegarde atomique des temps vocaux sans bloquer l'event loop."""
+    """Sauvegarde atomiquement les checkpoints vocaux actifs dans SQLite."""
     try:
         serializable = {
             uid: dt.astimezone(timezone.utc).isoformat()
             for uid, dt in voice_times.items()
         }
-        await atomic_write_json_async(VOICE_TIMES_FILE, serializable)
-        logger.info("[xp] Voice times sauvegardés (%s)", VOICE_TIMES_FILE)
-    except OSError as e:
-        logger.exception("[xp] Échec sauvegarde voice times: %s", e)
+        await database.replace_voice_times(serializable)
+        logger.info("[xp] Voice times sauvegardés dans SQLite")
+    except sqlite3.Error as e:
+        logger.exception("[xp] Échec sauvegarde SQLite voice times: %s", e)
 
 
 def load_daily_stats() -> dict:
@@ -192,7 +197,7 @@ async def xp_bootstrap_cache() -> None:
     global XP_BOOSTS, XP_BOOST_STARTS, XP_BOOST_HISTORY
     XP_CACHE = xp_store.data
     XP_LOCK = xp_store.lock
-    voice_times = load_voice_times()
+    voice_times = await load_voice_times()
     DAILY_STATS = load_daily_stats()
     today = datetime.now(PARIS_TZ).date().isoformat()
     _prune_stale_daily_stats(today)
@@ -415,7 +420,7 @@ class XPCog(commands.Cog):
         await xp_flush_cache_to_disk()
         try:
             await save_voice_times_to_disk()
-        except OSError as e:
+        except (OSError, sqlite3.Error) as e:
             logger.exception("[xp] auto_backup_xp: exception: %s", e)
         await save_daily_stats_to_disk()
         await save_xp_boosts_to_disk()

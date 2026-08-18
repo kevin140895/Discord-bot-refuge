@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import logging
 
 from storage.xp_store import xp_store
-from utils.persistence import read_json_safe
+from utils.persistence import read_json_safe as read_json_safe
 from utils.refuge_casino_observer import observe_casino_xp_transaction
 
 logger = logging.getLogger(__name__)
@@ -16,31 +16,18 @@ class InsufficientXPError(ValueError):
 
 
 def get_balance(user_id: int) -> int:
-    """Return current XP balance for ``user_id``.
+    """Return the authoritative in-memory XP balance for ``user_id``.
 
-    The in-memory XP store is authoritative once a user is cached. If the
-    requested user is absent, read the on-disk snapshot only as a fallback for
-    the returned balance. The fallback must never merge the whole disk snapshot
-    into ``xp_store.data`` because that could overwrite newer, unflushed XP for
-    other users with stale persisted values.
+    ``XPStore.start`` loads the complete SQLite XP table before cogs are loaded,
+    so a missing in-memory user means a zero balance. Reading the legacy JSON
+    file here would be unsafe after migration because that snapshot is no longer
+    updated and could return stale XP.
     """
 
-    uid = str(user_id)
-    cached = xp_store.data.get(uid)
-    if cached is not None:
-        return int(cached.get("xp", 0))
-
-    try:
-        disk_data = read_json_safe(xp_store.path)
-    except Exception:
+    cached = xp_store.data.get(str(user_id))
+    if cached is None:
         return 0
-
-    if not isinstance(disk_data, dict):
-        return 0
-    disk_user = disk_data.get(uid)
-    if not isinstance(disk_user, dict):
-        return 0
-    return int(disk_user.get("xp", 0))
+    return int(cached.get("xp", 0))
 
 
 async def add_xp(user_id: int, amount: int, guild_id: int, source: str) -> None:
@@ -108,16 +95,7 @@ async def refund_xp_exact(
 
     uid = str(user_id)
     async with xp_store.lock:
-        if uid not in xp_store.data:
-            disk_data = read_json_safe(xp_store.path)
-            disk_user = disk_data.get(uid) if isinstance(disk_data, dict) else None
-            xp_store.data[uid] = (
-                dict(disk_user)
-                if isinstance(disk_user, dict)
-                else {"xp": 0, "level": 0}
-            )
-
-        user = xp_store.data[uid]
+        user = xp_store.data.setdefault(uid, {"xp": 0, "level": 0})
         old_xp = int(user.get("xp", 0))
         old_level = int(user.get("level", xp_store._calc_level(old_xp)))
         new_xp = old_xp + amount
@@ -169,4 +147,5 @@ __all__ = [
     "get_balance",
     "add_xp",
     "refund_xp_exact",
+    "read_json_safe",
 ]
