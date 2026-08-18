@@ -47,6 +47,138 @@ async def test_legacy_xp_and_voice_migration_is_idempotent(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_legacy_daily_stats_and_boosts_migration_is_idempotent(tmp_path):
+    daily_path = tmp_path / "daily_stats.json"
+    boosts_path = tmp_path / "xp_boosts.json"
+    db = SQLiteDatabase(tmp_path / "refuge.db")
+
+    daily_path.write_text(
+        json.dumps(
+            {
+                "2026-08-19": {
+                    "10": {"messages": 7, "voice": 1800},
+                    "20": {
+                        "messages": 2,
+                        "voice": 7200,
+                        "voice_thanked": True,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    boosts_path.write_text(
+        json.dumps(
+            {
+                "10": {
+                    "started_at": "2026-08-19T08:00:00+00:00",
+                    "expires_at": "2026-08-19T09:00:00+00:00",
+                    "history": [
+                        {
+                            "start": "2026-08-18T08:00:00+00:00",
+                            "end": "2026-08-18T09:00:00+00:00",
+                        }
+                    ],
+                },
+                "20": "2099-01-01T12:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert await db.migrate_legacy_daily_stats(daily_path) == 2
+    assert await db.migrate_legacy_xp_boosts(boosts_path) == 2
+    assert await db.migrate_legacy_daily_stats(daily_path) == 0
+    assert await db.migrate_legacy_xp_boosts(boosts_path) == 0
+
+    daily = await db.load_daily_stats()
+    boosts = await db.load_xp_boosts()
+
+    assert daily["2026-08-19"]["10"] == {"messages": 7, "voice": 1800}
+    assert daily["2026-08-19"]["20"] == {
+        "messages": 2,
+        "voice": 7200,
+        "voice_thanked": True,
+    }
+    assert boosts["10"]["started_at"] == "2026-08-19T08:00:00+00:00"
+    assert boosts["10"]["expires_at"] == "2026-08-19T09:00:00+00:00"
+    assert boosts["10"]["history"] == [
+        {
+            "start": "2026-08-18T08:00:00+00:00",
+            "end": "2026-08-18T09:00:00+00:00",
+        }
+    ]
+    assert boosts["20"]["expires_at"] == "2099-01-01T12:00:00+00:00"
+    assert boosts["20"]["started_at"] is not None
+    assert await db.quick_check() == "ok"
+
+
+@pytest.mark.asyncio
+async def test_daily_stats_and_boost_snapshots_replace_stale_rows(tmp_path):
+    db = SQLiteDatabase(tmp_path / "refuge.db")
+
+    await db.replace_daily_stats(
+        {
+            "2026-08-18": {
+                "1": {"messages": 4, "voice": 30},
+            }
+        }
+    )
+    await db.replace_daily_stats(
+        {
+            "2026-08-19": {
+                "2": {
+                    "messages": 9,
+                    "voice": 90,
+                    "voice_thanked": True,
+                }
+            }
+        }
+    )
+    assert await db.load_daily_stats() == {
+        "2026-08-19": {
+            "2": {
+                "messages": 9,
+                "voice": 90,
+                "voice_thanked": True,
+            }
+        }
+    }
+
+    await db.replace_xp_boosts(
+        {
+            "1": {
+                "started_at": "2026-08-19T08:00:00+00:00",
+                "expires_at": "2026-08-19T09:00:00+00:00",
+                "history": [
+                    {
+                        "start": "2026-08-18T08:00:00+00:00",
+                        "end": "2026-08-18T09:00:00+00:00",
+                    }
+                ],
+            }
+        }
+    )
+    await db.replace_xp_boosts(
+        {
+            "2": {
+                "started_at": "2026-08-19T10:00:00+00:00",
+                "expires_at": "2026-08-19T11:00:00+00:00",
+                "history": [],
+            }
+        }
+    )
+    assert await db.load_xp_boosts() == {
+        "2": {
+            "started_at": "2026-08-19T10:00:00+00:00",
+            "expires_at": "2026-08-19T11:00:00+00:00",
+            "history": [],
+        }
+    }
+    assert await db.quick_check() == "ok"
+
+
+@pytest.mark.asyncio
 async def test_started_xp_store_persists_to_sqlite_without_rewriting_legacy_json(
     tmp_path,
 ):
