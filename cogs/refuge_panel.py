@@ -23,6 +23,7 @@ from ui.refuge_panel_view import (
     RefugeLiveStatus,
     RefugePublicControlsView,
     RefugePublicPanelView,
+    refuge_activity_presentation,
 )
 from utils.discord_utils import safe_message_edit
 from utils.timezones import PARIS_TZ
@@ -149,6 +150,13 @@ def build_refuge_live_status(
         radio_status=refuge_radio_status(bot),
         ambience=refuge_ambience(at=at),
     )
+
+
+def refuge_live_visual_signature(world_signature: str, voice_count: int) -> str:
+    """Combine persistent/hourly visuals with the coarse live activity bucket."""
+
+    activity = refuge_activity_presentation(voice_count)
+    return f"{world_signature}|activity:{activity.key}"
 
 
 def panel_refresh_action(
@@ -336,8 +344,16 @@ class RefugePanelCog(commands.Cog):
                 return
             await self.world_store.save_state(replace(state, panel=desired))
 
-    async def _render_file(self, snapshot: RefugePanelSnapshot) -> discord.File:
-        png = await self.panel_service.render_png(snapshot)
+    async def _render_file(
+        self,
+        snapshot: RefugePanelSnapshot,
+        live_status: RefugeLiveStatus,
+    ) -> discord.File:
+        activity = refuge_activity_presentation(live_status.voice_count)
+        png = await self.panel_service.render_png(
+            snapshot,
+            activity_key=activity.key,
+        )
         return discord.File(
             io.BytesIO(png),
             filename=REFUGE_MAP_FILENAME,
@@ -367,6 +383,10 @@ class RefugePanelCog(commands.Cog):
                 channel.guild,
                 snapshot,
             )
+            combined_visual_signature = refuge_live_visual_signature(
+                snapshot.visual_signature,
+                live_status.voice_count,
+            )
             combined_summary_signature = (
                 f"{snapshot.summary_signature}|live:{live_status.signature}"
             )
@@ -374,7 +394,7 @@ class RefugePanelCog(commands.Cog):
                 message_exists=message is not None,
                 previous_visual_signature=self._last_visual_signature,
                 previous_summary_signature=self._last_summary_signature,
-                visual_signature=snapshot.visual_signature,
+                visual_signature=combined_visual_signature,
                 summary_signature=combined_summary_signature,
             )
 
@@ -383,7 +403,7 @@ class RefugePanelCog(commands.Cog):
 
             view = RefugePublicPanelView(snapshot, live_status=live_status)
             if action == "create":
-                file = await self._render_file(snapshot)
+                file = await self._render_file(snapshot, live_status)
                 try:
                     message = await channel.send(file=file, view=view)
                 except discord.HTTPException:
@@ -392,7 +412,7 @@ class RefugePanelCog(commands.Cog):
                 await self._persist_panel_reference(message)
             elif action == "render":
                 assert message is not None
-                file = await self._render_file(snapshot)
+                file = await self._render_file(snapshot, live_status)
                 try:
                     edited = await safe_message_edit(
                         message,
@@ -415,7 +435,7 @@ class RefugePanelCog(commands.Cog):
                 if edited is not None:
                     message = edited
 
-            self._last_visual_signature = snapshot.visual_signature
+            self._last_visual_signature = combined_visual_signature
             self._last_summary_signature = combined_summary_signature
             if message is not None:
                 await self._persist_panel_reference(message)
@@ -448,6 +468,7 @@ __all__ = [
     "panel_refresh_action",
     "refuge_ambience",
     "refuge_day_number",
+    "refuge_live_visual_signature",
     "refuge_member_count",
     "refuge_radio_status",
     "refuge_voice_count",
