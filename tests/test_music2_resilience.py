@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import cogs.music2 as music2
+import utils.ytdlp_auth as ytdlp_auth
 
 
 class DummyBot:
@@ -86,6 +87,69 @@ async def test_extract_info_retries_once_after_transient_failure(monkeypatch):
 
     assert result["title"] == "Recovered"
     assert attempts == ["query", "query"]
+
+
+@pytest.mark.asyncio
+async def test_url_lookup_uses_metadata_cache_but_stream_resolution_stays_fresh(monkeypatch):
+    ytdlp_auth.clear_ytdlp_metadata_cache()
+    cog = music2.Music2Cog(DummyBot())
+    calls = []
+    target = "https://www.youtube.com/watch?v=cache-test"
+
+    def fake_extract(value: str):
+        calls.append(value)
+        return {
+            "id": "cache-test",
+            "title": "Cache Test",
+            "webpage_url": target,
+            "duration": 42,
+            "uploader": "Tester",
+            "url": f"https://signed-media.invalid/{len(calls)}",
+            "http_headers": {"User-Agent": "temporary"},
+        }
+
+    monkeypatch.setattr(cog, "_extract_info_sync", fake_extract)
+
+    first = await cog._extract_info(target, purpose="recherche URL")
+    second = await cog._extract_info(target, purpose="recherche URL")
+    fresh_stream = await cog._extract_info(target, purpose="résolution flux")
+
+    assert first["url"] == "https://signed-media.invalid/1"
+    assert "url" not in second
+    assert "http_headers" not in second
+    assert fresh_stream["url"] == "https://signed-media.invalid/2"
+    assert calls == [target, target]
+
+
+@pytest.mark.asyncio
+async def test_text_search_uses_one_hour_metadata_cache(monkeypatch):
+    ytdlp_auth.clear_ytdlp_metadata_cache()
+    cog = music2.Music2Cog(DummyBot())
+    calls = []
+    target = "Daft Punk One More Time"
+    webpage_url = "https://www.youtube.com/watch?v=search-cache"
+
+    def fake_search(value: str):
+        calls.append(value)
+        return {
+            "id": "search-cache",
+            "title": "One More Time",
+            "webpage_url": webpage_url,
+            "duration": 320,
+            "uploader": "Daft Punk",
+            "url": "https://signed-media.invalid/search",
+        }
+
+    monkeypatch.setattr(cog, "_search_info_sync", fake_search)
+
+    first = await cog._search_info(target)
+    second = await cog._search_info("  daft   punk one more time  ")
+
+    assert first["url"] == "https://signed-media.invalid/search"
+    assert second["title"] == "One More Time"
+    assert second["webpage_url"] == webpage_url
+    assert "url" not in second
+    assert calls == [target]
 
 
 @pytest.mark.asyncio
