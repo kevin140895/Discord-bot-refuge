@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import sys
 
-from config import DATA_DIR
-from storage.db import DB_PATH, SQLiteDatabase
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from config import DATA_DIR  # noqa: E402
+from storage.db import DB_PATH, SQLiteDatabase  # noqa: E402
 
 
 async def main() -> int:
