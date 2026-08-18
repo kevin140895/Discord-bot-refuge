@@ -5,20 +5,27 @@ import io
 import logging
 import os
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands, tasks
 
 from models.refuge_world import RefugePanelState
-from services.refuge_panel import RefugePanelService, refuge_panel_service
+from services.refuge_panel import (
+    RefugePanelService,
+    RefugePanelSnapshot,
+    refuge_panel_service,
+)
 from services.refuge_world_coordination import refuge_world_mutation_lock
 from storage.refuge_world_store import RefugeWorldStore, refuge_world_store
 from ui.refuge_panel_view import (
     REFUGE_MAP_FILENAME,
+    RefugeLiveStatus,
     RefugePublicControlsView,
     RefugePublicPanelView,
 )
 from utils.discord_utils import safe_message_edit
+from utils.timezones import PARIS_TZ
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +47,108 @@ REFUGE_PANEL_REFRESH_SECONDS = max(
     30,
     _env_int("REFUGE_PANEL_REFRESH_SECONDS", 60),
 )
+
+
+def _aware_utc(at: datetime | None = None) -> datetime:
+    moment = at or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def refuge_day_number(
+    created_at: str | None,
+    *,
+    at: datetime | None = None,
+) -> int | None:
+    """Return the persistent Refuge day number using Paris calendar days."""
+
+    if not created_at:
+        return None
+    try:
+        started = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+
+    started_day = started.astimezone(PARIS_TZ).date()
+    current_day = _aware_utc(at).astimezone(PARIS_TZ).date()
+    return max(1, (current_day - started_day).days + 1)
+
+
+def refuge_ambience(*, at: datetime | None = None) -> str:
+    """Return a deterministic atmosphere sentence for the Paris daypart."""
+
+    hour = _aware_utc(at).astimezone(PARIS_TZ).hour
+    if 5 <= hour < 12:
+        return "Le Refuge s’éveille doucement."
+    if 12 <= hour < 18:
+        return "L’activité bat son plein dans le Refuge."
+    if 18 <= hour < 23:
+        return "Les habitants se retrouvent autour du feu."
+    return "Le Refuge s’endort, mais quelques lumières restent allumées."
+
+
+def refuge_member_count(guild: discord.Guild) -> int:
+    """Count human members using the same semantics as the stats cog."""
+
+    members = tuple(getattr(guild, "members", ()) or ())
+    bot_count = sum(1 for member in members if getattr(member, "bot", False))
+    reported_count = getattr(guild, "member_count", None)
+    if reported_count is None:
+        return sum(1 for member in members if not getattr(member, "bot", False))
+    try:
+        total = int(reported_count)
+    except (TypeError, ValueError):
+        total = len(members)
+    return max(0, total - bot_count)
+
+
+def refuge_voice_count(guild: discord.Guild) -> int:
+    """Count humans currently connected to any guild voice channel."""
+
+    return sum(
+        1
+        for channel in (getattr(guild, "voice_channels", ()) or ())
+        for member in (getattr(channel, "members", ()) or ())
+        if not getattr(member, "bot", False)
+    )
+
+
+def refuge_radio_status(bot: commands.Bot) -> str:
+    """Describe the existing RadioCog state without adding Discord API calls."""
+
+    radio = bot.get_cog("RadioCog")
+    if radio is None:
+        return "Hors ligne"
+    if getattr(radio, "stream_url", None) is None:
+        # Music2 intentionally suspends the radio by clearing stream_url.
+        return "En pause"
+
+    voice = getattr(radio, "voice", None)
+    is_connected = getattr(voice, "is_connected", None)
+    if callable(is_connected) and bool(is_connected()):
+        return "En ligne"
+    return "Reconnexion"
+
+
+def build_refuge_live_status(
+    bot: commands.Bot,
+    guild: discord.Guild,
+    snapshot: RefugePanelSnapshot,
+    *,
+    at: datetime | None = None,
+) -> RefugeLiveStatus:
+    """Build the small live Discord layer shown above the persistent world state."""
+
+    return RefugeLiveStatus(
+        day_number=refuge_day_number(snapshot.state.created_at, at=at),
+        member_count=refuge_member_count(guild),
+        voice_count=refuge_voice_count(guild),
+        radio_status=refuge_radio_status(bot),
+        ambience=refuge_ambience(at=at),
+    )
 
 
 def panel_refresh_action(
@@ -227,7 +336,7 @@ class RefugePanelCog(commands.Cog):
                 return
             await self.world_store.save_state(replace(state, panel=desired))
 
-    async def _render_file(self, snapshot) -> discord.File:
+    async def _render_file(self, snapshot: RefugePanelSnapshot) -> discord.File:
         png = await self.panel_service.render_png(snapshot)
         return discord.File(
             io.BytesIO(png),
@@ -253,18 +362,26 @@ class RefugePanelCog(commands.Cog):
                 return
 
             snapshot = await self.panel_service.evaluate()
+            live_status = build_refuge_live_status(
+                self.bot,
+                channel.guild,
+                snapshot,
+            )
+            combined_summary_signature = (
+                f"{snapshot.summary_signature}|live:{live_status.signature}"
+            )
             action = panel_refresh_action(
                 message_exists=message is not None,
                 previous_visual_signature=self._last_visual_signature,
                 previous_summary_signature=self._last_summary_signature,
                 visual_signature=snapshot.visual_signature,
-                summary_signature=snapshot.summary_signature,
+                summary_signature=combined_summary_signature,
             )
 
             if action == "none":
                 return
 
-            view = RefugePublicPanelView(snapshot)
+            view = RefugePublicPanelView(snapshot, live_status=live_status)
             if action == "create":
                 file = await self._render_file(snapshot)
                 try:
@@ -299,7 +416,7 @@ class RefugePanelCog(commands.Cog):
                     message = edited
 
             self._last_visual_signature = snapshot.visual_signature
-            self._last_summary_signature = snapshot.summary_signature
+            self._last_summary_signature = combined_summary_signature
             if message is not None:
                 await self._persist_panel_reference(message)
 
@@ -326,6 +443,12 @@ __all__ = [
     "REFUGE_PANEL_CHANNEL_ID",
     "REFUGE_PANEL_REFRESH_SECONDS",
     "RefugePanelCog",
+    "build_refuge_live_status",
     "panel_reference_needs_retirement",
     "panel_refresh_action",
+    "refuge_ambience",
+    "refuge_day_number",
+    "refuge_member_count",
+    "refuge_radio_status",
+    "refuge_voice_count",
 ]
