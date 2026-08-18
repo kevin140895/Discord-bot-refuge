@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from rendering.refuge_construction import (
     construction_scene_signature,
     refuge_construction_renderer,
 )
+from rendering.refuge_live_activity import apply_refuge_activity_overlay
 from rendering.refuge_world import RefugeRenderContext
 from services.refuge_casino import RefugeCasinoService, refuge_casino_service
 from services.refuge_fire import RefugeFireService, refuge_fire_service
@@ -249,9 +251,22 @@ class RefugePanelService:
                 ),
             )
 
-    async def render_png(self, snapshot: RefugePanelSnapshot) -> bytes:
-        return await self.renderer.render_png_async(
+    async def render_png(
+        self,
+        snapshot: RefugePanelSnapshot,
+        *,
+        activity_key: str | None = None,
+    ) -> bytes:
+        png = await self.renderer.render_png_async(
             snapshot.state,
+            context=snapshot.context,
+        )
+        if activity_key is None:
+            return png
+        return await asyncio.to_thread(
+            apply_refuge_activity_overlay,
+            png,
+            activity_key=activity_key,
             context=snapshot.context,
         )
 
