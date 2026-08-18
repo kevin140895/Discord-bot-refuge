@@ -23,6 +23,17 @@ logger = logging.getLogger(__name__)
 REFUGE_PANEL_ACCENT = discord.Colour(0xD08A47)
 REFUGE_MAP_FILENAME: Final[str] = "refuge-map.png"
 RefugePanelAction = Literal["explore", "footprint", "timeline", "construction"]
+RefugeActivityKey = Literal["endormi", "calme", "vivant", "effervescent"]
+
+
+@dataclass(frozen=True, slots=True)
+class RefugeActivityPresentation:
+    """Compact presentation of the current real-time Refuge activity."""
+
+    key: RefugeActivityKey
+    emoji: str
+    label: str
+    description: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,13 +48,51 @@ class RefugeLiveStatus:
 
     @property
     def signature(self) -> str:
-        """Return a stable value used to avoid unnecessary panel edits."""
+        """Return visible runtime values used to avoid unnecessary panel edits."""
 
         day = self.day_number if self.day_number is not None else 0
         return (
             f"day={day}|members={self.member_count}|voice={self.voice_count}|"
-            f"radio={self.radio_status}|ambience={self.ambience}"
+            f"radio={self.radio_status}"
         )
+
+
+def refuge_activity_presentation(voice_count: int) -> RefugeActivityPresentation:
+    """Map cached human voice presence to one understandable Refuge state.
+
+    The thresholds are intentionally small and deterministic for the current
+    community size. They use only information already present in discord.py's
+    guild/voice cache, so rendering the public panel never adds a REST request.
+    """
+
+    count = max(0, int(voice_count))
+    if count == 0:
+        return RefugeActivityPresentation(
+            key="endormi",
+            emoji="🌙",
+            label="Refuge endormi",
+            description="Le camp est silencieux, les braises veillent encore.",
+        )
+    if count == 1:
+        return RefugeActivityPresentation(
+            key="calme",
+            emoji="🌿",
+            label="Refuge calme",
+            description="Quelques habitants veillent encore autour du feu.",
+        )
+    if count < 6:
+        return RefugeActivityPresentation(
+            key="vivant",
+            emoji="🔥",
+            label="Refuge vivant",
+            description="Le feu crépite tandis que les habitants se rassemblent.",
+        )
+    return RefugeActivityPresentation(
+        key="effervescent",
+        emoji="⚡",
+        label="Refuge effervescent",
+        description="Le camp résonne de voix jusque dans les cabanes.",
+    )
 
 
 class RefugePanelButton(discord.ui.Button):
@@ -203,6 +252,7 @@ class RefugePublicPanelView(discord.ui.LayoutView):
                 if live_status.day_number is not None
                 else "—"
             )
+            activity = refuge_activity_presentation(live_status.voice_count)
             container.add_item(
                 discord.ui.TextDisplay(
                     "### Vie du Refuge\n"
@@ -210,7 +260,8 @@ class RefugePublicPanelView(discord.ui.LayoutView):
                     f"👥 **{live_status.member_count} habitants** · "
                     f"🎙️ **{live_status.voice_count} au feu de camp**\n"
                     f"📻 **Radio : {live_status.radio_status}**\n"
-                    f"🌿 *{live_status.ambience}*"
+                    f"{activity.emoji} **{activity.label}** · "
+                    f"*{activity.description}*"
                 )
             )
             container.add_item(discord.ui.Separator())
@@ -250,9 +301,11 @@ def _roman(level: int) -> str:
 __all__ = [
     "REFUGE_MAP_FILENAME",
     "REFUGE_PANEL_ACCENT",
+    "RefugeActivityPresentation",
     "RefugeLiveStatus",
     "RefugePanelButton",
     "RefugePublicControlsView",
     "RefugePublicPanelView",
+    "refuge_activity_presentation",
     "refuge_controls_row",
 ]
