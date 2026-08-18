@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Final, Literal
 
 import discord
@@ -22,6 +23,27 @@ logger = logging.getLogger(__name__)
 REFUGE_PANEL_ACCENT = discord.Colour(0xD08A47)
 REFUGE_MAP_FILENAME: Final[str] = "refuge-map.png"
 RefugePanelAction = Literal["explore", "footprint", "timeline", "construction"]
+
+
+@dataclass(frozen=True, slots=True)
+class RefugeLiveStatus:
+    """Small Discord-runtime read model displayed on the public Refuge panel."""
+
+    day_number: int | None
+    member_count: int
+    voice_count: int
+    radio_status: str
+    ambience: str
+
+    @property
+    def signature(self) -> str:
+        """Return a stable value used to avoid unnecessary panel edits."""
+
+        day = self.day_number if self.day_number is not None else 0
+        return (
+            f"day={day}|members={self.member_count}|voice={self.voice_count}|"
+            f"radio={self.radio_status}|ambience={self.ambience}"
+        )
 
 
 class RefugePanelButton(discord.ui.Button):
@@ -152,7 +174,12 @@ class RefugePublicControlsView(discord.ui.LayoutView):
 class RefugePublicPanelView(discord.ui.LayoutView):
     """Permanent public Components V2 panel for the living Refuge."""
 
-    def __init__(self, snapshot: RefugePanelSnapshot) -> None:
+    def __init__(
+        self,
+        snapshot: RefugePanelSnapshot,
+        *,
+        live_status: RefugeLiveStatus | None = None,
+    ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(accent_colour=REFUGE_PANEL_ACCENT)
         container.add_item(
@@ -169,6 +196,24 @@ class RefugePublicPanelView(discord.ui.LayoutView):
         )
         container.add_item(gallery)
         container.add_item(discord.ui.Separator())
+
+        if live_status is not None:
+            day_label = (
+                str(live_status.day_number)
+                if live_status.day_number is not None
+                else "—"
+            )
+            container.add_item(
+                discord.ui.TextDisplay(
+                    "### Vie du Refuge\n"
+                    f"📅 **Jour {day_label}** · "
+                    f"👥 **{live_status.member_count} habitants** · "
+                    f"🎙️ **{live_status.voice_count} au feu de camp**\n"
+                    f"📻 **Radio : {live_status.radio_status}**\n"
+                    f"🌿 *{live_status.ambience}*"
+                )
+            )
+            container.add_item(discord.ui.Separator())
 
         casino_state = "Ouvert" if snapshot.casino_is_open else "Fermé"
         summary_lines = [
@@ -205,6 +250,7 @@ def _roman(level: int) -> str:
 __all__ = [
     "REFUGE_MAP_FILENAME",
     "REFUGE_PANEL_ACCENT",
+    "RefugeLiveStatus",
     "RefugePanelButton",
     "RefugePublicControlsView",
     "RefugePublicPanelView",
