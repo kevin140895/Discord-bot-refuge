@@ -68,7 +68,7 @@ def _is_ghost_hour(occurred: datetime) -> bool:
 
 
 class RouletteLegendStore:
-    """Read-only V2 legend evidence projection over existing roulette history."""
+    """Read-only V2.1 legend evidence projection over roulette history."""
 
     def __init__(self, path: str | Path = DB_PATH) -> None:
         self.path = Path(path)
@@ -80,15 +80,37 @@ class RouletteLegendStore:
         connection.execute("PRAGMA synchronous = NORMAL")
         return connection
 
-    def _rows_sync(self, cutoff: str) -> list[sqlite3.Row]:
+    @staticmethod
+    def _table_exists(connection: sqlite3.Connection) -> bool:
+        return (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='roulette_events'"
+            ).fetchone()
+            is not None
+        )
+
+    def _max_event_id_sync(self) -> int:
+        if not self.path.is_file():
+            return 0
+        try:
+            with self._connect() as connection:
+                if not self._table_exists(connection):
+                    return 0
+                row = connection.execute(
+                    "SELECT COALESCE(MAX(id), 0) AS max_id FROM roulette_events"
+                ).fetchone()
+        except sqlite3.Error:
+            return 0
+        if row is None:
+            return 0
+        return max(0, int(row["max_id"]))
+
+    def _rows_sync(self, after_event_id: int) -> list[sqlite3.Row]:
         if not self.path.is_file():
             return []
         try:
             with self._connect() as connection:
-                exists = connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='roulette_events'"
-                ).fetchone()
-                if exists is None:
+                if not self._table_exists(connection):
                     return []
                 rows = connection.execute(
                     """
@@ -103,21 +125,33 @@ class RouletteLegendStore:
                             zero_hit,
                             occurred_at
                         FROM roulette_events
-                        WHERE occurred_at >= ?
-                        ORDER BY occurred_at DESC, id DESC
+                        WHERE id > ?
+                        ORDER BY id DESC
                         LIMIT ?
                     )
-                    ORDER BY occurred_at ASC, id ASC
+                    ORDER BY id ASC
                     """,
-                    (cutoff, CASINO_LEGEND_MAX_ROWS),
+                    (max(0, int(after_event_id)), CASINO_LEGEND_MAX_ROWS),
                 ).fetchall()
         except sqlite3.Error:
             return []
         return list(rows)
 
     @staticmethod
-    def _build_evidence(rows: list[sqlite3.Row]) -> RouletteLegendEvidence:
-        if not rows:
+    def _build_evidence(
+        rows: list[sqlite3.Row],
+        *,
+        cutoff: datetime,
+    ) -> RouletteLegendEvidence:
+        parsed_rows: list[tuple[sqlite3.Row, datetime]] = []
+        for row in rows:
+            occurred = _parse_timestamp(row["occurred_at"])
+            if occurred is None or occurred < cutoff:
+                continue
+            parsed_rows.append((row, occurred))
+        parsed_rows.sort(key=lambda item: (item[1], int(item[0]["id"])))
+
+        if not parsed_rows:
             return RouletteLegendEvidence()
 
         user_stats: dict[int, dict[str, int]] = {}
@@ -125,15 +159,9 @@ class RouletteLegendStore:
         max_payout = 0
         current_house_streak = 0
         max_house_streak = 0
-        parsed_rows: list[tuple[sqlite3.Row, datetime]] = []
         nights: dict[str, dict[str, object]] = {}
 
-        for row in rows:
-            occurred = _parse_timestamp(row["occurred_at"])
-            if occurred is None:
-                continue
-            parsed_rows.append((row, occurred))
-
+        for row, occurred in parsed_rows:
             user_id = int(row["user_id"])
             wager = max(0, int(row["wager_xp"]))
             payout = max(0, int(row["payout_xp"]))
@@ -270,12 +298,18 @@ class RouletteLegendStore:
             ghost_player_qualified=ghost_player,
         )
 
+    async def get_max_event_id(self) -> int:
+        """Return the latest persisted roulette event id, or zero for an empty DB."""
+
+        return await asyncio.to_thread(self._max_event_id_sync)
+
     async def get_evidence(
         self,
         *,
         at: datetime | None = None,
         window_hours: int = CASINO_LEGEND_WINDOW_HOURS,
         since: datetime | str | None = None,
+        after_event_id: int = 0,
     ) -> RouletteLegendEvidence:
         now = _aware_utc(at)
         cutoff = now - timedelta(hours=max(1, int(window_hours)))
@@ -288,8 +322,9 @@ class RouletteLegendStore:
             since_at = None
         if since_at is not None and since_at > cutoff:
             cutoff = since_at
-        rows = await asyncio.to_thread(self._rows_sync, cutoff.isoformat())
-        return await asyncio.to_thread(self._build_evidence, rows)
+
+        rows = await asyncio.to_thread(self._rows_sync, after_event_id)
+        return await asyncio.to_thread(self._build_evidence, rows, cutoff=cutoff)
 
 
 roulette_legend_store = RouletteLegendStore()

@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from config import DATA_DIR
 from models.refuge_world import (
@@ -126,6 +126,14 @@ class RefugeWorldStore:
         if migrated:
             await atomic_write_json_async(self.path, state.to_dict())
 
+    @staticmethod
+    def _validate_state(state: RefugeWorldState) -> None:
+        if state.schema_version != REFUGE_WORLD_SCHEMA_VERSION:
+            raise RefugeWorldSchemaError(
+                "cannot persist refuge world schema "
+                f"{state.schema_version}; expected {REFUGE_WORLD_SCHEMA_VERSION}"
+            )
+
     async def load(self) -> RefugeWorldState:
         async with self._get_lock():
             await self._load_locked()
@@ -152,15 +160,28 @@ class RefugeWorldStore:
             return deepcopy(self._state)
 
     async def save_state(self, state: RefugeWorldState) -> RefugeWorldState:
-        if state.schema_version != REFUGE_WORLD_SCHEMA_VERSION:
-            raise RefugeWorldSchemaError(
-                "cannot persist refuge world schema "
-                f"{state.schema_version}; expected {REFUGE_WORLD_SCHEMA_VERSION}"
-            )
+        self._validate_state(state)
         async with self._get_lock():
             self._state = deepcopy(state)
             self._loaded = True
             await atomic_write_json_async(self.path, self._state.to_dict())
+            return deepcopy(self._state)
+
+    async def update_state(
+        self,
+        updater: Callable[[RefugeWorldState], RefugeWorldState],
+    ) -> RefugeWorldState:
+        """Atomically transform and persist the latest Refuge world state."""
+
+        async with self._get_lock():
+            await self._load_locked()
+            updated = updater(deepcopy(self._state))
+            if not isinstance(updated, RefugeWorldState):
+                raise TypeError("Refuge world updater must return RefugeWorldState")
+            self._validate_state(updated)
+            if updated != self._state:
+                self._state = deepcopy(updated)
+                await atomic_write_json_async(self.path, self._state.to_dict())
             return deepcopy(self._state)
 
 
