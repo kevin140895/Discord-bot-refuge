@@ -199,6 +199,7 @@ class RouletteLegendStore:
         for (previous, _previous_at), (current, _current_at) in zip(
             parsed_rows,
             parsed_rows[1:],
+            strict=False,
         ):
             if (
                 int(previous["user_id"]) == int(current["user_id"])
