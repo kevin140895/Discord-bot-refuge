@@ -14,12 +14,14 @@ from services.refuge_casino import (
     refuge_casino_service,
 )
 from storage.roulette_legend_store import (
+    HOUSE_LEGEND_MIN_STREAK,
     RouletteLegendEvidence,
     RouletteLegendStore,
     roulette_legend_store,
 )
 
 
+CASINO_LEGEND_RULES_VERSION = 2
 CASINO_LEGEND_DESCRIPTIONS = {
     "grand_heist": "Les joueurs ont fait plier les coffres de la Maison.",
     "black_night": "Une nuit entière a tourné à l'avantage de la Maison.",
@@ -59,8 +61,8 @@ class CasinoLegendState:
 EMPTY_CASINO_LEGENDS = CasinoLegendState()
 
 
-def _marker_sets(status: RefugeCasinoStatus) -> tuple[set[str], set[str]]:
-    building = next(
+def _casino_building(status: RefugeCasinoStatus):
+    return next(
         (
             item
             for item in status.state.buildings
@@ -68,6 +70,10 @@ def _marker_sets(status: RefugeCasinoStatus) -> tuple[set[str], set[str]]:
         ),
         None,
     )
+
+
+def _marker_sets(status: RefugeCasinoStatus) -> tuple[set[str], set[str]]:
+    building = _casino_building(status)
     if building is None:
         return set(), set()
 
@@ -82,6 +88,19 @@ def _marker_sets(status: RefugeCasinoStatus) -> tuple[set[str], set[str]]:
             str(item) for item in raw_secret if str(item) in CASINO_SECRET_EVENTS
         }
     return public, secret
+
+
+def _legend_rules_meta(status: RefugeCasinoStatus) -> tuple[int, str | None]:
+    building = _casino_building(status)
+    if building is None:
+        return 0, None
+    try:
+        version = int(building.state.get("legend_rules_version", 0))
+    except (TypeError, ValueError):
+        version = 0
+    raw_started_at = building.state.get("legend_rules_v2_started_at")
+    started_at = str(raw_started_at).strip() if raw_started_at else None
+    return version, started_at
 
 
 def casino_legend_state_from_status(
@@ -112,16 +131,16 @@ def _public_candidates(evidence: RouletteLegendEvidence) -> set[str]:
         candidates.add("black_night")
     if evidence.break_in_qualified:
         candidates.add("break_in")
-    if evidence.max_house_streak >= 10:
+    if evidence.max_house_streak >= HOUSE_LEGEND_MIN_STREAK:
         candidates.add("house_always_wins")
     return candidates
 
 
 def _secret_candidates(evidence: RouletteLegendEvidence) -> set[str]:
     candidates: set[str] = set()
-    if evidence.zero_count >= 3:
+    if evidence.black_cat_qualified:
         candidates.add("black_cat")
-    if evidence.max_payout_xp >= 5000:
+    if evidence.diamond_qualified:
         candidates.add("diamond")
     if evidence.ghost_player_qualified:
         candidates.add("ghost_player")
@@ -149,11 +168,20 @@ class CasinoLegendService:
     ) -> RefugeCasinoStatus:
         async with self._lock:
             current = status or await self.casino_service.evaluate(at=at)
+            version, started_at = _legend_rules_meta(current)
+            if version < CASINO_LEGEND_RULES_VERSION:
+                await self.casino_service.migrate_legend_rules_v2(at=at)
+                current = await self.casino_service.evaluate(at=at)
+                version, started_at = _legend_rules_meta(current)
+
             public, secret = _marker_sets(current)
             if public >= set(CASINO_EVENTS) and secret >= set(CASINO_SECRET_EVENTS):
                 return current
 
-            evidence = await self.store.get_evidence(at=at)
+            evidence = await self.store.get_evidence(
+                at=at,
+                since=started_at,
+            )
             public_candidates = _public_candidates(evidence) - public
             secret_candidates = _secret_candidates(evidence) - secret
             changed = False
@@ -175,6 +203,7 @@ casino_legend_service = CasinoLegendService()
 
 __all__ = [
     "CASINO_LEGEND_DESCRIPTIONS",
+    "CASINO_LEGEND_RULES_VERSION",
     "CASINO_SECRET_DESCRIPTIONS",
     "CasinoLegendService",
     "CasinoLegendState",

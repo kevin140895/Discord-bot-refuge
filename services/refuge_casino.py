@@ -501,6 +501,67 @@ class RefugeCasinoService:
             render_signature=world_render_signature(state),
         )
 
+    async def migrate_legend_rules_v2(
+        self,
+        *,
+        at: datetime | None = None,
+        config: RefugeCasinoConfig | None = None,
+    ) -> RefugeWorldState:
+        """Reset Lot 5 public markers once and establish the V2 evidence epoch."""
+
+        casino_config = config or RefugeCasinoConfig.from_env()
+        async with self._lock:
+            status = await self._evaluate_locked(config=casino_config, at=at)
+            state = status.state
+            building = _casino_building(state)
+            if building is None:
+                raise RuntimeError("Refuge Casino building is missing")
+
+            building_state = dict(building.state)
+            try:
+                version = int(building_state.get("legend_rules_version", 0))
+            except (TypeError, ValueError):
+                version = 0
+            if version >= 2:
+                return state
+
+            reset_markers = _string_list(
+                building_state.get("casino_events", ()),
+                allowed=CASINO_EVENTS,
+            )
+            started_at = _utc_iso(at)
+            building_state["casino_events"] = []
+            building_state["legend_rules_version"] = 2
+            building_state["legend_rules_v2_started_at"] = started_at
+
+            removed_event_ids = {
+                f"casino:casino_events:{marker_id}" for marker_id in CASINO_EVENTS
+            }
+            events = tuple(
+                event for event in state.events if event.event_id not in removed_event_ids
+            )
+            migration_event_id = "casino:legend_rules:v2"
+            if not any(event.event_id == migration_event_id for event in events):
+                events = events + (
+                    RefugeHistoricalEvent(
+                        event_id=migration_event_id,
+                        event_type="casino_legend_rules_migrated",
+                        occurred_at=started_at,
+                        data={
+                            "building_id": CASINO_BUILDING_ID,
+                            "rule_version": 2,
+                            "reset_markers": reset_markers,
+                            "name": "Règles des légendes du Casino recalibrées",
+                        },
+                    ),
+                )
+
+            updated = _replace_building(
+                replace(state, events=events),
+                replace(building, state=building_state),
+            )
+            return await self.world_store.save_state(updated)
+
     async def _unlock_marker(
         self,
         marker_id: str,
