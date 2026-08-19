@@ -21,10 +21,14 @@ from config import (
     CASINO_CLOSE_HOUR,
     CASINO_SCHEDULE_LABEL,
 )
+from rendering.casino_royal import CASINO_ROYAL_FILENAME
+from services.casino_visual_cache import CasinoVisualAsset, casino_visual_cache
+from services.refuge_casino import refuge_casino_service
 from storage.roulette_history_store import roulette_history_store
 from storage.xp_store import xp_store
 from cogs.xp import award_xp
 from ui.casino_views import CasinoLeaderboardEntry, CasinoLeaderboardView
+from ui.casino_visual_panel import add_casino_visual_block
 from utils import xp_adapter
 from utils.timezones import PARIS_TZ
 from utils.persistence import atomic_write_json_async, read_json_safe
@@ -292,9 +296,18 @@ class RouletteXPActionRow(discord.ui.ActionRow):
 class RouletteXPView(discord.ui.LayoutView):
     """Persistent mobile-first Components V2 panel for the Casino du Refuge."""
 
-    def __init__(self, cog: "PariXPCog", disabled: bool = False) -> None:
+    def __init__(
+        self,
+        cog: "PariXPCog",
+        disabled: bool = False,
+        *,
+        include_visual: bool = True,
+    ) -> None:
         super().__init__(timeout=None)
         self.cog = cog
+        visual_asset = getattr(cog, "casino_visual_asset", None)
+        if not isinstance(visual_asset, CasinoVisualAsset):
+            visual_asset = None
 
         if not cog.is_open:
             container = discord.ui.Container(accent_colour=discord.Colour.dark_red())
@@ -304,7 +317,14 @@ class RouletteXPView(discord.ui.LayoutView):
                     "**Maison Royale · Roulette XP**"
                 )
             )
-            container.add_item(discord.ui.Separator())
+            if add_casino_visual_block(
+                container,
+                visual_asset,
+                include_media=include_visual,
+            ):
+                container.add_item(discord.ui.Separator())
+            else:
+                container.add_item(discord.ui.Separator())
             container.add_item(
                 discord.ui.TextDisplay(
                     "### 🔒 Portes fermées\n"
@@ -332,7 +352,14 @@ class RouletteXPView(discord.ui.LayoutView):
                 f"Horaires : **{CASINO_SCHEDULE_LABEL}**"
             )
         )
-        container.add_item(discord.ui.Separator())
+        if add_casino_visual_block(
+            container,
+            visual_asset,
+            include_media=include_visual,
+        ):
+            container.add_item(discord.ui.Separator())
+        else:
+            container.add_item(discord.ui.Separator())
         container.add_item(
             discord.ui.TextDisplay(
                 "### 🎲 Tables royales\n"
@@ -438,9 +465,11 @@ class PariXPCog(commands.Cog):
         self.state.setdefault("players", {})
         self.is_open: bool = bool(self.state.get("is_open"))
         self.living_state: dict[str, object] = _empty_living_state()
+        self.casino_visual_asset: CasinoVisualAsset | None = None
         self._message_id: Optional[int] = self.state.get("message_id")
         self._last_announced_state: Optional[bool] = None
         self._last_panel_signature: tuple[object, ...] | None = None
+        self._last_visual_signature: str | None = None
         # Sérialise la séquence débit → tirage → crédit → état pour éviter
         # que deux paris simultanés n'entrelacent les compteurs du casino.
         self._bet_lock = asyncio.Lock()
@@ -462,6 +491,7 @@ class PariXPCog(commands.Cog):
             self.state["is_open"] = self.is_open
             await self._save_state()
             await self._announce_state()
+        await self._refresh_casino_visual()
         await self._ensure_roulette_message()
 
     @check_schedule.before_loop
@@ -499,6 +529,16 @@ class PariXPCog(commands.Cog):
         # peut modifier self.state pendant la copie.
         snapshot = copy.deepcopy(self.state)
         await atomic_write_json_async(STATE_FILE, snapshot)
+
+    async def _refresh_casino_visual(self) -> None:
+        """Refresh the visual read model without touching roulette probability logic."""
+        try:
+            status = await refuge_casino_service.evaluate()
+            asset = await casino_visual_cache.get_or_render(status)
+        except Exception:
+            logger.exception("[PariXP] impossible de rafraîchir le visuel Casino")
+            return
+        self.casino_visual_asset = asset
 
     async def _refresh_living_state(self) -> None:
         try:
@@ -579,6 +619,12 @@ class PariXPCog(commands.Cog):
 
         return recent_ids, spotlight_sig, biggest_sig, streak_sig
 
+    def _visual_panel_signature(self) -> str | None:
+        asset = self.casino_visual_asset
+        if asset is None:
+            return None
+        return asset.signature
+
     def _roulette_panel_signature(self) -> tuple[object, ...]:
         last = self.state.get("last_winner")
         if not isinstance(last, dict):
@@ -590,6 +636,7 @@ class PariXPCog(commands.Cog):
             last.get("user_id"),
             last.get("amount"),
             self._living_panel_signature(),
+            self._visual_panel_signature(),
         )
 
     async def _ensure_roulette_message(self) -> None:
@@ -616,7 +663,17 @@ class PariXPCog(commands.Cog):
             return
 
         signature = self._roulette_panel_signature()
-        view = RouletteXPView(self, disabled=not self.is_open)
+        visual_asset = self.casino_visual_asset
+        include_visual = (
+            visual_asset is not None
+            and visual_asset.path.is_file()
+        )
+        visual_signature = visual_asset.signature if include_visual and visual_asset else None
+        view = RouletteXPView(
+            self,
+            disabled=not self.is_open,
+            include_visual=include_visual,
+        )
         message: Optional[discord.Message] = None
         if self._message_id:
             try:
@@ -627,16 +684,35 @@ class PariXPCog(commands.Cog):
         if message:
             if self._last_panel_signature == signature:
                 return
-            await safe_message_edit(
-                message,
-                content=None,
-                embed=None,
-                attachments=[],
-                view=view,
-            )
+            edit_kwargs: dict[str, object] = {
+                "content": None,
+                "embed": None,
+                "view": view,
+            }
+            if include_visual and self._last_visual_signature != visual_signature:
+                assert visual_asset is not None
+                edit_kwargs["attachments"] = [
+                    discord.File(
+                        str(visual_asset.path),
+                        filename=CASINO_ROYAL_FILENAME,
+                    )
+                ]
+            elif not include_visual and self._last_visual_signature is not None:
+                edit_kwargs["attachments"] = []
+            await safe_message_edit(message, **edit_kwargs)
         else:
             try:
-                sent = await channel.send(view=view)
+                if include_visual:
+                    assert visual_asset is not None
+                    sent = await channel.send(
+                        file=discord.File(
+                            str(visual_asset.path),
+                            filename=CASINO_ROYAL_FILENAME,
+                        ),
+                        view=view,
+                    )
+                else:
+                    sent = await channel.send(view=view)
             except discord.HTTPException:
                 return
             self._message_id = sent.id
@@ -644,6 +720,7 @@ class PariXPCog(commands.Cog):
             await self._save_state()
 
         self._last_panel_signature = signature
+        self._last_visual_signature = visual_signature
 
     def _record_player_result(self, user_id: int, bet_amount: int, payout: int) -> None:
         players = self.state.setdefault("players", {})
@@ -902,8 +979,9 @@ class PariXPCog(commands.Cog):
 
     async def cog_load(self) -> None:
         await self._refresh_living_state()
+        await self._refresh_casino_visual()
         try:
-            self.bot.add_view(RouletteXPView(self))
+            self.bot.add_view(RouletteXPView(self, include_visual=False))
         except Exception:
             pass
         await self._ensure_roulette_message()
