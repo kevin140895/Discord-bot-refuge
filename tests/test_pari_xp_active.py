@@ -41,11 +41,13 @@ def test_is_open_now_respects_overnight_schedule(monkeypatch):
 
 
 def test_simple_bet_roll_boundaries_use_40_percent_win_band():
+    cutoff = pari_xp.HOUSE_ZERO_CHANCE + pari_xp.SIMPLE_BET_WIN_CHANCE
+
     assert pari_xp._resolve_simple_bet_roll(0.0) == (True, False)
     assert pari_xp._resolve_simple_bet_roll(0.029999) == (True, False)
     assert pari_xp._resolve_simple_bet_roll(0.03) == (False, True)
-    assert pari_xp._resolve_simple_bet_roll(0.429999) == (False, True)
-    assert pari_xp._resolve_simple_bet_roll(0.43) == (False, False)
+    assert pari_xp._resolve_simple_bet_roll(cutoff - 1e-9) == (False, True)
+    assert pari_xp._resolve_simple_bet_roll(cutoff) == (False, False)
     assert pari_xp._resolve_simple_bet_roll(0.999999) == (False, False)
 
 
@@ -203,7 +205,8 @@ async def test_handle_bet_loss_starts_at_new_simple_cutoff(monkeypatch):
     monkeypatch.setattr(pari_xp.xp_adapter, "add_xp", AsyncMock())
     credit = AsyncMock()
     monkeypatch.setattr(pari_xp, "award_xp", credit)
-    monkeypatch.setattr(pari_xp.random, "random", lambda: 0.43)
+    cutoff = pari_xp.HOUSE_ZERO_CHANCE + pari_xp.SIMPLE_BET_WIN_CHANCE
+    monkeypatch.setattr(pari_xp.random, "random", lambda: cutoff)
     monkeypatch.setattr(pari_xp.asyncio, "sleep", AsyncMock())
 
     result_message = SimpleNamespace(edit=AsyncMock())
