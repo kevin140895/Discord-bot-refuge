@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 
+from models.refuge_world import RefugeHistoricalEvent, RefugeWorldState
 from services.refuge_casino import (
     CASINO_BUILDING_ID,
     CASINO_EVENTS,
@@ -22,6 +23,8 @@ from storage.roulette_legend_store import (
 
 
 CASINO_LEGEND_RULES_VERSION = 2
+CASINO_LEGEND_RULES_PATCH = "2.1"
+CASINO_LEGEND_V21_EVENT_ID = "casino:legend_rules:v2.1"
 CASINO_LEGEND_DESCRIPTIONS = {
     "grand_heist": "Les joueurs ont fait plier les coffres de la Maison.",
     "black_night": "Une nuit entière a tourné à l'avantage de la Maison.",
@@ -61,6 +64,13 @@ class CasinoLegendState:
 EMPTY_CASINO_LEGENDS = CasinoLegendState()
 
 
+def _utc_iso(at: datetime | None = None) -> str:
+    moment = at or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).isoformat()
+
+
 def _casino_building(status: RefugeCasinoStatus):
     return next(
         (
@@ -90,17 +100,29 @@ def _marker_sets(status: RefugeCasinoStatus) -> tuple[set[str], set[str]]:
     return public, secret
 
 
-def _legend_rules_meta(status: RefugeCasinoStatus) -> tuple[int, str | None]:
+def _legend_rules_meta(
+    status: RefugeCasinoStatus,
+) -> tuple[int, str | None, str | None, int | None]:
     building = _casino_building(status)
     if building is None:
-        return 0, None
+        return 0, None, None, None
     try:
         version = int(building.state.get("legend_rules_version", 0))
     except (TypeError, ValueError):
         version = 0
     raw_started_at = building.state.get("legend_rules_v2_started_at")
     started_at = str(raw_started_at).strip() if raw_started_at else None
-    return version, started_at
+    raw_patch = building.state.get("legend_rules_patch")
+    patch = str(raw_patch).strip() if raw_patch else None
+    raw_boundary = building.state.get("legend_rules_v2_after_event_id")
+    if raw_boundary is None:
+        boundary = None
+    else:
+        try:
+            boundary = max(0, int(raw_boundary))
+        except (TypeError, ValueError):
+            boundary = None
+    return version, started_at, patch, boundary
 
 
 def casino_legend_state_from_status(
@@ -147,6 +169,27 @@ def _secret_candidates(evidence: RouletteLegendEvidence) -> set[str]:
     return candidates
 
 
+def _replace_casino_building(
+    state: RefugeWorldState,
+    *,
+    building_state: dict[str, object],
+) -> RefugeWorldState:
+    buildings = []
+    found = False
+    for building in state.buildings:
+        if building.building_id == CASINO_BUILDING_ID:
+            buildings.append(replace(building, state=dict(building_state)))
+            found = True
+        else:
+            buildings.append(building)
+    if not found:
+        return state
+    return replace(
+        state,
+        buildings=tuple(sorted(buildings, key=lambda item: item.building_id)),
+    )
+
+
 class CasinoLegendService:
     """Unlock one-time narrative markers from real roulette history."""
 
@@ -160,6 +203,88 @@ class CasinoLegendService:
         self.casino_service = casino_service
         self._lock = asyncio.Lock()
 
+    async def _migrate_v21(
+        self,
+        *,
+        after_event_id: int,
+        at: datetime | None,
+    ) -> None:
+        started_at = _utc_iso(at)
+        removed_event_ids = {
+            f"casino:casino_events:{marker_id}" for marker_id in CASINO_EVENTS
+        }
+
+        def updater(state: RefugeWorldState) -> RefugeWorldState:
+            building = next(
+                (
+                    item
+                    for item in state.buildings
+                    if item.building_id == CASINO_BUILDING_ID
+                ),
+                None,
+            )
+            if building is None:
+                return state
+
+            building_state: dict[str, object] = dict(building.state)
+            raw_patch = building_state.get("legend_rules_patch")
+            patch = str(raw_patch).strip() if raw_patch else None
+            raw_boundary = building_state.get("legend_rules_v2_after_event_id")
+            try:
+                existing_boundary = int(raw_boundary) if raw_boundary is not None else None
+            except (TypeError, ValueError):
+                existing_boundary = None
+            if patch == CASINO_LEGEND_RULES_PATCH and existing_boundary is not None:
+                return state
+
+            raw_public = building_state.get("casino_events", ())
+            if isinstance(raw_public, (list, tuple, set, frozenset)):
+                reset_markers = sorted(
+                    {str(item) for item in raw_public if str(item) in CASINO_EVENTS}
+                )
+            else:
+                reset_markers = []
+
+            building_state["casino_events"] = []
+            building_state["legend_rules_version"] = CASINO_LEGEND_RULES_VERSION
+            building_state["legend_rules_patch"] = CASINO_LEGEND_RULES_PATCH
+            building_state["legend_rules_v2_after_event_id"] = max(
+                0, int(after_event_id)
+            )
+            building_state["legend_rules_v21_started_at"] = started_at
+
+            events = tuple(
+                event for event in state.events if event.event_id not in removed_event_ids
+            )
+            if not any(event.event_id == CASINO_LEGEND_V21_EVENT_ID for event in events):
+                events = events + (
+                    RefugeHistoricalEvent(
+                        event_id=CASINO_LEGEND_V21_EVENT_ID,
+                        event_type="casino_legend_rules_migrated",
+                        occurred_at=started_at,
+                        data={
+                            "building_id": CASINO_BUILDING_ID,
+                            "rule_version": CASINO_LEGEND_RULES_VERSION,
+                            "patch": CASINO_LEGEND_RULES_PATCH,
+                            "after_event_id": max(0, int(after_event_id)),
+                            "reset_markers": reset_markers,
+                            "name": "Règles des légendes du Casino sécurisées V2.1",
+                        },
+                    ),
+                )
+
+            updated = _replace_casino_building(
+                replace(state, events=events),
+                building_state=building_state,
+            )
+            return updated
+
+        # RefugeCasinoService owns all normal Casino world mutations. Sharing its
+        # service lock here prevents a stale evaluate/save cycle from overwriting
+        # the one-time V2.1 migration while RefugeWorldStore performs the atomic write.
+        async with self.casino_service._lock:
+            await self.casino_service.world_store.update_state(updater)
+
     async def sync(
         self,
         *,
@@ -168,11 +293,22 @@ class CasinoLegendService:
     ) -> RefugeCasinoStatus:
         async with self._lock:
             current = status or await self.casino_service.evaluate(at=at)
-            version, started_at = _legend_rules_meta(current)
+            version, _started_at, patch, after_event_id = _legend_rules_meta(current)
             if version < CASINO_LEGEND_RULES_VERSION:
                 await self.casino_service.migrate_legend_rules_v2(at=at)
                 current = await self.casino_service.evaluate(at=at)
-                version, started_at = _legend_rules_meta(current)
+                version, _started_at, patch, after_event_id = _legend_rules_meta(current)
+
+            if patch != CASINO_LEGEND_RULES_PATCH or after_event_id is None:
+                boundary = await self.store.get_max_event_id()
+                await self._migrate_v21(after_event_id=boundary, at=at)
+                current = await self.casino_service.evaluate(at=at)
+                version, _started_at, patch, after_event_id = _legend_rules_meta(current)
+
+            if version < CASINO_LEGEND_RULES_VERSION:
+                return current
+            if patch != CASINO_LEGEND_RULES_PATCH or after_event_id is None:
+                return current
 
             public, secret = _marker_sets(current)
             if public >= set(CASINO_EVENTS) and secret >= set(CASINO_SECRET_EVENTS):
@@ -180,7 +316,7 @@ class CasinoLegendService:
 
             evidence = await self.store.get_evidence(
                 at=at,
-                since=started_at,
+                after_event_id=after_event_id,
             )
             public_candidates = _public_candidates(evidence) - public
             secret_candidates = _secret_candidates(evidence) - secret
@@ -203,7 +339,9 @@ casino_legend_service = CasinoLegendService()
 
 __all__ = [
     "CASINO_LEGEND_DESCRIPTIONS",
+    "CASINO_LEGEND_RULES_PATCH",
     "CASINO_LEGEND_RULES_VERSION",
+    "CASINO_LEGEND_V21_EVENT_ID",
     "CASINO_SECRET_DESCRIPTIONS",
     "CasinoLegendService",
     "CasinoLegendState",
