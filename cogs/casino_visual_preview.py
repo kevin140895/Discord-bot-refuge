@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config import GUILD_ID
 from services.casino_visual_cache import casino_visual_cache
 from services.refuge_casino import refuge_casino_service
 
@@ -24,6 +25,7 @@ class CasinoVisualPreviewCog(commands.Cog):
         name="casino_preview_visuel",
         description="Prévisualiser un état visuel du Casino du Refuge",
     )
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.describe(
         phase="Moment de la journée à simuler",
         fortune="Fortune de la Maison à simuler",
