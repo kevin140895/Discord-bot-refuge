@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 
 import discord
@@ -66,7 +67,8 @@ class CasinoVisualPreviewCog(commands.Cog):
                 fortune_override=fortune.value,
                 open_override=etat.value == "open",
             )
-            file = discord.File(str(asset.path), filename="casino-preview.png")
+            payload = await asset.read_bytes()
+            file = discord.File(io.BytesIO(payload), filename="casino-preview.png")
             cache_label = "cache" if asset.cache_hit else "nouveau rendu"
             await interaction.followup.send(
                 (
