@@ -31,6 +31,7 @@ class CasinoVisualPreviewCog(commands.Cog):
         phase="Moment de la journée à simuler",
         fortune="Fortune de la Maison à simuler",
         etat="Ouverture ou fermeture à simuler",
+        reaction="Réaction visuelle Lot 4 à simuler",
     )
     @app_commands.choices(
         phase=[
@@ -52,6 +53,15 @@ class CasinoVisualPreviewCog(commands.Cog):
             app_commands.Choice(name="Ouvert", value="open"),
             app_commands.Choice(name="Fermé", value="closed"),
         ],
+        reaction=[
+            app_commands.Choice(name="Normal", value="normal"),
+            app_commands.Choice(name="Tables actives", value="active"),
+            app_commands.Choice(name="Forte affluence", value="busy"),
+            app_commands.Choice(name="Zéro Vert", value="green_zero"),
+            app_commands.Choice(name="Gros gain royal", value="royal_win"),
+            app_commands.Choice(name="Série joueurs", value="players_streak"),
+            app_commands.Choice(name="Série Maison", value="house_streak"),
+        ],
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def casino_preview_visuel(
@@ -60,15 +70,19 @@ class CasinoVisualPreviewCog(commands.Cog):
         phase: app_commands.Choice[str],
         fortune: app_commands.Choice[str],
         etat: app_commands.Choice[str],
+        reaction: app_commands.Choice[str] | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             status = await refuge_casino_service.evaluate()
+            reaction_value = reaction.value if reaction is not None else "normal"
+            reaction_name = reaction.name if reaction is not None else "Normal"
             asset = await casino_visual_cache.get_or_render(
                 status,
                 phase_override=phase.value,
                 fortune_override=fortune.value,
                 open_override=etat.value == "open",
+                reaction_override=reaction_value,
             )
             payload = await asset.read_bytes()
             file = discord.File(io.BytesIO(payload), filename="casino-preview.png")
@@ -76,7 +90,7 @@ class CasinoVisualPreviewCog(commands.Cog):
             await interaction.followup.send(
                 (
                     f"🎨 **Prévisualisation Casino** · {phase.name} · "
-                    f"{fortune.name} · {etat.name}\n"
+                    f"{fortune.name} · {etat.name} · {reaction_name}\n"
                     f"-# {cache_label} · aucun réglage économique n'a été modifié."
                 ),
                 file=file,
