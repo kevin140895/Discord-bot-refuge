@@ -15,7 +15,10 @@ async def test_casino_preview_command_is_registered_for_configured_guild():
         await bot.add_cog(CasinoVisualPreviewCog(bot))
         guild = discord.Object(id=GUILD_ID)
 
-        assert bot.tree.get_command("casino_preview_visuel", guild=guild) is not None
+        command = bot.tree.get_command("casino_preview_visuel", guild=guild)
+        assert command is not None
         assert bot.tree.get_command("casino_preview_visuel") is None
+        assert command.default_permissions is not None
+        assert command.default_permissions.administrator is True
     finally:
         await bot.close()
