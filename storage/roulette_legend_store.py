@@ -17,11 +17,10 @@ CASINO_LEGEND_MAX_ROWS = 5000
 @dataclass(frozen=True, slots=True)
 class RouletteLegendEvidence:
     max_house_streak: int = 0
-    max_user_net_xp: int = 0
-    max_user_wins: int = 0
-    max_user_number_wins: int = 0
     zero_count: int = 0
     max_payout_xp: int = 0
+    grand_heist_qualified: bool = False
+    break_in_qualified: bool = False
     black_night_qualified: bool = False
     ghost_player_qualified: bool = False
 
@@ -181,22 +180,20 @@ class RouletteLegendStore:
                 ghost_player = True
                 break
 
+        grand_heist = any(
+            stats["net"] >= 2500 and stats["wins"] >= 3
+            for stats in user_stats.values()
+        )
+        break_in = any(
+            stats["number_wins"] >= 3 for stats in user_stats.values()
+        )
+
         return RouletteLegendEvidence(
             max_house_streak=max_house_streak,
-            max_user_net_xp=max(
-                (stats["net"] for stats in user_stats.values()),
-                default=0,
-            ),
-            max_user_wins=max(
-                (stats["wins"] for stats in user_stats.values()),
-                default=0,
-            ),
-            max_user_number_wins=max(
-                (stats["number_wins"] for stats in user_stats.values()),
-                default=0,
-            ),
             zero_count=zero_count,
             max_payout_xp=max_payout,
+            grand_heist_qualified=grand_heist,
+            break_in_qualified=break_in,
             black_night_qualified=black_night,
             ghost_player_qualified=ghost_player,
         )
