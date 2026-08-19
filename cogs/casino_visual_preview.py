@@ -26,6 +26,7 @@ class CasinoVisualPreviewCog(commands.Cog):
         description="Prévisualiser un état visuel du Casino du Refuge",
     )
     @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
         phase="Moment de la journée à simuler",
         fortune="Fortune de la Maison à simuler",
