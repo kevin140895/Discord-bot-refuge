@@ -32,6 +32,15 @@ CASINO_METRIC_KEY: Final[str] = "casino_prestige_points"
 CASINO_MAX_LEVEL: Final[int] = 5
 CASINO_RECENT_WINDOW_SECONDS: Final[int] = 24 * 60 * 60
 CASINO_STATE_FILE = Path(DATA_DIR) / "pari_xp_state.json"
+# Boundaries implementing the approved visible states exactly:
+# <= -1500 ruined, -1499..-251 difficulty, -250..250 stable,
+# 251..1500 prosperous, > 1500 insolent.
+DEFAULT_CASINO_FORTUNE_THRESHOLDS_XP: Final[tuple[int, int, int, int]] = (
+    -1499,
+    -250,
+    251,
+    1501,
+)
 
 CASINO_LEVEL_NAMES: Final[Mapping[int, str]] = {
     1: "Baraque de Jeux",
@@ -132,6 +141,9 @@ class RefugeCasinoConfig:
 
     @classmethod
     def from_env(cls) -> "RefugeCasinoConfig":
+        configured_fortune_thresholds = _csv_ints(
+            "REFUGE_CASINO_FORTUNE_THRESHOLDS_XP"
+        )
         return cls(
             level_thresholds_points=_csv_ints(
                 "REFUGE_CASINO_LEVEL_THRESHOLDS_POINTS"
@@ -148,8 +160,9 @@ class RefugeCasinoConfig:
             jackpot_1000_weight=_env_nonnegative_int(
                 "REFUGE_CASINO_JACKPOT_1000_WEIGHT"
             ),
-            fortune_thresholds_xp=_csv_ints(
-                "REFUGE_CASINO_FORTUNE_THRESHOLDS_XP"
+            fortune_thresholds_xp=(
+                configured_fortune_thresholds
+                or DEFAULT_CASINO_FORTUNE_THRESHOLDS_XP
             ),
         )
 
@@ -223,9 +236,8 @@ def casino_fortune_for_net(
             return "prosperous"
         return "insolent"
 
-    # Without calibrated magnitude thresholds, only the sign of an actually
-    # observed recent net can be interpreted safely. Extreme states remain
-    # unavailable until explicit thresholds are configured.
+    # Explicit tests and historical tooling may still opt into the uncalibrated
+    # sign-only interpretation by constructing RefugeCasinoConfig() directly.
     if int(transactions) <= 0 or net == 0:
         return "stable"
     return "prosperous" if net > 0 else "difficulty"
@@ -585,6 +597,7 @@ __all__ = [
     "CASINO_MAX_LEVEL",
     "CASINO_RECENT_WINDOW_SECONDS",
     "CASINO_SECRET_EVENTS",
+    "DEFAULT_CASINO_FORTUNE_THRESHOLDS_XP",
     "CasinoSourceSnapshot",
     "RefugeCasinoConfig",
     "RefugeCasinoService",
