@@ -70,18 +70,17 @@ def _marker_sets(status: RefugeCasinoStatus) -> tuple[set[str], set[str]]:
     )
     if building is None:
         return set(), set()
+
     raw_public = building.state.get("casino_events", ())
     raw_secret = building.state.get("secret_events", ())
-    public = {
-        str(item)
-        for item in raw_public
-        if str(item) in CASINO_EVENTS
-    } if isinstance(raw_public, (list, tuple, set, frozenset)) else set()
-    secret = {
-        str(item)
-        for item in raw_secret
-        if str(item) in CASINO_SECRET_EVENTS
-    } if isinstance(raw_secret, (list, tuple, set, frozenset)) else set()
+    public: set[str] = set()
+    secret: set[str] = set()
+    if isinstance(raw_public, (list, tuple, set, frozenset)):
+        public = {str(item) for item in raw_public if str(item) in CASINO_EVENTS}
+    if isinstance(raw_secret, (list, tuple, set, frozenset)):
+        secret = {
+            str(item) for item in raw_secret if str(item) in CASINO_SECRET_EVENTS
+        }
     return public, secret
 
 
@@ -142,12 +141,17 @@ class CasinoLegendService:
         self.casino_service = casino_service
         self._lock = asyncio.Lock()
 
-    async def sync(self, *, at: datetime | None = None) -> RefugeCasinoStatus:
+    async def sync(
+        self,
+        *,
+        status: RefugeCasinoStatus | None = None,
+        at: datetime | None = None,
+    ) -> RefugeCasinoStatus:
         async with self._lock:
-            status = await self.casino_service.evaluate(at=at)
-            public, secret = _marker_sets(status)
+            current = status or await self.casino_service.evaluate(at=at)
+            public, secret = _marker_sets(current)
             if public >= set(CASINO_EVENTS) and secret >= set(CASINO_SECRET_EVENTS):
-                return status
+                return current
 
             evidence = await self.store.get_evidence(at=at)
             public_candidates = _public_candidates(evidence) - public
@@ -162,7 +166,7 @@ class CasinoLegendService:
                 changed = True
 
             if not changed:
-                return status
+                return current
             return await self.casino_service.evaluate(at=at)
 
 
