@@ -134,7 +134,7 @@ async def test_reaction_store_reads_existing_lot2_sqlite_history(tmp_path):
         )
 
     state = await service.evaluate(at=NOW)
-    assert state.activity == "active"
+    assert state.activity == "busy"
     assert state.reaction == "players_streak"
     assert state.streak_count == 5
 
