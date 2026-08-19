@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Final
 
 from config import DATA_DIR
+from rendering.casino_legends import (
+    CASINO_LEGEND_RENDERER_VERSION,
+    apply_casino_legend_overlay,
+)
 from rendering.casino_reactions import (
     CASINO_REACTION_RENDERER_VERSION,
     apply_casino_reaction_overlay,
@@ -20,6 +24,10 @@ from rendering.casino_royal import (
     CasinoVisualState,
     build_casino_visual_state,
     casino_royal_renderer,
+)
+from services.casino_legends import (
+    CasinoLegendState,
+    casino_legend_state_from_status,
 )
 from services.casino_reactions import (
     CasinoReactionService,
@@ -33,7 +41,7 @@ from services.refuge_casino import RefugeCasinoStatus
 
 logger = logging.getLogger(__name__)
 CASINO_VISUAL_CACHE_DIR: Final[Path] = Path(DATA_DIR) / "casino_visuals"
-CASINO_VISUAL_CACHE_MAX_FILES: Final[int] = 72
+CASINO_VISUAL_CACHE_MAX_FILES: Final[int] = 96
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +49,7 @@ class CasinoVisualAsset:
     path: Path
     state: CasinoVisualState
     reaction: CasinoReactionState
+    legends: CasinoLegendState
     cache_hit: bool
 
     @property
@@ -48,7 +57,8 @@ class CasinoVisualAsset:
         raw = (
             f"v{CASINO_ROYAL_RENDERER_VERSION}:"
             f"r{CASINO_REACTION_RENDERER_VERSION}:"
-            f"{self.state.cache_key}:{self.reaction.cache_key}"
+            f"l{CASINO_LEGEND_RENDERER_VERSION}:"
+            f"{self.state.cache_key}:{self.reaction.cache_key}:{self.legends.cache_key}"
         ).encode("utf-8")
         return hashlib.sha256(raw).hexdigest()[:24]
 
@@ -79,11 +89,13 @@ class CasinoVisualCache:
         self,
         state: CasinoVisualState,
         reaction: CasinoReactionState,
+        legends: CasinoLegendState,
     ) -> Path:
         return self.cache_dir / (
             f"casino_royal_v{CASINO_ROYAL_RENDERER_VERSION}_"
             f"r{CASINO_REACTION_RENDERER_VERSION}_"
-            f"{state.cache_key}_{reaction.cache_key}.png"
+            f"l{CASINO_LEGEND_RENDERER_VERSION}_"
+            f"{state.cache_key}_{reaction.cache_key}_{legends.cache_key}.png"
         )
 
     def _is_cached(self, path: Path) -> bool:
@@ -135,10 +147,12 @@ class CasinoVisualCache:
         status: RefugeCasinoStatus,
         state: CasinoVisualState,
         reaction: CasinoReactionState,
+        legends: CasinoLegendState,
         path: Path,
     ) -> None:
         payload = self.renderer.render_png(status, state)
         payload = apply_casino_reaction_overlay(payload, reaction)
+        payload = apply_casino_legend_overlay(payload, legends)
         self._write_atomic(path, payload)
         self._prune(path)
 
@@ -156,8 +170,6 @@ class CasinoVisualCache:
         try:
             return await self.reaction_service.evaluate(at=at)
         except Exception:
-            # Lot 4 is visual-only. A read failure must never break Roulette XP
-            # or prevent the normal Lot 3 hero from being displayed.
             logger.exception("[CasinoVisual] réaction Lot 4 indisponible, fallback calme")
             return NORMAL_CASINO_REACTION
 
@@ -170,6 +182,7 @@ class CasinoVisualCache:
         fortune_override: str | None = None,
         open_override: bool | None = None,
         reaction_override: str | None = None,
+        legend_override: str | None = None,
     ) -> CasinoVisualAsset:
         state = build_casino_visual_state(
             status,
@@ -183,12 +196,17 @@ class CasinoVisualCache:
             at=at,
             reaction_override=reaction_override,
         )
-        path = self._path_for(state, reaction)
+        legends = casino_legend_state_from_status(
+            status,
+            marker_override=legend_override,
+        )
+        path = self._path_for(state, reaction, legends)
         if await asyncio.to_thread(self._is_cached, path):
             return CasinoVisualAsset(
                 path=path,
                 state=state,
                 reaction=reaction,
+                legends=legends,
                 cache_hit=True,
             )
 
@@ -198,6 +216,7 @@ class CasinoVisualCache:
                     path=path,
                     state=state,
                     reaction=reaction,
+                    legends=legends,
                     cache_hit=True,
                 )
             await asyncio.to_thread(
@@ -205,12 +224,14 @@ class CasinoVisualCache:
                 status,
                 state,
                 reaction,
+                legends,
                 path,
             )
             return CasinoVisualAsset(
                 path=path,
                 state=state,
                 reaction=reaction,
+                legends=legends,
                 cache_hit=False,
             )
 
