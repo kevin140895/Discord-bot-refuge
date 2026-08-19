@@ -12,6 +12,24 @@ from utils.timezones import PARIS_TZ
 
 CASINO_LEGEND_WINDOW_HOURS = 24
 CASINO_LEGEND_MAX_ROWS = 5000
+SIMPLE_BET_TYPES = frozenset({"red", "black", "even", "odd"})
+
+GRAND_HEIST_MIN_NET_XP = 8000
+GRAND_HEIST_MIN_WINS = 8
+GRAND_HEIST_MIN_BETS = 15
+BLACK_NIGHT_MIN_BETS = 30
+BLACK_NIGHT_MIN_HOUSE_NET_XP = 4000
+BLACK_NIGHT_MIN_PLAYERS = 3
+HOUSE_LEGEND_MIN_STREAK = 15
+BREAK_IN_CONSECUTIVE_NUMBER_WINS = 2
+
+# Secret thresholds remain deliberately absent from the public Discord UI.
+BLACK_CAT_WINDOW_SPINS = 12
+BLACK_CAT_ZEROES_REQUIRED = 3
+DIAMOND_MIN_WAGER_XP = 500
+DIAMOND_MIN_PAYOUT_XP = 5000
+GHOST_WINDOW_MINUTES = 90
+GHOST_NUMBER_WINS_REQUIRED = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +40,8 @@ class RouletteLegendEvidence:
     grand_heist_qualified: bool = False
     break_in_qualified: bool = False
     black_night_qualified: bool = False
+    black_cat_qualified: bool = False
+    diamond_qualified: bool = False
     ghost_player_qualified: bool = False
 
 
@@ -42,8 +62,13 @@ def _parse_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _is_ghost_hour(occurred: datetime) -> bool:
+    local = occurred.astimezone(PARIS_TZ)
+    return 2 <= local.hour < 5
+
+
 class RouletteLegendStore:
-    """Read-only Lot 5 evidence projection over the existing roulette table."""
+    """Read-only V2 legend evidence projection over existing roulette history."""
 
     def __init__(self, path: str | Path = DB_PATH) -> None:
         self.path = Path(path)
@@ -118,23 +143,24 @@ class RouletteLegendStore:
 
             stats = user_stats.setdefault(
                 user_id,
-                {"net": 0, "wins": 0, "number_wins": 0},
+                {"net": 0, "wins": 0, "bets": 0},
             )
+            stats["bets"] += 1
             stats["net"] += payout - wager
             if won:
                 stats["wins"] += 1
-                if bet_type == "number":
-                    stats["number_wins"] += 1
 
             if zero_hit:
                 zero_count += 1
             max_payout = max(max_payout, payout)
 
-            if won:
-                current_house_streak = 0
-            else:
-                current_house_streak += 1
-                max_house_streak = max(max_house_streak, current_house_streak)
+            # V2 deliberately ignores number bets for the House streak.
+            if bet_type in SIMPLE_BET_TYPES:
+                if won:
+                    current_house_streak = 0
+                else:
+                    current_house_streak += 1
+                    max_house_streak = max(max_house_streak, current_house_streak)
 
             local = occurred.astimezone(PARIS_TZ)
             if local.hour >= 22:
@@ -154,39 +180,82 @@ class RouletteLegendStore:
                 if isinstance(users, set):
                     users.add(user_id)
 
+        grand_heist = any(
+            stats["net"] >= GRAND_HEIST_MIN_NET_XP
+            and stats["wins"] >= GRAND_HEIST_MIN_WINS
+            and stats["bets"] >= GRAND_HEIST_MIN_BETS
+            for stats in user_stats.values()
+        )
+
         black_night = any(
-            int(night["bets"]) >= 20
-            and int(night["house_net"]) >= 1500
+            int(night["bets"]) >= BLACK_NIGHT_MIN_BETS
+            and int(night["house_net"]) >= BLACK_NIGHT_MIN_HOUSE_NET_XP
             and isinstance(night["users"], set)
-            and len(night["users"]) >= 2
+            and len(night["users"]) >= BLACK_NIGHT_MIN_PLAYERS
             for night in nights.values()
         )
 
-        ghost_player = False
-        for index, (row, occurred) in enumerate(parsed_rows):
-            if not bool(row["won"]) or str(row["bet_type"]) != "number":
-                continue
-            local = occurred.astimezone(PARIS_TZ)
-            if not 2 <= local.hour < 5:
-                continue
-            candidate_user = int(row["user_id"])
-            window_start = occurred - timedelta(minutes=30)
-            users: set[int] = set()
-            for previous_row, previous_at in parsed_rows[: index + 1]:
-                if previous_at < window_start or previous_at > occurred:
-                    continue
-                users.add(int(previous_row["user_id"]))
-            if users == {candidate_user}:
-                ghost_player = True
+        break_in = False
+        for (previous, _previous_at), (current, _current_at) in zip(
+            parsed_rows,
+            parsed_rows[1:],
+        ):
+            if (
+                int(previous["user_id"]) == int(current["user_id"])
+                and str(previous["bet_type"]) == "number"
+                and str(current["bet_type"]) == "number"
+                and bool(previous["won"])
+                and bool(current["won"])
+            ):
+                break_in = True
                 break
 
-        grand_heist = any(
-            stats["net"] >= 2500 and stats["wins"] >= 3
-            for stats in user_stats.values()
+        black_cat = False
+        zero_flags = [bool(row["zero_hit"]) for row, _occurred in parsed_rows]
+        for index in range(len(zero_flags)):
+            start = max(0, index - BLACK_CAT_WINDOW_SPINS + 1)
+            if sum(zero_flags[start : index + 1]) >= BLACK_CAT_ZEROES_REQUIRED:
+                black_cat = True
+                break
+
+        diamond = any(
+            str(row["bet_type"]) == "number"
+            and bool(row["won"])
+            and int(row["wager_xp"]) >= DIAMOND_MIN_WAGER_XP
+            and int(row["payout_xp"]) >= DIAMOND_MIN_PAYOUT_XP
+            for row, _occurred in parsed_rows
         )
-        break_in = any(
-            stats["number_wins"] >= 3 for stats in user_stats.values()
-        )
+
+        ghost_player = False
+        ghost_window = timedelta(minutes=GHOST_WINDOW_MINUTES)
+        for row, occurred in parsed_rows:
+            if (
+                str(row["bet_type"]) != "number"
+                or not bool(row["won"])
+                or not _is_ghost_hour(occurred)
+            ):
+                continue
+            candidate_user = int(row["user_id"])
+            window_start = occurred - ghost_window
+            window_rows = [
+                (candidate, candidate_at)
+                for candidate, candidate_at in parsed_rows
+                if window_start <= candidate_at <= occurred
+            ]
+            users = {int(candidate["user_id"]) for candidate, _at in window_rows}
+            if users != {candidate_user}:
+                continue
+            qualifying_wins = sum(
+                1
+                for candidate, candidate_at in window_rows
+                if int(candidate["user_id"]) == candidate_user
+                and str(candidate["bet_type"]) == "number"
+                and bool(candidate["won"])
+                and _is_ghost_hour(candidate_at)
+            )
+            if qualifying_wins >= GHOST_NUMBER_WINS_REQUIRED:
+                ghost_player = True
+                break
 
         return RouletteLegendEvidence(
             max_house_streak=max_house_streak,
@@ -195,6 +264,8 @@ class RouletteLegendStore:
             grand_heist_qualified=grand_heist,
             break_in_qualified=break_in,
             black_night_qualified=black_night,
+            black_cat_qualified=black_cat,
+            diamond_qualified=diamond,
             ghost_player_qualified=ghost_player,
         )
 
@@ -203,9 +274,19 @@ class RouletteLegendStore:
         *,
         at: datetime | None = None,
         window_hours: int = CASINO_LEGEND_WINDOW_HOURS,
+        since: datetime | str | None = None,
     ) -> RouletteLegendEvidence:
         now = _aware_utc(at)
         cutoff = now - timedelta(hours=max(1, int(window_hours)))
+        since_at: datetime | None
+        if isinstance(since, datetime):
+            since_at = _aware_utc(since)
+        elif since is not None:
+            since_at = _parse_timestamp(since)
+        else:
+            since_at = None
+        if since_at is not None and since_at > cutoff:
+            cutoff = since_at
         rows = await asyncio.to_thread(self._rows_sync, cutoff.isoformat())
         return await asyncio.to_thread(self._build_evidence, rows)
 
@@ -214,8 +295,16 @@ roulette_legend_store = RouletteLegendStore()
 
 
 __all__ = [
+    "BLACK_NIGHT_MIN_BETS",
+    "BLACK_NIGHT_MIN_HOUSE_NET_XP",
+    "BLACK_NIGHT_MIN_PLAYERS",
+    "BREAK_IN_CONSECUTIVE_NUMBER_WINS",
     "CASINO_LEGEND_MAX_ROWS",
     "CASINO_LEGEND_WINDOW_HOURS",
+    "GRAND_HEIST_MIN_BETS",
+    "GRAND_HEIST_MIN_NET_XP",
+    "GRAND_HEIST_MIN_WINS",
+    "HOUSE_LEGEND_MIN_STREAK",
     "RouletteLegendEvidence",
     "RouletteLegendStore",
     "roulette_legend_store",
