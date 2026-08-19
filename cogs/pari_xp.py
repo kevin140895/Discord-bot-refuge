@@ -21,6 +21,7 @@ from config import (
     CASINO_CLOSE_HOUR,
     CASINO_SCHEDULE_LABEL,
 )
+from storage.roulette_history_store import roulette_history_store
 from storage.xp_store import xp_store
 from cogs.xp import award_xp
 from ui.casino_views import CasinoLeaderboardEntry, CasinoLeaderboardView
@@ -39,10 +40,20 @@ PARI_XP_MAX_BET = int(os.getenv("PARI_XP_MAX_BET", "500"))
 HOUSE_ZERO_CHANCE = 0.03
 SIMPLE_BET_WIN_CHANCE = 0.40
 NUMBER_BET_WIN_CHANCE = 0.05
+LIVING_RECENT_LIMIT = 6
 SPINNING_GIF_URL = (
     "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGpxaXd6ZDZhaGlvbXhjOTJtdDA5MTl5cGo2N2oxbHB2aXZpNjJtZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26uflBhaGt5lQsaCA/giphy.gif"
 )
-CASINO_CLOSED_MESSAGE = f"🏛️ Le Casino du Refuge est fermé. Horaires : {CASINO_SCHEDULE_LABEL}."
+CASINO_CLOSED_MESSAGE = (
+    f"🏛️ Le Casino du Refuge est fermé. Horaires : {CASINO_SCHEDULE_LABEL}."
+)
+BET_LABELS = {
+    "red": "🔴 Rouge",
+    "black": "⚫ Noir",
+    "even": "⚪ Pair",
+    "odd": "◼️ Impair",
+    "number": "🎯 Numéro",
+}
 
 
 def _draw_number_for_roll(selected_number: int, roll: float) -> int:
@@ -89,13 +100,71 @@ def _format_xp(value: object) -> str:
     return f"{amount:,}".replace(",", " ")
 
 
+def _event_int(event: dict[str, object], key: str) -> int | None:
+    value = event.get(key)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_recent_event(event: dict[str, object]) -> str:
+    """Render a compact truthful history line without exposing probabilities."""
+    if bool(event.get("zero_hit", False)):
+        return "🟢 Zéro Vert · 🏛️ Maison"
+
+    bet_type = str(event.get("bet_type", ""))
+    won = bool(event.get("won", False))
+    if bet_type == "number":
+        selected = _event_int(event, "selected_number")
+        drawn = _event_int(event, "drawn_number")
+        if won and selected is not None:
+            return f"🎯 {selected} · 👑 gagné"
+        if selected is not None and drawn is not None:
+            return f"🎯 {selected} → {drawn} · 🏛️ Maison"
+        return "🎯 Numéro · 🏛️ Maison"
+
+    label = BET_LABELS.get(bet_type, "🎲 Table")
+    return f"{label} · {'👑 gagné' if won else '🏛️ Maison'}"
+
+
+def _format_streak(streak: object) -> str | None:
+    if not isinstance(streak, dict):
+        return None
+    try:
+        count = int(streak.get("count", 0))
+    except (TypeError, ValueError):
+        return None
+    if count < 3:
+        return None
+    if streak.get("side") == "players":
+        return f"🔥 Série : **{count} gains joueurs consécutifs**"
+    if streak.get("side") == "house":
+        return f"🏛️ Série : **{count} coups pour la Maison**"
+    return None
+
+
+def _empty_living_state() -> dict[str, object]:
+    return {
+        "recent": [],
+        "spotlight": None,
+        "biggest_win": None,
+        "streak": None,
+    }
+
+
 class BetAmountModal(discord.ui.Modal):
     def __init__(self, cog: "PariXPCog", bet_type: str) -> None:
         super().__init__(title="Parier XP")
         self.cog = cog
         self.bet_type = bet_type
         self.amount = discord.ui.TextInput(
-            label="Mise (XP)", placeholder=f"{PARI_XP_MIN_BET}-{PARI_XP_MAX_BET}", min_length=1, max_length=4
+            label="Mise (XP)",
+            placeholder=f"{PARI_XP_MIN_BET}-{PARI_XP_MAX_BET}",
+            min_length=1,
+            max_length=4,
         )
         self.add_item(self.amount)
 
@@ -113,7 +182,10 @@ class NumberBetModal(discord.ui.Modal):
         super().__init__(title="Pari sur numéro")
         self.cog = cog
         self.amount = discord.ui.TextInput(
-            label="Mise (XP)", placeholder=f"{PARI_XP_MIN_BET}-{PARI_XP_MAX_BET}", min_length=1, max_length=4
+            label="Mise (XP)",
+            placeholder=f"{PARI_XP_MIN_BET}-{PARI_XP_MAX_BET}",
+            min_length=1,
+            max_length=4,
         )
         self.number = discord.ui.TextInput(
             label="Numéro (1-36)", placeholder="1-36", min_length=1, max_length=2
@@ -271,6 +343,58 @@ class RouletteXPView(discord.ui.LayoutView):
                 "🟢 Zéro Vert — **la Maison gagne**"
             )
         )
+
+        living = getattr(cog, "living_state", _empty_living_state())
+        if not isinstance(living, dict):
+            living = _empty_living_state()
+        recent = living.get("recent", [])
+        if isinstance(recent, list) and recent:
+            lines = [
+                _format_recent_event(item)
+                for item in recent[:LIVING_RECENT_LIMIT]
+                if isinstance(item, dict)
+            ]
+            streak_line = _format_streak(living.get("streak"))
+            if streak_line:
+                lines.append(streak_line)
+            if lines:
+                container.add_item(discord.ui.Separator())
+                container.add_item(
+                    discord.ui.TextDisplay(
+                        "### 🎰 Vie des tables\n" + "\n".join(lines)
+                    )
+                )
+
+        spotlight = living.get("spotlight")
+        if isinstance(spotlight, dict) and spotlight.get("user_id") is not None:
+            user_id = _event_int(spotlight, "user_id")
+            bets = _event_int(spotlight, "bets") or 0
+            wins = _event_int(spotlight, "wins") or 0
+            net_xp = _event_int(spotlight, "net_xp") or 0
+            if user_id is not None and net_xp > 0:
+                container.add_item(discord.ui.Separator())
+                container.add_item(
+                    discord.ui.TextDisplay(
+                        "### 🔥 Joueur en vue · 24 h\n"
+                        f"<@{user_id}> · **+{_format_xp(net_xp)} XP net** · "
+                        f"{wins} gains / {bets} paris"
+                    )
+                )
+
+        biggest = living.get("biggest_win")
+        if isinstance(biggest, dict) and biggest.get("user_id") is not None:
+            user_id = _event_int(biggest, "user_id")
+            payout_xp = _event_int(biggest, "payout_xp") or 0
+            bet_label = BET_LABELS.get(str(biggest.get("bet_type", "")), "🎲 Table")
+            if user_id is not None and payout_xp > 0:
+                container.add_item(discord.ui.Separator())
+                container.add_item(
+                    discord.ui.TextDisplay(
+                        "### 💎 Plus gros gain · 24 h\n"
+                        f"<@{user_id}> · **{_format_xp(payout_xp)} XP** · {bet_label}"
+                    )
+                )
+
         container.add_item(discord.ui.Separator())
         container.add_item(
             discord.ui.TextDisplay(
@@ -280,15 +404,17 @@ class RouletteXPView(discord.ui.LayoutView):
             )
         )
 
-        last = cog.state.get("last_winner")
-        if isinstance(last, dict) and last.get("user_id") is not None:
-            container.add_item(discord.ui.Separator())
-            container.add_item(
-                discord.ui.TextDisplay(
-                    "### 👑 Dernier gagnant\n"
-                    f"<@{last.get('user_id')}> a remporté **{_format_xp(last.get('amount', 0))} XP**"
+        if not isinstance(biggest, dict):
+            last = cog.state.get("last_winner")
+            if isinstance(last, dict) and last.get("user_id") is not None:
+                container.add_item(discord.ui.Separator())
+                container.add_item(
+                    discord.ui.TextDisplay(
+                        "### 👑 Dernier gagnant\n"
+                        f"<@{last.get('user_id')}> a remporté "
+                        f"**{_format_xp(last.get('amount', 0))} XP**"
+                    )
                 )
-            )
 
         container.add_item(discord.ui.Separator())
         container.add_item(
@@ -311,6 +437,7 @@ class PariXPCog(commands.Cog):
         self.state.setdefault("total_winnings", 0)
         self.state.setdefault("players", {})
         self.is_open: bool = bool(self.state.get("is_open"))
+        self.living_state: dict[str, object] = _empty_living_state()
         self._message_id: Optional[int] = self.state.get("message_id")
         self._last_announced_state: Optional[bool] = None
         self._last_panel_signature: tuple[object, ...] | None = None
@@ -373,6 +500,85 @@ class PariXPCog(commands.Cog):
         snapshot = copy.deepcopy(self.state)
         await atomic_write_json_async(STATE_FILE, snapshot)
 
+    async def _refresh_living_state(self) -> None:
+        try:
+            snapshot = await roulette_history_store.get_living_snapshot(
+                recent_limit=LIVING_RECENT_LIMIT,
+                window_hours=24,
+            )
+        except Exception:
+            logger.exception("[PariXP] impossible de rafraîchir l'historique vivant")
+            return
+        if isinstance(snapshot, dict):
+            self.living_state = snapshot
+
+    async def _record_living_event(
+        self,
+        *,
+        user_id: int,
+        bet_type: str,
+        amount: int,
+        payout: int,
+        win: bool,
+        zero_hit: bool,
+        selected_number: int | None,
+        drawn_number: int | None,
+    ) -> None:
+        try:
+            await roulette_history_store.record_event(
+                user_id=user_id,
+                bet_type=bet_type,
+                wager_xp=amount,
+                payout_xp=payout,
+                won=win,
+                zero_hit=zero_hit,
+                selected_number=selected_number,
+                drawn_number=drawn_number,
+                at=datetime.now(self.tz),
+            )
+            await self._refresh_living_state()
+        except Exception:
+            # L'historique est une couche visuelle : un échec ne doit jamais
+            # invalider un pari XP déjà comptabilisé.
+            logger.exception("[PariXP] enregistrement historique vivant impossible")
+
+    def _living_panel_signature(self) -> tuple[object, ...]:
+        living = self.living_state if isinstance(self.living_state, dict) else {}
+        recent = living.get("recent", [])
+        recent_ids: tuple[object, ...] = ()
+        if isinstance(recent, list):
+            recent_ids = tuple(
+                item.get("id")
+                for item in recent
+                if isinstance(item, dict)
+            )
+
+        spotlight = living.get("spotlight")
+        spotlight_sig: tuple[object, ...] = ()
+        if isinstance(spotlight, dict):
+            spotlight_sig = (
+                spotlight.get("user_id"),
+                spotlight.get("net_xp"),
+                spotlight.get("wins"),
+                spotlight.get("bets"),
+            )
+
+        biggest = living.get("biggest_win")
+        biggest_sig: tuple[object, ...] = ()
+        if isinstance(biggest, dict):
+            biggest_sig = (
+                biggest.get("id"),
+                biggest.get("user_id"),
+                biggest.get("payout_xp"),
+            )
+
+        streak = living.get("streak")
+        streak_sig: tuple[object, ...] = ()
+        if isinstance(streak, dict):
+            streak_sig = (streak.get("side"), streak.get("count"))
+
+        return recent_ids, spotlight_sig, biggest_sig, streak_sig
+
     def _roulette_panel_signature(self) -> tuple[object, ...]:
         last = self.state.get("last_winner")
         if not isinstance(last, dict):
@@ -383,6 +589,7 @@ class PariXPCog(commands.Cog):
             int(self.state.get("total_winnings", 0)),
             last.get("user_id"),
             last.get("amount"),
+            self._living_panel_signature(),
         )
 
     async def _ensure_roulette_message(self) -> None:
@@ -555,7 +762,9 @@ class PariXPCog(commands.Cog):
                             )
                         return
                     msg = f"🎉 Gagné ! Tu remportes {payout} XP."
-                    self.state["total_winnings"] = self.state.get("total_winnings", 0) + payout
+                    self.state["total_winnings"] = (
+                        self.state.get("total_winnings", 0) + payout
+                    )
                     self.state["last_winner"] = {
                         "user_id": interaction.user.id,
                         "amount": payout,
@@ -569,19 +778,37 @@ class PariXPCog(commands.Cog):
                 else:
                     msg = "❌ Perdu."
                 if zero_hit:
-                    outcome_line: str | None = "🟢 Zéro Vert (0) ! La Maison reprend la table."
+                    outcome_line: str | None = (
+                        "🟢 Zéro Vert (0) ! La Maison reprend la table."
+                    )
                 elif bet_type == "number":
-                    outcome_line = f"🎯 Numéro tiré : {drawn_number} — ton choix : {number}."
+                    outcome_line = (
+                        f"🎯 Numéro tiré : {drawn_number} — ton choix : {number}."
+                    )
                 else:
                     outcome_line = None
                 self.state["total_bets"] = self.state.get("total_bets", 0) + amount
                 self._record_player_result(interaction.user.id, amount, payout)
                 await self._save_state()
 
+            await self._record_living_event(
+                user_id=interaction.user.id,
+                bet_type=bet_type,
+                amount=amount,
+                payout=payout,
+                win=win,
+                zero_hit=zero_hit,
+                selected_number=number,
+                drawn_number=drawn_number,
+            )
+
             # Les effets Discord ne font pas partie de la section comptable.
             if winner_role is not None:
                 try:
-                    await interaction.user.add_roles(winner_role, reason="Pari XP gagnant")
+                    await interaction.user.add_roles(
+                        winner_role,
+                        reason="Pari XP gagnant",
+                    )
                 except discord.HTTPException:
                     pass
 
@@ -674,6 +901,7 @@ class PariXPCog(commands.Cog):
         await interaction.response.send_message(view=CasinoLeaderboardView(entries))
 
     async def cog_load(self) -> None:
+        await self._refresh_living_state()
         try:
             self.bot.add_view(RouletteXPView(self))
         except Exception:
