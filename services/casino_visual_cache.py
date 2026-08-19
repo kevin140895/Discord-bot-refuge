@@ -27,6 +27,7 @@ from rendering.casino_royal import (
 )
 from services.casino_legends import (
     CasinoLegendState,
+    casino_legend_service,
     casino_legend_state_from_status,
 )
 from services.casino_reactions import (
@@ -64,7 +65,6 @@ class CasinoVisualAsset:
 
     async def read_bytes(self) -> bytes:
         """Read the cached PNG without blocking the Discord event loop."""
-
         return await asyncio.to_thread(self.path.read_bytes)
 
 
@@ -123,10 +123,7 @@ class CasinoVisualCache:
                 for path in self.cache_dir.glob("casino_royal_v*.png")
                 if path.is_file()
             ]
-            files.sort(
-                key=lambda path: path.stat().st_mtime,
-                reverse=True,
-            )
+            files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
         except OSError:
             return
 
@@ -173,6 +170,21 @@ class CasinoVisualCache:
             logger.exception("[CasinoVisual] réaction Lot 4 indisponible, fallback calme")
             return NORMAL_CASINO_REACTION
 
+    async def _resolve_status(
+        self,
+        status: RefugeCasinoStatus,
+        *,
+        at: datetime | None,
+        legend_override: str | None,
+    ) -> RefugeCasinoStatus:
+        if legend_override is not None:
+            return status
+        try:
+            return await casino_legend_service.sync(status=status, at=at)
+        except Exception:
+            logger.exception("[CasinoVisual] légendes Lot 5 indisponibles, état précédent conservé")
+            return status
+
     async def get_or_render(
         self,
         status: RefugeCasinoStatus,
@@ -184,8 +196,13 @@ class CasinoVisualCache:
         reaction_override: str | None = None,
         legend_override: str | None = None,
     ) -> CasinoVisualAsset:
-        state = build_casino_visual_state(
+        resolved_status = await self._resolve_status(
             status,
+            at=at,
+            legend_override=legend_override,
+        )
+        state = build_casino_visual_state(
+            resolved_status,
             at=at,
             phase_override=phase_override,
             fortune_override=fortune_override,
@@ -197,43 +214,25 @@ class CasinoVisualCache:
             reaction_override=reaction_override,
         )
         legends = casino_legend_state_from_status(
-            status,
+            resolved_status,
             marker_override=legend_override,
         )
         path = self._path_for(state, reaction, legends)
         if await asyncio.to_thread(self._is_cached, path):
-            return CasinoVisualAsset(
-                path=path,
-                state=state,
-                reaction=reaction,
-                legends=legends,
-                cache_hit=True,
-            )
+            return CasinoVisualAsset(path, state, reaction, legends, True)
 
         async with self._lock:
             if await asyncio.to_thread(self._is_cached, path):
-                return CasinoVisualAsset(
-                    path=path,
-                    state=state,
-                    reaction=reaction,
-                    legends=legends,
-                    cache_hit=True,
-                )
+                return CasinoVisualAsset(path, state, reaction, legends, True)
             await asyncio.to_thread(
                 self._render_and_store,
-                status,
+                resolved_status,
                 state,
                 reaction,
                 legends,
                 path,
             )
-            return CasinoVisualAsset(
-                path=path,
-                state=state,
-                reaction=reaction,
-                legends=legends,
-                cache_hit=False,
-            )
+            return CasinoVisualAsset(path, state, reaction, legends, False)
 
 
 casino_visual_cache = CasinoVisualCache()
