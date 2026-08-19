@@ -44,9 +44,13 @@ def _roulette_cog(*, is_open: bool) -> pari_xp.PariXPCog:
 
 def test_roulette_v2_closed_state_hides_all_bet_buttons() -> None:
     view = pari_xp.RouletteXPView(_roulette_cog(is_open=False), disabled=True)
+    text = _text(view)
 
     assert isinstance(view, discord.ui.LayoutView)
-    assert _text(view) == "🔴 **Casino fermé**"
+    assert "👑 Casino du Refuge" in text
+    assert "Maison Royale · Roulette XP" in text
+    assert "🔒 Portes fermées" in text
+    assert "%" not in text
     assert _buttons(view) == []
 
 
