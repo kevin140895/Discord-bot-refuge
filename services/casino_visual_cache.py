@@ -32,6 +32,11 @@ class CasinoVisualAsset:
     def signature(self) -> str:
         return self.state.cache_key
 
+    async def read_bytes(self) -> bytes:
+        """Read the cached PNG without blocking the Discord event loop."""
+
+        return await asyncio.to_thread(self.path.read_bytes)
+
 
 class CasinoVisualCache:
     """Persistent low-churn cache for deterministic Casino hero renders."""
