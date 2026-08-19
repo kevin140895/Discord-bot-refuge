@@ -12,7 +12,7 @@ def add_casino_visual_block(
     *,
     include_media: bool,
 ) -> bool:
-    """Append the hero and qualitative 24 h fortune without exposing odds."""
+    """Append the living Casino hero without exposing roulette probabilities."""
 
     if asset is None:
         return False
@@ -38,6 +38,14 @@ def add_casino_visual_block(
             f"**{asset.state.fortune_name}** · reflet des dernières 24 h de jeu."
         )
     )
+    if asset.state.is_open and asset.reaction.is_notable:
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.TextDisplay(
+                "### 🎭 Ambiance du Casino\n"
+                f"**{asset.reaction.label}** · réaction temporaire à l'activité des tables."
+            )
+        )
     return True
 
 
