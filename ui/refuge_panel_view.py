@@ -6,9 +6,10 @@ from typing import Final, Literal
 
 import discord
 
+from config import PARI_XP_CHANNEL_ID
 from services.refuge_construction import refuge_construction_service
 from services.refuge_exploration_runtime import refuge_exploration_runtime_service
-from services.refuge_panel import RefugePanelSnapshot
+from services.refuge_panel import RefugePanelSnapshot, refuge_panel_service
 from services.refuge_timeline import refuge_timeline_service
 from ui.refuge_construction_view import RefugeConstructionView
 from ui.refuge_exploration_view import (
@@ -22,7 +23,13 @@ from ui.refuge_timeline_view import RefugeTimelineView
 logger = logging.getLogger(__name__)
 REFUGE_PANEL_ACCENT = discord.Colour(0xD08A47)
 REFUGE_MAP_FILENAME: Final[str] = "refuge-map.png"
-RefugePanelAction = Literal["explore", "footprint", "timeline", "construction"]
+RefugePanelAction = Literal[
+    "explore",
+    "footprint",
+    "timeline",
+    "construction",
+    "casino",
+]
 RefugeActivityKey = Literal["endormi", "calme", "vivant", "effervescent"]
 
 
@@ -95,6 +102,53 @@ def refuge_activity_presentation(voice_count: int) -> RefugeActivityPresentation
     )
 
 
+class RefugeCasinoPortalView(discord.ui.LayoutView):
+    """Private bridge from the Refuge hub to the existing Casino channel."""
+
+    def __init__(
+        self,
+        snapshot: RefugePanelSnapshot,
+        *,
+        guild_id: int | None,
+    ) -> None:
+        super().__init__(timeout=180)
+        container = discord.ui.Container(accent_colour=discord.Colour.gold())
+        casino_state = "Ouvert" if snapshot.casino_is_open else "Fermé"
+        lines = [
+            "## 🎰 Casino du Refuge",
+            (
+                f"**{snapshot.casino_name} · niveau {_roman(snapshot.casino_level)}** "
+                f"— {snapshot.casino_fortune_name} · {casino_state}"
+            ),
+        ]
+        if snapshot.casino_is_open and snapshot.casino_reaction.is_notable:
+            lines.append(f"🎭 Ambiance : **{snapshot.casino_reaction.label}**")
+        lines.append(
+            "📜 Légendes : "
+            f"**{snapshot.casino_public_legend_count}/{snapshot.casino_public_legend_total}** "
+            "· 🔐 Mystères : "
+            f"**{snapshot.casino_secret_legend_count}/{snapshot.casino_secret_legend_total}**"
+        )
+        container.add_item(discord.ui.TextDisplay("\n".join(lines)))
+
+        if guild_id is not None and PARI_XP_CHANNEL_ID > 0:
+            container.add_item(discord.ui.Separator())
+            container.add_item(
+                discord.ui.ActionRow(
+                    discord.ui.Button(
+                        label="Entrer au Casino",
+                        emoji="🎰",
+                        style=discord.ButtonStyle.link,
+                        url=(
+                            f"https://discord.com/channels/{int(guild_id)}/"
+                            f"{PARI_XP_CHANNEL_ID}"
+                        ),
+                    )
+                )
+            )
+        self.add_item(container)
+
+
 class RefugePanelButton(discord.ui.Button):
     """Persistent public control dispatching to private Refuge surfaces."""
 
@@ -154,6 +208,12 @@ class RefugePanelButton(discord.ui.Button):
                 )
                 timeline_file = await timeline_view.selected_file()
                 view = timeline_view
+            elif self.action == "casino":
+                snapshot = await refuge_panel_service.evaluate()
+                view = RefugeCasinoPortalView(
+                    snapshot,
+                    guild_id=interaction.guild_id,
+                )
             else:
                 await refuge_timeline_service.sync()
                 snapshot = await refuge_construction_service.get_snapshot(
@@ -208,6 +268,12 @@ def refuge_controls_row() -> discord.ui.ActionRow:
             label="Chantier",
             emoji="🏗️",
             style=discord.ButtonStyle.success,
+        ),
+        RefugePanelButton(
+            action="casino",
+            label="Casino",
+            emoji="🎰",
+            style=discord.ButtonStyle.secondary,
         ),
     )
 
@@ -278,8 +344,18 @@ class RefugePublicPanelView(discord.ui.LayoutView):
                 f"🎰 **{snapshot.casino_name} · niveau {_roman(snapshot.casino_level)}** "
                 f"— {snapshot.casino_fortune_name} · {casino_state}"
             ),
-            f"🏗️ **{snapshot.construction_label}**",
         ]
+        if snapshot.casino_is_open and snapshot.casino_reaction.is_notable:
+            summary_lines.append(
+                f"🎭 Casino : **{snapshot.casino_reaction.label}**"
+            )
+        summary_lines.append(
+            "📜 Casino : "
+            f"**{snapshot.casino_public_legend_count}/{snapshot.casino_public_legend_total} légendes** "
+            "· 🔐 "
+            f"**{snapshot.casino_secret_legend_count}/{snapshot.casino_secret_legend_total} mystères**"
+        )
+        summary_lines.append(f"🏗️ **{snapshot.construction_label}**")
         if snapshot.latest_event_label:
             summary_lines.append(f"🌌 Dernière trace : **{snapshot.latest_event_label}**")
         container.add_item(discord.ui.TextDisplay("\n".join(summary_lines)))
@@ -302,6 +378,7 @@ __all__ = [
     "REFUGE_MAP_FILENAME",
     "REFUGE_PANEL_ACCENT",
     "RefugeActivityPresentation",
+    "RefugeCasinoPortalView",
     "RefugeLiveStatus",
     "RefugePanelButton",
     "RefugePublicControlsView",

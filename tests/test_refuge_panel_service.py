@@ -11,6 +11,7 @@ from models.refuge_world import (
     RefugeHistoricalEvent,
     RefugeWorldState,
 )
+from services.casino_reactions import CasinoReactionState
 from services.refuge_panel import (
     RefugePanelService,
     construction_label,
@@ -27,6 +28,25 @@ class _Service:
     async def evaluate(self, *, at=None):
         self.calls.append(at)
         return self.status
+
+
+class _LegendService:
+    def __init__(self):
+        self.calls = []
+
+    async def sync(self, *, status=None, at=None):
+        self.calls.append((status, at))
+        return status
+
+
+class _ReactionService:
+    def __init__(self, reaction: CasinoReactionState | None = None):
+        self.reaction = reaction or CasinoReactionState()
+        self.calls = []
+
+    async def evaluate(self, *, at=None):
+        self.calls.append(at)
+        return self.reaction
 
 
 class _Timeline:
@@ -108,16 +128,17 @@ async def test_panel_service_archives_then_evaluates_systems_and_secrets_sequent
             level_name="Hall des Légendes",
         )
     )
-    casino = _Service(
-        _status(
-            casino_state,
-            level=1,
-            level_name="Baraque de Jeux",
-            fortune="stable",
-            fortune_name="Stable",
-            is_open=True,
-        )
+    casino_status = _status(
+        casino_state,
+        level=1,
+        level_name="Baraque de Jeux",
+        fortune="stable",
+        fortune_name="Stable",
+        is_open=True,
     )
+    casino = _Service(casino_status)
+    legends = _LegendService()
+    reactions = _ReactionService()
     timeline = _Timeline()
     secrets = _Secrets(final_state, changed=True)
     renderer = _Renderer()
@@ -125,6 +146,8 @@ async def test_panel_service_archives_then_evaluates_systems_and_secrets_sequent
         fire_service=fire,
         hall_service=hall,
         casino_service=casino,
+        legend_service=legends,
+        reaction_service=reactions,
         timeline_service=timeline,
         secrets_service=secrets,
         renderer=renderer,
@@ -140,21 +163,66 @@ async def test_panel_service_archives_then_evaluates_systems_and_secrets_sequent
     assert snapshot.hall_level == 3
     assert snapshot.casino_fortune_name == "Stable"
     assert snapshot.casino_is_open is True
+    assert snapshot.casino_reaction == CasinoReactionState()
+    assert snapshot.casino_public_legend_count == 0
+    assert snapshot.casino_public_legend_total == 4
+    assert snapshot.casino_secret_legend_count == 0
+    assert snapshot.casino_secret_legend_total == 3
     assert snapshot.construction_label == "Aucun chantier actif"
     assert snapshot.latest_event_label == "Le Premier Visiteur"
     assert snapshot.changed is True
     assert len(timeline.calls) == len(secrets.calls) == 1
+    assert len(legends.calls) == len(reactions.calls) == 1
+    assert legends.calls[0][0] is casino_status
     assert (
         timeline.calls[0]
         == fire.calls[0]
         == hall.calls[0]
         == casino.calls[0]
+        == reactions.calls[0]
         == secrets.calls[0]
     )
 
     assert await service.render_png(snapshot) == b"PNG"
     assert renderer.calls[0][0] == final_state
     assert renderer.calls[0][1] == snapshot.context
+
+
+@pytest.mark.asyncio
+async def test_closed_casino_does_not_query_temporary_reaction_service():
+    at = datetime(2026, 8, 9, 4, 0, tzinfo=timezone.utc)
+    state = RefugeWorldState()
+    fire = _Service(
+        _status(state, level_name="Feu", intensity="normal")
+    )
+    hall = _Service(_status(state, level_name="Hall"))
+    casino_status = _status(
+        state,
+        level_name="Casino",
+        fortune="stable",
+        fortune_name="Stable",
+        is_open=False,
+    )
+    casino = _Service(casino_status)
+    legends = _LegendService()
+    reactions = _ReactionService(
+        CasinoReactionState(activity="busy", reaction="green_zero")
+    )
+    service = RefugePanelService(
+        fire_service=fire,
+        hall_service=hall,
+        casino_service=casino,
+        legend_service=legends,
+        reaction_service=reactions,
+        timeline_service=_Timeline(),
+        secrets_service=_Secrets(state),
+        renderer=_Renderer(),
+    )
+
+    snapshot = await service.evaluate(at=at)
+
+    assert snapshot.casino_reaction == CasinoReactionState()
+    assert reactions.calls == []
 
 
 def test_construction_label_prefers_persisted_project_name():

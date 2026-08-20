@@ -17,6 +17,7 @@ from cogs.refuge_panel import (
 )
 from models.refuge_world import RefugeWorldState
 from rendering.refuge_world import RefugeRenderContext
+from services.casino_reactions import CasinoReactionState
 from services.refuge_panel import RefugePanelSnapshot
 from ui.refuge_panel_view import (
     RefugeLiveStatus,
@@ -42,6 +43,11 @@ def _snapshot(*, created_at: str = "2026-08-18T00:00:00+00:00") -> RefugePanelSn
         casino_fortune="stable",
         casino_fortune_name="Stable",
         casino_is_open=True,
+        casino_reaction=CasinoReactionState(),
+        casino_public_legend_count=0,
+        casino_public_legend_total=4,
+        casino_secret_legend_count=0,
+        casino_secret_legend_total=3,
         construction_label="Aucun chantier actif",
         latest_event_id=None,
         latest_event_label=None,
@@ -83,8 +89,6 @@ def test_refuge_day_number_uses_persisted_creation_date_and_paris_calendar() -> 
     ],
 )
 def test_refuge_ambience_follows_paris_daypart(hour_utc: int, expected: str) -> None:
-    # 18 August is CEST (UTC+2), so the selected UTC hours map to
-    # Paris 06:00, 12:00, 19:00 and 00:00 respectively.
     assert refuge_ambience(
         at=datetime(2026, 8, 18, hour_utc, tzinfo=timezone.utc)
     ) == expected
