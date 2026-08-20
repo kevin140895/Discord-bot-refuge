@@ -65,10 +65,12 @@ RUN deno --version
 WORKDIR /app
 
 # requirements.txt is generated from requirements.in and contains exact pins
-# plus hashes. --require-hashes makes dependency drift a build failure instead
-# of silently resolving a newer package release.
-COPY requirements.txt .
-RUN python -m pip install --no-cache-dir --require-hashes -r requirements.txt
+# plus hashes. The PO Token plugin has its own tiny hash-locked manifest because
+# its JavaScript provider runs as a separate Railway service instead of being
+# embedded into the bot container.
+COPY requirements.txt requirements-youtube-pot.txt ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.txt && \
+    python -m pip install --no-cache-dir --require-hashes -r requirements-youtube-pot.txt
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh

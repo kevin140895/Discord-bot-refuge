@@ -5,6 +5,12 @@ monté (``YOUTUBE_COOKIES_FILE``), soit via un secret base64
 (``YOUTUBE_COOKIES_B64``). Le secret base64 est matérialisé dans le répertoire
 temporaire avec des permissions 0600 et son contenu n'est jamais journalisé.
 
+Pour les flux YouTube soumis aux Proof-of-Origin tokens, le bot peut aussi être
+relié à un serveur HTTP bgutil séparé via ``YOUTUBE_POT_PROVIDER_URL``. Le
+plugin Python reste dans l'image du bot, tandis que le générateur JavaScript est
+isolé dans un autre service Railway. Lorsque ce provider est configuré, yt-dlp
+utilise par défaut le client ``mweb`` recommandé pour les requêtes GVS.
+
 La configuration est appliquée au ``YoutubeDL`` global afin que tous les appels
 (recherche, validation d'un candidat et résolution du flux) partagent la même
 authentification sans dupliquer la logique dans les cogs.
@@ -28,6 +34,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 import yt_dlp
 
@@ -36,6 +43,7 @@ logger = logging.getLogger(__name__)
 YOUTUBE_COOKIES_B64_ENV = "YOUTUBE_COOKIES_B64"
 YOUTUBE_COOKIES_FILE_ENV = "YOUTUBE_COOKIES_FILE"
 YOUTUBE_USER_AGENT_ENV = "YOUTUBE_USER_AGENT"
+YOUTUBE_POT_PROVIDER_URL_ENV = "YOUTUBE_POT_PROVIDER_URL"
 COOKIE_FILENAME = "refuge-youtube-cookies.txt"
 _VALID_COOKIE_HEADERS = {
     "# Netscape HTTP Cookie File",
@@ -62,6 +70,7 @@ class YTDLPAuthConfig:
     cookiefile: str | None = None
     user_agent: str | None = None
     source: str | None = None
+    pot_provider_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +103,29 @@ def _validate_cookie_file(path: Path) -> Path:
         raise ValueError("fichier cookies YouTube introuvable")
     _normalise_cookie_text(path.read_bytes())
     return path
+
+
+def _normalise_pot_provider_url(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        raise ValueError("URL provider PO Token vide")
+
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("URL provider PO Token invalide (http/https attendu)")
+    if parsed.username or parsed.password:
+        raise ValueError("URL provider PO Token avec identifiants interdite")
+    if parsed.query or parsed.fragment:
+        raise ValueError("URL provider PO Token avec query/fragment interdite")
+    if parsed.path not in {"", "/"}:
+        raise ValueError("URL provider PO Token doit viser la racine du service")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("port provider PO Token invalide") from exc
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("port provider PO Token invalide")
+    return raw
 
 
 def _materialise_base64_cookiefile(value: str, *, temp_dir: str | None = None) -> Path:
@@ -140,16 +172,26 @@ def load_ytdlp_auth_config(
     *,
     temp_dir: str | None = None,
 ) -> YTDLPAuthConfig:
-    """Charge les secrets yt-dlp sans jamais exposer leur contenu dans les logs."""
+    """Charge les secrets/options yt-dlp sans exposer leur contenu dans les logs."""
 
     env = os.environ if environ is None else environ
     user_agent = str(env.get(YOUTUBE_USER_AGENT_ENV, "") or "").strip() or None
+
+    pot_provider_url = None
+    raw_provider_url = str(env.get(YOUTUBE_POT_PROVIDER_URL_ENV, "") or "").strip()
+    if raw_provider_url:
+        try:
+            pot_provider_url = _normalise_pot_provider_url(raw_provider_url)
+        except ValueError as exc:
+            logger.warning("[ytdlp] YOUTUBE_POT_PROVIDER_URL inutilisable: %s", exc)
 
     explicit_path = str(env.get(YOUTUBE_COOKIES_FILE_ENV, "") or "").strip()
     if explicit_path:
         try:
             path = _validate_cookie_file(Path(explicit_path).expanduser())
-            return YTDLPAuthConfig(str(path), user_agent, "file")
+            return YTDLPAuthConfig(
+                str(path), user_agent, "file", pot_provider_url
+            )
         except (OSError, ValueError) as exc:
             logger.warning("[ytdlp] YOUTUBE_COOKIES_FILE inutilisable: %s", exc)
 
@@ -157,15 +199,29 @@ def load_ytdlp_auth_config(
     if encoded:
         try:
             path = _materialise_base64_cookiefile(encoded, temp_dir=temp_dir)
-            return YTDLPAuthConfig(str(path), user_agent, "railway_secret")
+            return YTDLPAuthConfig(
+                str(path), user_agent, "railway_secret", pot_provider_url
+            )
         except (OSError, ValueError) as exc:
             logger.warning("[ytdlp] YOUTUBE_COOKIES_B64 inutilisable: %s", exc)
 
-    return YTDLPAuthConfig(None, user_agent, None)
+    return YTDLPAuthConfig(None, user_agent, None, pot_provider_url)
+
+
+def _copy_extractor_args(value: object) -> dict[str, object] | None:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        return None
+
+    copied: dict[str, object] = {}
+    for key, raw in value.items():
+        copied[str(key)] = dict(raw) if isinstance(raw, Mapping) else raw
+    return copied
 
 
 def augment_ytdlp_options(options: Mapping[str, object] | None) -> dict[str, object]:
-    """Injecte les paramètres d'authentification sans écraser un choix explicite."""
+    """Injecte l'auth et le provider PO Token sans écraser un choix explicite."""
 
     merged: dict[str, object] = dict(options or {})
     config = _ACTIVE_CONFIG
@@ -178,6 +234,28 @@ def augment_ytdlp_options(options: Mapping[str, object] | None) -> dict[str, obj
         headers = dict(existing_headers) if isinstance(existing_headers, Mapping) else {}
         headers.setdefault("User-Agent", config.user_agent)
         merged["http_headers"] = headers
+
+    if config.pot_provider_url:
+        extractor_args = _copy_extractor_args(merged.get("extractor_args"))
+        if extractor_args is None:
+            logger.warning(
+                "[ytdlp] extractor_args explicite non-mapping; injection PO Token ignorée"
+            )
+            return merged
+
+        youtube_raw = extractor_args.get("youtube")
+        youtube_args = dict(youtube_raw) if isinstance(youtube_raw, Mapping) else {}
+        youtube_args.setdefault("player_client", ["mweb"])
+        extractor_args["youtube"] = youtube_args
+
+        provider_key = "youtubepot-bgutilhttp"
+        provider_raw = extractor_args.get(provider_key)
+        provider_args = (
+            dict(provider_raw) if isinstance(provider_raw, Mapping) else {}
+        )
+        provider_args.setdefault("base_url", [config.pot_provider_url])
+        extractor_args[provider_key] = provider_args
+        merged["extractor_args"] = extractor_args
 
     return merged
 
@@ -297,6 +375,11 @@ def configure_ytdlp_auth(
     else:
         logger.info("[ytdlp] extraction YouTube anonyme (aucun cookie configuré)")
 
+    if _ACTIVE_CONFIG.pot_provider_url:
+        logger.info("[ytdlp] PO Token provider activé client=mweb transport=http")
+    else:
+        logger.info("[ytdlp] PO Token provider externe non configuré")
+
     logger.info(
         "[ytdlp] metadata cache actif ttl=%ss max_entries=%d",
         int(YTDLP_METADATA_CACHE_TTL_SECONDS),
@@ -309,6 +392,7 @@ __all__ = [
     "YTDLPAuthConfig",
     "YTDLP_METADATA_CACHE_MAX_ENTRIES",
     "YTDLP_METADATA_CACHE_TTL_SECONDS",
+    "YOUTUBE_POT_PROVIDER_URL_ENV",
     "augment_ytdlp_options",
     "clear_ytdlp_metadata_cache",
     "configure_ytdlp_auth",
