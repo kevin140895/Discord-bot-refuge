@@ -57,7 +57,7 @@ def test_runtime_manifest_keeps_breaking_change_guards():
 
 
 def test_generated_locks_are_exact_and_hashed():
-    for path in ("requirements.txt", "requirements-dev.txt"):
+    for path in ("requirements.txt", "requirements-dev.txt", "requirements-youtube-pot.txt"):
         text = (ROOT / path).read_text(encoding="utf-8")
         starts = _locked_requirement_starts(path)
 
@@ -76,14 +76,21 @@ def test_lock_toolchain_is_pinned():
 def test_music2_uses_known_good_youtube_runtime():
     runtime = set(_requirements("requirements.in"))
     runtime_lock = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    pot_lock = (ROOT / "requirements-youtube-pot.txt").read_text(encoding="utf-8")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert "yt-dlp[default]>=2025.11.12" in runtime
     assert "yt-dlp==" in runtime_lock
-    assert not any(line.startswith("bgutil-ytdlp-pot-provider") for line in runtime)
 
-    # Deno must stay explicit and reproducible. The old DENO_INSTALL marker
-    # represented the remote install.sh path and must not become the contract.
+    # Keep the provider plugin reproducible while avoiding the old architecture
+    # that cloned and ran the JavaScript provider inside the bot container.
+    assert "bgutil-ytdlp-pot-provider==1.3.1" in pot_lock
+    assert "130635912e2450757438f72068b900076ac1a62d9f26a00afbe6f2ab258e8b25" in pot_lock
+    assert "e62b21f9b2e4479d59af87a8900387c34892e8d7fdb223f266749a90e0be22de" in pot_lock
+    assert "requirements-youtube-pot.txt" in dockerfile
+    assert "--require-hashes -r requirements-youtube-pot.txt" in dockerfile
+
+    # Deno remains explicit and reproducible for yt-dlp's JS challenge support.
     assert "deno.land/install.sh" not in dockerfile
     assert "ARG DENO_VERSION=" in dockerfile
     assert "DENO_SHA256_AMD64=" in dockerfile
@@ -92,6 +99,8 @@ def test_music2_uses_known_good_youtube_runtime():
     assert "COPY --from=deno-fetcher /usr/local/bin/deno /usr/local/bin/deno" in dockerfile
     assert "deno --version" in dockerfile
 
-    assert "--require-hashes -r requirements.txt" in dockerfile
+    # The bot container must not own the provider process lifecycle anymore.
+    assert "git clone" not in dockerfile
+    assert "/bgutil-ytdlp-pot-provider/server" not in dockerfile
+    assert "127.0.0.1:4416" not in dockerfile
     assert 'CMD ["python", "main.py"]' in dockerfile
-    assert "bgutil-ytdlp-pot-provider" not in dockerfile
