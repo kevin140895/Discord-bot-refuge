@@ -21,10 +21,12 @@ from rendering.refuge_construction import (
 from rendering.refuge_live_activity import apply_refuge_activity_overlay
 from rendering.refuge_world import RefugeRenderContext
 from services.casino_legends import (
+    CasinoLegendService,
     casino_legend_service,
     casino_legend_state_from_status,
 )
 from services.casino_reactions import (
+    CasinoReactionService,
     CasinoReactionState,
     NORMAL_CASINO_REACTION,
     casino_reaction_service,
@@ -193,6 +195,8 @@ class RefugePanelService:
         fire_service: RefugeFireService = refuge_fire_service,
         hall_service: RefugeHallService = refuge_hall_service,
         casino_service: RefugeCasinoService = refuge_casino_service,
+        legend_service: CasinoLegendService = casino_legend_service,
+        reaction_service: CasinoReactionService = casino_reaction_service,
         timeline_service: RefugeTimelineService = refuge_timeline_service,
         secrets_service: RefugeSecretsService = refuge_secrets_service,
         renderer: RefugeConstructionRenderer = refuge_construction_renderer,
@@ -200,6 +204,8 @@ class RefugePanelService:
         self.fire_service = fire_service
         self.hall_service = hall_service
         self.casino_service = casino_service
+        self.legend_service = legend_service
+        self.reaction_service = reaction_service
         self.timeline_service = timeline_service
         self.secrets_service = secrets_service
         self.renderer = renderer
@@ -207,23 +213,15 @@ class RefugePanelService:
     async def evaluate(self, *, at: datetime | None = None) -> RefugePanelSnapshot:
         now = _aware_utc(at)
         async with refuge_world_mutation_lock():
-            # REFUGE-011 archives the previous Paris calendar month before any
-            # current-month mutation can touch the shared world state.
             await self.timeline_service.sync_under_world_lock(at=now)
 
-            # Sequential evaluation is intentional: all systems share
-            # RefugeWorldStore and each stage must observe the previous write.
             fire = await self.fire_service.evaluate(at=now)
             hall = await self.hall_service.evaluate(at=now)
             casino = await self.casino_service.evaluate(at=now)
 
-            # Lot 6 makes the Refuge consume the existing Lot 5 projection instead
-            # of maintaining another legend system. A temporary SQLite problem must
-            # never take the whole Refuge panel down, so the previous Casino state
-            # remains the fallback and V2.2 will retry on the next refresh.
             casino_with_legends = casino
             try:
-                casino_with_legends = await casino_legend_service.sync(
+                casino_with_legends = await self.legend_service.sync(
                     status=casino,
                     at=now,
                 )
@@ -235,7 +233,7 @@ class RefugePanelService:
 
             if casino_with_legends.is_open:
                 try:
-                    casino_reaction = await casino_reaction_service.evaluate(at=now)
+                    casino_reaction = await self.reaction_service.evaluate(at=now)
                 except Exception:
                     logger.exception(
                         "[refuge] réaction Casino indisponible; fallback calme"
@@ -246,9 +244,6 @@ class RefugePanelService:
 
             legend_state = casino_legend_state_from_status(casino_with_legends)
 
-            # Hidden discoveries are evaluated only after their source systems
-            # have projected the latest real evidence into the world. The
-            # service already runs under the shared mutation lock here.
             secrets = await self.secrets_service.sync_under_world_lock(at=now)
             state = secrets.state
 
