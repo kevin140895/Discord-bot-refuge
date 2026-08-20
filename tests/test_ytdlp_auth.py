@@ -80,6 +80,70 @@ def test_configure_injects_cookiefile_and_user_agent_without_overwriting_options
     assert explicit["http_headers"]["User-Agent"] == "Explicit UA"
 
 
+def test_external_pot_provider_uses_mweb_and_bgutil_http(tmp_path):
+    provider_url = "http://youtube-pot.railway.internal:4416"
+    config = ytdlp_auth.configure_ytdlp_auth(
+        {
+            "YOUTUBE_COOKIES_B64": _encoded_cookie(),
+            "YOUTUBE_POT_PROVIDER_URL": provider_url,
+        },
+        temp_dir=str(tmp_path),
+    )
+
+    options = ytdlp_auth.augment_ytdlp_options({"quiet": True})
+
+    assert config.pot_provider_url == provider_url
+    assert options["extractor_args"] == {
+        "youtube": {"player_client": ["mweb"]},
+        "youtubepot-bgutilhttp": {"base_url": [provider_url]},
+    }
+
+
+def test_external_pot_provider_preserves_explicit_extractor_args(tmp_path):
+    provider_url = "http://youtube-pot.railway.internal:4416"
+    ytdlp_auth.configure_ytdlp_auth(
+        {"YOUTUBE_POT_PROVIDER_URL": provider_url},
+        temp_dir=str(tmp_path),
+    )
+
+    options = ytdlp_auth.augment_ytdlp_options(
+        {
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web_safari"],
+                    "player_skip": ["configs"],
+                },
+                "youtubepot-bgutilhttp": {
+                    "base_url": ["http://custom-provider.internal:4416"]
+                },
+            }
+        }
+    )
+
+    assert options["extractor_args"]["youtube"] == {
+        "player_client": ["web_safari"],
+        "player_skip": ["configs"],
+    }
+    assert options["extractor_args"]["youtubepot-bgutilhttp"] == {
+        "base_url": ["http://custom-provider.internal:4416"]
+    }
+
+
+def test_invalid_pot_provider_url_is_ignored_without_breaking_cookie_auth(tmp_path, caplog):
+    caplog.set_level(logging.WARNING)
+    config = ytdlp_auth.load_ytdlp_auth_config(
+        {
+            "YOUTUBE_COOKIES_B64": _encoded_cookie(),
+            "YOUTUBE_POT_PROVIDER_URL": "file:///tmp/not-http",
+        },
+        temp_dir=str(tmp_path),
+    )
+
+    assert config.cookiefile is not None
+    assert config.pot_provider_url is None
+    assert "YOUTUBE_POT_PROVIDER_URL inutilisable" in caplog.text
+
+
 def test_invalid_base64_is_safe_and_secret_is_never_logged(tmp_path, caplog):
     secret = "this-is-not-valid-base64!!!"
     caplog.set_level(logging.WARNING)
