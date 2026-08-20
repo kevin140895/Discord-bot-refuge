@@ -6,6 +6,7 @@ from models.refuge_world import (
     RefugeWorldState,
 )
 from rendering.refuge_world import RefugeRenderContext
+from services.casino_reactions import CasinoReactionState
 from services.member_profile import MemberProfileSnapshot
 from services.refuge_casino import RefugeCasinoConfig
 from services.refuge_exploration import (
@@ -73,6 +74,11 @@ def _panel(state: RefugeWorldState) -> RefugePanelSnapshot:
         casino_fortune="stable",
         casino_fortune_name="Stable",
         casino_is_open=True,
+        casino_reaction=CasinoReactionState(),
+        casino_public_legend_count=0,
+        casino_public_legend_total=4,
+        casino_secret_legend_count=0,
+        casino_secret_legend_total=3,
         construction_label="Aucun chantier actif",
         latest_event_id=None,
         latest_event_label=None,
@@ -109,7 +115,6 @@ def test_explorer_uses_configured_next_milestone_without_inventing_progress():
 
     fire_text = " ".join(snapshot.get_zone("fire").details)
     assert "Le Campement à 1 h 00" in fire_text
-    # Dates legitimately contain slashes; only reject an invented x / y ratio.
     assert " / " not in fire_text
 
 
