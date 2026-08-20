@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from services.casino_legends import (
     CASINO_LEGEND_RULES_PATCH,
-    CASINO_LEGEND_V21_EVENT_ID,
+    CASINO_LEGEND_V22_EVENT_ID,
     CasinoLegendService,
     casino_legend_state_from_status,
 )
@@ -16,7 +18,10 @@ from services.refuge_world import RefugeWorldService
 from storage.refuge_casino_activity_store import RefugeCasinoActivityStore
 from storage.refuge_world_store import RefugeWorldStore
 from storage.roulette_history_store import RouletteHistoryStore
-from storage.roulette_legend_store import RouletteLegendStore
+from storage.roulette_legend_store import (
+    RouletteLegendStore,
+    RouletteLegendStoreUnavailable,
+)
 
 
 NOW = datetime(2026, 8, 20, 0, 0, tzinfo=timezone.utc)
@@ -33,12 +38,14 @@ def _services(tmp_path, db_path):
         world_service=world_service,
         state_file=state_file,
     )
+    history_store = RouletteHistoryStore(db_path)
     legend_store = RouletteLegendStore(db_path)
     legend_service = CasinoLegendService(
         store=legend_store,
         casino_service=casino_service,
+        history_store=history_store,
     )
-    return casino_service, legend_store, legend_service
+    return casino_service, history_store, legend_store, legend_service
 
 
 def _casino_building(status):
@@ -49,14 +56,34 @@ def _casino_building(status):
     )
 
 
-@pytest.mark.asyncio
-async def test_v21_resets_false_v2_markers_and_freezes_existing_event_ids(tmp_path):
-    db_path = tmp_path / "refuge.db"
-    history = RouletteHistoryStore(db_path)
-    casino_service, legend_store, legends = _services(tmp_path, db_path)
+async def _set_v21_metadata(
+    casino_service: RefugeCasinoService,
+    *,
+    boundary: int = 0,
+) -> None:
+    def updater(state):
+        buildings = []
+        for building in state.buildings:
+            if building.building_id != "casino":
+                buildings.append(building)
+                continue
+            building_state = dict(building.state)
+            building_state["legend_rules_version"] = 2
+            building_state["legend_rules_patch"] = "2.1"
+            building_state["legend_rules_v2_after_event_id"] = boundary
+            buildings.append(replace(building, state=building_state))
+        return replace(state, buildings=tuple(buildings))
 
-    # Old history deliberately qualifies several V2 rules. It must become
-    # permanently ineligible once the V2.1 id boundary is established.
+    await casino_service.world_store.update_state(updater)
+
+
+@pytest.mark.asyncio
+async def test_v22_resets_false_v21_markers_and_freezes_existing_event_ids(tmp_path):
+    db_path = tmp_path / "refuge.db"
+    casino_service, history, legend_store, legends = _services(tmp_path, db_path)
+
+    # Old history deliberately qualifies several rules. V2.2 must capture its
+    # maximum id before resetting the false V2.1 markers.
     start = NOW - timedelta(hours=2)
     for index in range(15):
         won = index < 8
@@ -85,9 +112,8 @@ async def test_v21_resets_false_v2_markers_and_freezes_existing_event_ids(tmp_pa
     boundary = await legend_store.get_max_event_id()
     assert boundary == 45
 
-    # Reproduce production after the first V2 deployment: version 2 exists,
-    # but false public markers have already been written back from old history.
     await casino_service.migrate_legend_rules_v2(at=NOW - timedelta(minutes=5))
+    await _set_v21_metadata(casino_service, boundary=0)
     for marker in ("black_night", "break_in", "grand_heist"):
         await casino_service.unlock_event(marker, at=NOW - timedelta(minutes=4))
 
@@ -109,13 +135,13 @@ async def test_v21_resets_false_v2_markers_and_freezes_existing_event_ids(tmp_pa
     assert building.state["legend_rules_v2_after_event_id"] == boundary
 
     event_ids = [event.event_id for event in second.state.events]
-    assert event_ids.count(CASINO_LEGEND_V21_EVENT_ID) == 1
+    assert event_ids.count(CASINO_LEGEND_V22_EVENT_ID) == 1
     for marker in ("black_night", "break_in", "grand_heist"):
         assert f"casino:casino_events:{marker}" not in event_ids
 
 
 @pytest.mark.asyncio
-async def test_v21_boundary_ignores_preexisting_rows_regardless_of_iso_offset(tmp_path):
+async def test_v22_boundary_ignores_preexisting_rows_regardless_of_iso_offset(tmp_path):
     db_path = tmp_path / "refuge.db"
     history = RouletteHistoryStore(db_path)
     store = RouletteLegendStore(db_path)
@@ -136,8 +162,6 @@ async def test_v21_boundary_ignores_preexisting_rows_regardless_of_iso_offset(tm
     boundary = await store.get_max_event_id()
     assert boundary == 2
 
-    # Simulate historical ISO strings with an offset different from the UTC
-    # strings written by the current recorder. The id boundary remains exact.
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "UPDATE roulette_events SET occurred_at = ? WHERE id = 1",
@@ -155,10 +179,9 @@ async def test_v21_boundary_ignores_preexisting_rows_regardless_of_iso_offset(tm
 
 
 @pytest.mark.asyncio
-async def test_v21_allows_new_events_after_boundary_to_unlock(tmp_path):
+async def test_v22_allows_new_events_after_boundary_to_unlock(tmp_path):
     db_path = tmp_path / "refuge.db"
-    history = RouletteHistoryStore(db_path)
-    _casino_service, _legend_store, legends = _services(tmp_path, db_path)
+    _casino_service, history, _legend_store, legends = _services(tmp_path, db_path)
 
     activated = await legends.sync(at=NOW)
     building = _casino_building(activated)
@@ -183,6 +206,66 @@ async def test_v21_allows_new_events_after_boundary_to_unlock(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_max_event_id_is_zero_without_roulette_table(tmp_path):
+async def test_max_event_id_requires_verified_roulette_table(tmp_path):
     store = RouletteLegendStore(tmp_path / "missing.db")
+    with pytest.raises(RouletteLegendStoreUnavailable):
+        await store.get_max_event_id()
+
+
+@pytest.mark.asyncio
+async def test_max_event_id_zero_is_valid_only_after_empty_table_initialization(tmp_path):
+    db_path = tmp_path / "refuge.db"
+    history = RouletteHistoryStore(db_path)
+    store = RouletteLegendStore(db_path)
+
+    await history.start()
     assert await store.get_max_event_id() == 0
+
+
+@pytest.mark.asyncio
+async def test_v22_operational_error_defers_migration_then_recovers(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    db_path = tmp_path / "refuge.db"
+    casino_service, history, legend_store, legends = _services(tmp_path, db_path)
+
+    await history.record_event(
+        user_id=10,
+        bet_type="red",
+        wager_xp=100,
+        payout_xp=0,
+        won=False,
+        zero_hit=False,
+        at=NOW - timedelta(minutes=1),
+    )
+    await casino_service.migrate_legend_rules_v2(at=NOW - timedelta(minutes=5))
+    await _set_v21_metadata(casino_service, boundary=0)
+    await casino_service.unlock_event("grand_heist", at=NOW - timedelta(minutes=4))
+    before = await casino_service.evaluate(at=NOW - timedelta(minutes=3))
+
+    def locked_boundary():
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(legend_store, "_max_event_id_sync", locked_boundary)
+        with caplog.at_level(logging.ERROR, logger="services.casino_legends"):
+            deferred = await legends.sync(status=before, at=NOW)
+
+    deferred_building = _casino_building(deferred)
+    assert deferred_building.state["legend_rules_patch"] == "2.1"
+    assert "grand_heist" in casino_legend_state_from_status(deferred).public_events
+    assert CASINO_LEGEND_V22_EVENT_ID not in {
+        event.event_id for event in deferred.state.events
+    }
+    assert "V2.2 boundary capture failed; migration deferred" in caplog.text
+
+    recovered = await legends.sync(status=deferred, at=NOW + timedelta(seconds=1))
+    recovered_building = _casino_building(recovered)
+    assert recovered_building.state["legend_rules_patch"] == CASINO_LEGEND_RULES_PATCH
+    assert recovered_building.state["legend_rules_v2_after_event_id"] == 1
+    assert casino_legend_state_from_status(recovered).public_events == ()
+    assert CASINO_LEGEND_V22_EVENT_ID in {
+        event.event_id for event in recovered.state.events
+    }

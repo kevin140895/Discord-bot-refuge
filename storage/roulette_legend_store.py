@@ -32,6 +32,10 @@ GHOST_WINDOW_MINUTES = 90
 GHOST_NUMBER_WINS_REQUIRED = 2
 
 
+class RouletteLegendStoreUnavailable(RuntimeError):
+    """Raised when legend evidence cannot be read safely from SQLite."""
+
+
 @dataclass(frozen=True, slots=True)
 class RouletteLegendEvidence:
     max_house_streak: int = 0
@@ -68,7 +72,7 @@ def _is_ghost_hour(occurred: datetime) -> bool:
 
 
 class RouletteLegendStore:
-    """Read-only V2.1 legend evidence projection over roulette history."""
+    """Read-only V2.2 legend evidence projection over roulette history."""
 
     def __init__(self, path: str | Path = DB_PATH) -> None:
         self.path = Path(path)
@@ -89,29 +93,43 @@ class RouletteLegendStore:
             is not None
         )
 
-    def _max_event_id_sync(self) -> int:
+    def _require_database(self) -> None:
         if not self.path.is_file():
-            return 0
+            raise RouletteLegendStoreUnavailable(
+                f"roulette SQLite database is unavailable: {self.path}"
+            )
+
+    def _max_event_id_sync(self) -> int:
+        self._require_database()
         try:
             with self._connect() as connection:
                 if not self._table_exists(connection):
-                    return 0
+                    raise RouletteLegendStoreUnavailable(
+                        "roulette_events table is unavailable"
+                    )
                 row = connection.execute(
                     "SELECT COALESCE(MAX(id), 0) AS max_id FROM roulette_events"
                 ).fetchone()
-        except sqlite3.Error:
-            return 0
+        except RouletteLegendStoreUnavailable:
+            raise
+        except sqlite3.Error as exc:
+            raise RouletteLegendStoreUnavailable(
+                "unable to capture roulette event boundary"
+            ) from exc
         if row is None:
-            return 0
+            raise RouletteLegendStoreUnavailable(
+                "roulette event boundary query returned no row"
+            )
         return max(0, int(row["max_id"]))
 
     def _rows_sync(self, after_event_id: int) -> list[sqlite3.Row]:
-        if not self.path.is_file():
-            return []
+        self._require_database()
         try:
             with self._connect() as connection:
                 if not self._table_exists(connection):
-                    return []
+                    raise RouletteLegendStoreUnavailable(
+                        "roulette_events table is unavailable"
+                    )
                 rows = connection.execute(
                     """
                     SELECT * FROM (
@@ -133,8 +151,12 @@ class RouletteLegendStore:
                     """,
                     (max(0, int(after_event_id)), CASINO_LEGEND_MAX_ROWS),
                 ).fetchall()
-        except sqlite3.Error:
-            return []
+        except RouletteLegendStoreUnavailable:
+            raise
+        except sqlite3.Error as exc:
+            raise RouletteLegendStoreUnavailable(
+                "unable to read roulette legend evidence"
+            ) from exc
         return list(rows)
 
     @staticmethod
@@ -299,7 +321,7 @@ class RouletteLegendStore:
         )
 
     async def get_max_event_id(self) -> int:
-        """Return the latest persisted roulette event id, or zero for an empty DB."""
+        """Return the latest persisted event id; zero only means a verified empty table."""
 
         return await asyncio.to_thread(self._max_event_id_sync)
 
@@ -343,5 +365,6 @@ __all__ = [
     "HOUSE_LEGEND_MIN_STREAK",
     "RouletteLegendEvidence",
     "RouletteLegendStore",
+    "RouletteLegendStoreUnavailable",
     "roulette_legend_store",
 ]

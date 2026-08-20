@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
+import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
@@ -14,17 +16,21 @@ from services.refuge_casino import (
     RefugeCasinoStatus,
     refuge_casino_service,
 )
+from storage.roulette_history_store import RouletteHistoryStore
 from storage.roulette_legend_store import (
     HOUSE_LEGEND_MIN_STREAK,
     RouletteLegendEvidence,
     RouletteLegendStore,
+    RouletteLegendStoreUnavailable,
     roulette_legend_store,
 )
 
 
+logger = logging.getLogger(__name__)
 CASINO_LEGEND_RULES_VERSION = 2
-CASINO_LEGEND_RULES_PATCH = "2.1"
+CASINO_LEGEND_RULES_PATCH = "2.2"
 CASINO_LEGEND_V21_EVENT_ID = "casino:legend_rules:v2.1"
+CASINO_LEGEND_V22_EVENT_ID = "casino:legend_rules:v2.2"
 CASINO_LEGEND_DESCRIPTIONS = {
     "grand_heist": "Les joueurs ont fait plier les coffres de la Maison.",
     "black_night": "Une nuit entière a tourné à l'avantage de la Maison.",
@@ -198,21 +204,24 @@ class CasinoLegendService:
         *,
         store: RouletteLegendStore = roulette_legend_store,
         casino_service: RefugeCasinoService = refuge_casino_service,
+        history_store: RouletteHistoryStore | None = None,
     ) -> None:
         self.store = store
         self.casino_service = casino_service
+        self.history_store = history_store or RouletteHistoryStore(self.store.path)
         self._lock = asyncio.Lock()
 
-    async def _migrate_v21(
+    async def _migrate_v22(
         self,
         *,
         after_event_id: int,
         at: datetime | None,
-    ) -> None:
+    ) -> tuple[str, ...]:
         started_at = _utc_iso(at)
         removed_event_ids = {
             f"casino:casino_events:{marker_id}" for marker_id in CASINO_EVENTS
         }
+        reset_markers_holder: list[str] = []
 
         def updater(state: RefugeWorldState) -> RefugeWorldState:
             building = next(
@@ -244,6 +253,7 @@ class CasinoLegendService:
                 )
             else:
                 reset_markers = []
+            reset_markers_holder[:] = reset_markers
 
             building_state["casino_events"] = []
             building_state["legend_rules_version"] = CASINO_LEGEND_RULES_VERSION
@@ -251,15 +261,15 @@ class CasinoLegendService:
             building_state["legend_rules_v2_after_event_id"] = max(
                 0, int(after_event_id)
             )
-            building_state["legend_rules_v21_started_at"] = started_at
+            building_state["legend_rules_v22_started_at"] = started_at
 
             events = tuple(
                 event for event in state.events if event.event_id not in removed_event_ids
             )
-            if not any(event.event_id == CASINO_LEGEND_V21_EVENT_ID for event in events):
+            if not any(event.event_id == CASINO_LEGEND_V22_EVENT_ID for event in events):
                 events = events + (
                     RefugeHistoricalEvent(
-                        event_id=CASINO_LEGEND_V21_EVENT_ID,
+                        event_id=CASINO_LEGEND_V22_EVENT_ID,
                         event_type="casino_legend_rules_migrated",
                         occurred_at=started_at,
                         data={
@@ -268,22 +278,28 @@ class CasinoLegendService:
                             "patch": CASINO_LEGEND_RULES_PATCH,
                             "after_event_id": max(0, int(after_event_id)),
                             "reset_markers": reset_markers,
-                            "name": "Règles des légendes du Casino sécurisées V2.1",
+                            "name": "Règles des légendes du Casino sécurisées V2.2",
                         },
                     ),
                 )
 
-            updated = _replace_casino_building(
+            return _replace_casino_building(
                 replace(state, events=events),
                 building_state=building_state,
             )
-            return updated
 
         # RefugeCasinoService owns all normal Casino world mutations. Sharing its
-        # service lock here prevents a stale evaluate/save cycle from overwriting
-        # the one-time V2.1 migration while RefugeWorldStore performs the atomic write.
+        # service lock prevents a stale evaluate/save cycle from overwriting the
+        # one-time V2.2 migration while RefugeWorldStore performs the atomic write.
         async with self.casino_service._lock:
             await self.casino_service.world_store.update_state(updater)
+        return tuple(reset_markers_holder)
+
+    async def _capture_v22_boundary(self) -> int:
+        # Make the history schema available before boundary capture. This is
+        # idempotent and targets the exact same SQLite path as the legend store.
+        await self.history_store.start()
+        return await self.store.get_max_event_id()
 
     async def sync(
         self,
@@ -300,10 +316,33 @@ class CasinoLegendService:
                 version, _started_at, patch, after_event_id = _legend_rules_meta(current)
 
             if patch != CASINO_LEGEND_RULES_PATCH or after_event_id is None:
-                boundary = await self.store.get_max_event_id()
-                await self._migrate_v21(after_event_id=boundary, at=at)
+                try:
+                    boundary = await self._capture_v22_boundary()
+                except (sqlite3.Error, RouletteLegendStoreUnavailable):
+                    logger.exception(
+                        "[CasinoLegend] V2.2 boundary capture failed; migration deferred"
+                    )
+                    return current
+
+                logger.info(
+                    "[CasinoLegend] V2.2 boundary captured event_id=%d",
+                    boundary,
+                )
+                reset_markers = await self._migrate_v22(
+                    after_event_id=boundary,
+                    at=at,
+                )
+                logger.info(
+                    "[CasinoLegend] V2.2 reset public legends=%d markers=%s",
+                    len(reset_markers),
+                    ",".join(reset_markers) if reset_markers else "none",
+                )
                 current = await self.casino_service.evaluate(at=at)
                 version, _started_at, patch, after_event_id = _legend_rules_meta(current)
+                logger.info(
+                    "[CasinoLegend] V2.2 migration complete after_event_id=%d",
+                    boundary,
+                )
 
             if version < CASINO_LEGEND_RULES_VERSION:
                 return current
@@ -314,10 +353,17 @@ class CasinoLegendService:
             if public >= set(CASINO_EVENTS) and secret >= set(CASINO_SECRET_EVENTS):
                 return current
 
-            evidence = await self.store.get_evidence(
-                at=at,
-                after_event_id=after_event_id,
-            )
+            try:
+                evidence = await self.store.get_evidence(
+                    at=at,
+                    after_event_id=after_event_id,
+                )
+            except RouletteLegendStoreUnavailable:
+                logger.exception(
+                    "[CasinoLegend] SQLite evidence unavailable; unlock deferred"
+                )
+                return current
+
             public_candidates = _public_candidates(evidence) - public
             secret_candidates = _secret_candidates(evidence) - secret
             changed = False
@@ -342,6 +388,7 @@ __all__ = [
     "CASINO_LEGEND_RULES_PATCH",
     "CASINO_LEGEND_RULES_VERSION",
     "CASINO_LEGEND_V21_EVENT_ID",
+    "CASINO_LEGEND_V22_EVENT_ID",
     "CASINO_SECRET_DESCRIPTIONS",
     "CasinoLegendService",
     "CasinoLegendState",
