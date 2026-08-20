@@ -3,11 +3,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Final, Mapping
 
 from models.refuge_world import RefugeHistoricalEvent, RefugeWorldState
+from rendering.refuge_casino_reactions import (
+    REFUGE_CASINO_REACTION_RENDERER_VERSION,
+    apply_refuge_casino_reaction_overlay,
+)
 from rendering.refuge_construction import (
     RefugeConstructionRenderer,
     construction_scene_signature,
@@ -15,7 +20,21 @@ from rendering.refuge_construction import (
 )
 from rendering.refuge_live_activity import apply_refuge_activity_overlay
 from rendering.refuge_world import RefugeRenderContext
-from services.refuge_casino import RefugeCasinoService, refuge_casino_service
+from services.casino_legends import (
+    casino_legend_service,
+    casino_legend_state_from_status,
+)
+from services.casino_reactions import (
+    CasinoReactionState,
+    NORMAL_CASINO_REACTION,
+    casino_reaction_service,
+)
+from services.refuge_casino import (
+    CASINO_EVENTS,
+    CASINO_SECRET_EVENTS,
+    RefugeCasinoService,
+    refuge_casino_service,
+)
 from services.refuge_fire import RefugeFireService, refuge_fire_service
 from services.refuge_hall import RefugeHallService, refuge_hall_service
 from services.refuge_secrets import RefugeSecretsService, refuge_secrets_service
@@ -23,6 +42,8 @@ from services.refuge_timeline import RefugeTimelineService, refuge_timeline_serv
 from services.refuge_world_coordination import refuge_world_mutation_lock
 from utils.seasons import season_id_for, season_label
 
+
+logger = logging.getLogger(__name__)
 
 _FIRE_INTENSITY_NAMES: Final[Mapping[str, str]] = {
     "low": "Calme",
@@ -57,6 +78,11 @@ class RefugePanelSnapshot:
     casino_fortune: str
     casino_fortune_name: str
     casino_is_open: bool
+    casino_reaction: CasinoReactionState
+    casino_public_legend_count: int
+    casino_public_legend_total: int
+    casino_secret_legend_count: int
+    casino_secret_legend_total: int
     construction_label: str
     latest_event_id: str | None
     latest_event_label: str | None
@@ -191,6 +217,35 @@ class RefugePanelService:
             hall = await self.hall_service.evaluate(at=now)
             casino = await self.casino_service.evaluate(at=now)
 
+            # Lot 6 makes the Refuge consume the existing Lot 5 projection instead
+            # of maintaining another legend system. A temporary SQLite problem must
+            # never take the whole Refuge panel down, so the previous Casino state
+            # remains the fallback and V2.2 will retry on the next refresh.
+            casino_with_legends = casino
+            try:
+                casino_with_legends = await casino_legend_service.sync(
+                    status=casino,
+                    at=now,
+                )
+            except Exception:
+                logger.exception(
+                    "[refuge] synchronisation des légendes Casino indisponible; "
+                    "état précédent conservé"
+                )
+
+            if casino_with_legends.is_open:
+                try:
+                    casino_reaction = await casino_reaction_service.evaluate(at=now)
+                except Exception:
+                    logger.exception(
+                        "[refuge] réaction Casino indisponible; fallback calme"
+                    )
+                    casino_reaction = NORMAL_CASINO_REACTION
+            else:
+                casino_reaction = NORMAL_CASINO_REACTION
+
+            legend_state = casino_legend_state_from_status(casino_with_legends)
+
             # Hidden discoveries are evaluated only after their source systems
             # have projected the latest real evidence into the world. The
             # service already runs under the shared mutation lock here.
@@ -206,7 +261,12 @@ class RefugePanelService:
                 fire.intensity,
                 fire.intensity.capitalize(),
             )
-            visual_signature = construction_scene_signature(state, context)
+            base_visual_signature = construction_scene_signature(state, context)
+            visual_signature = (
+                f"{base_visual_signature}|casino-reaction:"
+                f"v{REFUGE_CASINO_REACTION_RENDERER_VERSION}:"
+                f"{casino_reaction.cache_key}"
+            )
             summary_payload = {
                 "season_id": current_season,
                 "fire_level": fire.level,
@@ -214,10 +274,13 @@ class RefugePanelService:
                 "fire_intensity": fire.intensity,
                 "hall_level": hall.level,
                 "hall_name": hall.level_name,
-                "casino_level": casino.level,
-                "casino_name": casino.level_name,
-                "casino_fortune": casino.fortune,
-                "casino_open": casino.is_open,
+                "casino_level": casino_with_legends.level,
+                "casino_name": casino_with_legends.level_name,
+                "casino_fortune": casino_with_legends.fortune,
+                "casino_open": casino_with_legends.is_open,
+                "casino_reaction": casino_reaction.cache_key,
+                "casino_public_legends": len(legend_state.public_events),
+                "casino_secret_legends": len(legend_state.secret_events),
                 "construction": build_label,
                 "latest_event_id": last_event.event_id if last_event else None,
             }
@@ -233,11 +296,16 @@ class RefugePanelService:
                 fire_intensity_name=fire_intensity_name,
                 hall_level=hall.level,
                 hall_name=hall.level_name,
-                casino_level=casino.level,
-                casino_name=casino.level_name,
-                casino_fortune=casino.fortune,
-                casino_fortune_name=casino.fortune_name,
-                casino_is_open=casino.is_open,
+                casino_level=casino_with_legends.level,
+                casino_name=casino_with_legends.level_name,
+                casino_fortune=casino_with_legends.fortune,
+                casino_fortune_name=casino_with_legends.fortune_name,
+                casino_is_open=casino_with_legends.is_open,
+                casino_reaction=casino_reaction,
+                casino_public_legend_count=len(legend_state.public_events),
+                casino_public_legend_total=len(CASINO_EVENTS),
+                casino_secret_legend_count=len(legend_state.secret_events),
+                casino_secret_legend_total=len(CASINO_SECRET_EVENTS),
                 construction_label=build_label,
                 latest_event_id=last_event.event_id if last_event else None,
                 latest_event_label=last_event_label,
@@ -247,6 +315,7 @@ class RefugePanelService:
                     fire.changed
                     or hall.changed
                     or casino.changed
+                    or casino_with_legends.state != casino.state
                     or secrets.changed
                 ),
             )
@@ -261,6 +330,13 @@ class RefugePanelService:
             snapshot.state,
             context=snapshot.context,
         )
+        if snapshot.casino_is_open and snapshot.casino_reaction.is_notable:
+            png = await asyncio.to_thread(
+                apply_refuge_casino_reaction_overlay,
+                png,
+                snapshot.casino_reaction,
+                context=snapshot.context,
+            )
         if activity_key is None:
             return png
         return await asyncio.to_thread(
