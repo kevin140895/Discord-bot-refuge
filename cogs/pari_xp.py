@@ -14,7 +14,6 @@ from discord.ext import commands, tasks
 
 from config import (
     DATA_DIR,
-    ANNOUNCE_CHANNEL_ID,
     PARI_XP_CHANNEL_ID,
     PARI_XP_ROLE_ID,
     CASINO_OPEN_HOUR,
@@ -467,7 +466,6 @@ class PariXPCog(commands.Cog):
         self.living_state: dict[str, object] = _empty_living_state()
         self.casino_visual_asset: CasinoVisualAsset | None = None
         self._message_id: Optional[int] = self.state.get("message_id")
-        self._last_announced_state: Optional[bool] = None
         self._last_panel_signature: tuple[object, ...] | None = None
         self._last_visual_signature: str | None = None
         # Sérialise la séquence débit → tirage → crédit → état pour éviter
@@ -490,38 +488,12 @@ class PariXPCog(commands.Cog):
             self.is_open = open_now
             self.state["is_open"] = self.is_open
             await self._save_state()
-            await self._announce_state()
         await self._refresh_casino_visual()
         await self._ensure_roulette_message()
 
     @check_schedule.before_loop
     async def before_check(self) -> None:
         await self.bot.wait_until_ready()
-
-    async def _announce_state(self) -> None:
-        if self._last_announced_state == self.is_open:
-            return
-        if ANNOUNCE_CHANNEL_ID <= 0:
-            self._last_announced_state = self.is_open
-            return
-        channel = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(ANNOUNCE_CHANNEL_ID)
-            except discord.HTTPException:
-                return
-        if not isinstance(channel, discord.TextChannel):
-            return
-        msg = (
-            f"👑 Le Casino du Refuge ouvre ses tables jusqu'à {CASINO_CLOSE_HOUR:02d}h00 !"
-            if self.is_open
-            else f"🔒 Le Casino du Refuge ferme ses portes. Rendez-vous à {CASINO_OPEN_HOUR:02d}h00."
-        )
-        try:
-            await channel.send(msg)
-        except discord.HTTPException:
-            pass
-        self._last_announced_state = self.is_open
 
     async def _save_state(self) -> None:
         # Ne jamais envoyer l'objet mutable partagé au thread de sérialisation.
