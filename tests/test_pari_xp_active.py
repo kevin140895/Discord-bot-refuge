@@ -15,7 +15,6 @@ def _make_cog(*, is_open: bool = True):
     cog.state = {"is_open": is_open, "total_bets": 0, "total_winnings": 0}
     cog.is_open = is_open
     cog._message_id = None
-    cog._last_announced_state = None
     cog._last_panel_signature = None
     cog._bet_lock = asyncio.Lock()
     return cog
@@ -116,11 +115,11 @@ def test_roulette_v2_reflects_refuge_royal_closed_state(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_check_schedule_updates_active_cog_state():
+async def test_check_schedule_updates_state_without_daily_announcement():
     cog = _make_cog(is_open=False)
     cog._is_open_now = lambda: True
     cog._save_state = AsyncMock()
-    cog._announce_state = AsyncMock()
+    cog._refresh_casino_visual = AsyncMock()
     cog._ensure_roulette_message = AsyncMock()
 
     await pari_xp.PariXPCog.check_schedule.coro(cog)
@@ -128,7 +127,7 @@ async def test_check_schedule_updates_active_cog_state():
     assert cog.is_open is True
     assert cog.state["is_open"] is True
     cog._save_state.assert_awaited_once()
-    cog._announce_state.assert_awaited_once()
+    cog._refresh_casino_visual.assert_awaited_once()
     cog._ensure_roulette_message.assert_awaited_once()
 
 
