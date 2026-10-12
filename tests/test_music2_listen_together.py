@@ -8,6 +8,12 @@ import pytest
 import cogs.music2_listen_together as listen_together
 
 
+@pytest.fixture(autouse=True)
+def keep_existing_invitation_tests_in_a_non_general_channel(monkeypatch):
+    # Other music/invitation tests continue to exercise a dedicated channel.
+    monkeypatch.setattr(listen_together, "LISTEN_TOGETHER_CHANNEL_ID", 987654321)
+
+
 class DummyVoice:
     def __init__(self, *, playing: bool = True, paused: bool = False) -> None:
         self.playing = playing
@@ -124,7 +130,7 @@ def make_active_session(*, title: str = "Du Ferme", listeners: int = 2, queued: 
 
 
 @pytest.mark.asyncio
-async def test_active_custom_music_creates_single_general_announcement() -> None:
+async def test_active_custom_music_creates_single_dedicated_channel_announcement() -> None:
     bot, music, radio, text_channel, voice_channel = make_active_session()
     cog = listen_together.Music2ListenTogetherCog(bot)
     cog._initial_cleanup_done = True
@@ -140,6 +146,45 @@ async def test_active_custom_music_creates_single_general_announcement() -> None
     assert "**2** personne(s)" in embed.description
     assert "**1** titre(s)" in embed.description
     assert text_channel.message.edit.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_no_invitation_is_posted_in_general_while_music_plays(monkeypatch) -> None:
+    monkeypatch.setattr(
+        listen_together, "LISTEN_TOGETHER_CHANNEL_ID",
+        listen_together.GENERAL_CHANNEL_ID,
+    )
+    bot, music, radio, text_channel, voice_channel = make_active_session()
+    cog = listen_together.Music2ListenTogetherCog(bot)
+    cog._initial_cleanup_done = True
+
+    await cog._sync_announcement()
+    await cog._sync_announcement()
+
+    assert text_channel.sent == []
+    assert cog._message is None
+    assert cog._current_state() is not None  # Music playback is unaffected.
+
+
+@pytest.mark.asyncio
+async def test_old_general_invitation_is_cleaned_without_reposting(monkeypatch) -> None:
+    monkeypatch.setattr(
+        listen_together, "LISTEN_TOGETHER_CHANNEL_ID",
+        listen_together.GENERAL_CHANNEL_ID,
+    )
+    bot, music, radio, text_channel, voice_channel = make_active_session()
+    old = DummyMessage()
+    old.embeds = [SimpleNamespace(title=listen_together.LISTEN_TOGETHER_TITLE)]
+
+    async def history(*, limit: int):
+        yield old
+
+    text_channel.history = history
+    cog = listen_together.Music2ListenTogetherCog(bot)
+
+    await cog._sync_announcement()
+    old.delete.assert_awaited_once()
+    assert text_channel.sent == []
 
 
 @pytest.mark.asyncio
