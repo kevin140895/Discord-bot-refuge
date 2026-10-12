@@ -11,7 +11,7 @@ PyNaCl>=1.6.2,<1.7
 davey>=0.1.0
 python-dotenv>=1.0,<2
 Pillow>=10.0,<13
-yt-dlp[default]>=2025.11.12
+yt-dlp[default]>=2026.8.19
 imageio-ffmpeg>=0.4,<1
 aiohttp>=3.8,<4
 # Minimum versions fixing the October 2026 pip-audit advisories.
