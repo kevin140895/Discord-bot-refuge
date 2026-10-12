@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
@@ -171,3 +172,85 @@ async def test_objectif_communaute_sends_components_v2_view(monkeypatch) -> None
     assert "Objectif automatique" in text
     assert "Ambitieux" in text
     assert "Automatisation en pause" in text
+
+
+def _test_goal() -> dict:
+    return {
+        "id": "goal-automated-1",
+        "metric_key": "messages",
+        "title": "La place s'éveille",
+        "target": 5,
+        "baseline_total": 0,
+        "ends_at": "2099-12-31T12:00:00+00:00",
+        "source": "automatic",
+        "metadata": {"duration_days": 3, "difficulty_label": "Normal"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_general_suppresses_goal_creation_and_completion_announcements(monkeypatch) -> None:
+    monkeypatch.setattr(
+        community_goals_module,
+        "ANNOUNCE_CHANNEL_ID",
+        community_goals_module.GENERAL_CHANNEL_ID,
+    )
+    bot = SimpleNamespace(get_channel=MagicMock(), fetch_channel=AsyncMock())
+    cog = CommunityGoalsCog(bot)
+
+    await cog._announce_automatic_goal(_test_goal())
+    await cog._announce_completion(_test_goal(), progress=5)
+
+    bot.get_channel.assert_not_called()
+    bot.fetch_channel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_community_goals_are_created_and_completed_silently(monkeypatch) -> None:
+    monkeypatch.setattr(
+        community_goals_module,
+        "ANNOUNCE_CHANNEL_ID",
+        community_goals_module.GENERAL_CHANNEL_ID,
+    )
+    goal = _test_goal()
+    store = SimpleNamespace(
+        list_goals=AsyncMock(return_value=[goal]),
+        finish_goal=AsyncMock(return_value=goal),
+    )
+    monkeypatch.setattr(community_goals_module, "community_goal_store", store)
+    automation = SimpleNamespace(
+        sync=AsyncMock(return_value=SimpleNamespace(created_goal=goal))
+    )
+    monkeypatch.setattr(
+        community_goals_module, "community_goal_automation_service", automation
+    )
+
+    bot = SimpleNamespace(get_channel=MagicMock(), fetch_channel=AsyncMock())
+    cog = CommunityGoalsCog(bot)
+    cog._metric_total = AsyncMock(return_value=10)
+    await CommunityGoalsCog.evaluate_community_goals.coro(cog)
+
+    store.finish_goal.assert_awaited_once()
+    automation.sync.assert_awaited_once()
+    bot.get_channel.assert_not_called()
+    bot.fetch_channel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_community_goals_still_announce_in_a_dedicated_channel(monkeypatch) -> None:
+    dedicated_channel_id = 987654321
+    monkeypatch.setattr(
+        community_goals_module, "ANNOUNCE_CHANNEL_ID", dedicated_channel_id
+    )
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.id = dedicated_channel_id
+    channel.send = AsyncMock()
+    bot = SimpleNamespace(
+        get_channel=MagicMock(return_value=channel), fetch_channel=AsyncMock()
+    )
+    cog = CommunityGoalsCog(bot)
+
+    await cog._announce_automatic_goal(_test_goal())
+    await cog._announce_completion(_test_goal(), progress=5)
+
+    assert channel.send.await_count == 2
+    assert channel.send.await_args.kwargs["embed"].title == "🏆 Objectif communautaire atteint"
