@@ -10,7 +10,7 @@ from datetime import date, datetime, time
 import discord
 from discord.ext import commands, tasks
 
-from config import DATA_DIR
+from config import DATA_DIR, GENERAL_CHANNEL_ID
 from storage.xp_store import xp_store
 from storage.season_store import season_store
 from utils.persistence import (
@@ -146,9 +146,11 @@ class FirstMessageCog(commands.Cog):
                 logger.exception(
                     "[season] Impossible d'enregistrer la récompense premier message"
                 )
-        await message.channel.send(
-            f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 400 XP !",
-        )
+        # The winner keeps the 400 XP, even if the first message was in #général.
+        if message.channel.id != GENERAL_CHANNEL_ID:
+            await message.channel.send(
+                f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 400 XP !",
+            )
         await self._save_state()
         logger.info(
             "[FirstMessage] %s a gagné le challenge du premier message", message.author

@@ -116,6 +116,9 @@ TOP_MSG_ROLE_ID = 1406412171965104208
 TOP_VC_ROLE_ID = 1406412383878119485
 MVP_ROLE_ID = 1406412507433795595
 
+# Les annonces sélectionnées ne doivent plus être publiées dans #général.
+GENERAL_CHANNEL_ID: int = 1400552164979507263
+
 ANNOUNCE_CHANNEL_ID: int = SETTINGS.announce_channel_id
 """Salon utilisé pour les annonces de la machine à sous."""
 

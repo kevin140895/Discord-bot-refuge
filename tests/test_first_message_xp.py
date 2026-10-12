@@ -18,7 +18,8 @@ def test_daily_reset_is_scheduled_at_8am_paris():
 
 
 @pytest.mark.asyncio
-async def test_first_message_awards_xp_once(tmp_path, monkeypatch):
+@pytest.mark.parametrize("channel_id, should_announce", [(fm.GENERAL_CHANNEL_ID, False), (987654321, True)])
+async def test_first_message_awards_xp_once(tmp_path, monkeypatch, channel_id, should_announce):
     class FixedDatetime(datetime):
         @classmethod
         def now(cls, tz=None):
@@ -38,7 +39,7 @@ async def test_first_message_awards_xp_once(tmp_path, monkeypatch):
     message = SimpleNamespace(
         author=SimpleNamespace(bot=False, id=1, mention="@user"),
         guild=SimpleNamespace(id=123),
-        channel=SimpleNamespace(send=AsyncMock()),
+        channel=SimpleNamespace(id=channel_id, send=AsyncMock()),
     )
 
     with patch.object(fm.tasks.Loop, "start", lambda self, *a, **k: None):
@@ -50,5 +51,6 @@ async def test_first_message_awards_xp_once(tmp_path, monkeypatch):
     await cog.on_message(message)  # second call should not add XP
 
     add_xp.assert_awaited_once_with(1, 400, guild_id=123, source="message")
-    assert message.channel.send.await_count == 1
+    assert message.channel.send.await_count == int(should_announce)
+    assert cog.winner_id == 1
     assert cog.first_message_claimed is True

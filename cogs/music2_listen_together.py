@@ -8,7 +8,7 @@ from typing import Any
 import discord
 from discord.ext import commands, tasks
 
-from config import RADIO_VC_ID
+from config import GENERAL_CHANNEL_ID, RADIO_VC_ID
 
 
 logger = logging.getLogger(__name__)
@@ -227,6 +227,11 @@ class Music2ListenTogetherCog(commands.Cog):
                 return
 
             await self._cleanup_stale_messages(channel)
+            if LISTEN_TOGETHER_CHANNEL_ID == GENERAL_CHANNEL_ID:
+                # Clean up an active invitation, but never publish a new one
+                # in #général. The music playback and join logic stay intact.
+                await self._delete_announcement()
+                return
             state = self._current_state()
             if state is None:
                 await self._delete_announcement()

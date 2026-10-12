@@ -14,6 +14,7 @@ from storage.roulette_store import RouletteStore
 from ..xp import award_xp, add_xp_boost
 from config import (
     ANNOUNCE_CHANNEL_ID,
+    GENERAL_CHANNEL_ID,
     ROLE_NOTIFICATION as NOTIF_ROLE_ID,
     MACHINE_A_SOUS_ROLE_ID as ROLE_ID,
     MACHINE_A_SOUS_CHANNEL_ID as CHANNEL_ID,
@@ -508,7 +509,9 @@ class MachineASousCog(commands.Cog):
         self.maintenance_loop.start()
 
     async def _post_state_message(self, opened: bool):
-        """Announce the open/closed state in the announcement channel."""
+        """Announce state only outside #général; the game schedule remains active."""
+        if ANNOUNCE_CHANNEL_ID == GENERAL_CHANNEL_ID:
+            return
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
             logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")
@@ -589,7 +592,9 @@ class MachineASousCog(commands.Cog):
             logger.error("[MachineASous] Post state message fail: %s", e)
 
     async def _ensure_state_message(self, opened: bool):
-        """Ensure a state message exists and matches the current status."""
+        """Keep the state panel synchronized, except for announcements in #général."""
+        if ANNOUNCE_CHANNEL_ID == GENERAL_CHANNEL_ID:
+            return
         ch = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if not isinstance(ch, (discord.TextChannel, discord.Thread)):
             logger.warning("[MachineASous] ANNOUNCE_CHANNEL_ID invalide.")

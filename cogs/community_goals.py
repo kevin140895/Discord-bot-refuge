@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import ANNOUNCE_CHANNEL_ID
+from config import ANNOUNCE_CHANNEL_ID, GENERAL_CHANNEL_ID
 from services.community_goal_automation import community_goal_automation_service
 from storage.community_goal_store import ACTIVE_STATUS, community_goal_store
 from storage.season_store import season_store
@@ -60,7 +60,7 @@ class CommunityGoalsCog(commands.Cog):
         )
 
     async def _announcement_channel(self) -> discord.TextChannel | discord.Thread | None:
-        if ANNOUNCE_CHANNEL_ID <= 0:
+        if ANNOUNCE_CHANNEL_ID <= 0 or ANNOUNCE_CHANNEL_ID == GENERAL_CHANNEL_ID:
             return None
         channel = self.bot.get_channel(ANNOUNCE_CHANNEL_ID)
         if channel is None:
@@ -69,6 +69,8 @@ class CommunityGoalsCog(commands.Cog):
             except discord.HTTPException:
                 return None
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return None
+        if channel.id == GENERAL_CHANNEL_ID:
             return None
         return channel
 
