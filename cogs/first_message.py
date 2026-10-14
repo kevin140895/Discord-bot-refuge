@@ -10,7 +10,7 @@ from datetime import date, datetime, time
 import discord
 from discord.ext import commands, tasks
 
-from config import DATA_DIR, GENERAL_CHANNEL_ID
+from config import DATA_DIR
 from storage.xp_store import xp_store
 from storage.season_store import season_store
 from utils.persistence import (
@@ -23,6 +23,7 @@ from utils.timezones import PARIS_TZ
 logger = logging.getLogger(__name__)
 
 FIRST_WIN_FILE = os.path.join(DATA_DIR, "first_win.json")
+FIRST_MESSAGE_REACTION = "🏆"
 ensure_dir(DATA_DIR)
 
 
@@ -146,12 +147,18 @@ class FirstMessageCog(commands.Cog):
                 logger.exception(
                     "[season] Impossible d'enregistrer la récompense premier message"
                 )
-        # The winner keeps the 400 XP, even if the first message was in #général.
-        if message.channel.id != GENERAL_CHANNEL_ID:
-            await message.channel.send(
-                f"🎉 Félicitations {message.author.mention}, tu es le premier de la journée et tu gagnes 400 XP !",
-            )
+        # Conserver la récompense et son état même si Discord refuse la réaction.
         await self._save_state()
+        try:
+            await message.add_reaction(FIRST_MESSAGE_REACTION)
+        except discord.HTTPException as exc:
+            logger.warning(
+                "[FirstMessage] Réaction impossible sur le message %s du salon %s "
+                "(les 400 XP restent attribués) : %s",
+                message.id,
+                message.channel.id,
+                exc,
+            )
         logger.info(
             "[FirstMessage] %s a gagné le challenge du premier message", message.author
         )
