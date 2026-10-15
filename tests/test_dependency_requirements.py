@@ -84,9 +84,10 @@ def test_music2_uses_known_good_youtube_runtime():
 
     # Keep the provider plugin reproducible while avoiding the old architecture
     # that cloned and ran the JavaScript provider inside the bot container.
-    assert "bgutil-ytdlp-pot-provider==1.3.1" in pot_lock
-    assert "130635912e2450757438f72068b900076ac1a62d9f26a00afbe6f2ab258e8b25" in pot_lock
-    assert "e62b21f9b2e4479d59af87a8900387c34892e8d7fdb223f266749a90e0be22de" in pot_lock
+    assert "bgutil-ytdlp-pot-provider==2.0.2" in pot_lock
+    assert "4f488008d25a715837df79472aad06ea052d20e14ad3a02609bbb0fbd746b8be" in pot_lock
+    assert "a127b20c4757edb33f88061afb01220829d1b340638cf638a293065577a000b4" in pot_lock
+    assert "bgutil-ytdlp-pot-provider==1.3.1" not in pot_lock
     assert "requirements-youtube-pot.txt" in dockerfile
     assert "--require-hashes -r requirements-youtube-pot.txt" in dockerfile
 
