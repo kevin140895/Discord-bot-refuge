@@ -1,6 +1,6 @@
 # Deno is downloaded in an isolated build stage so curl/unzip never reach the
 # runtime image. The release and archive checksums are pinned deliberately.
-FROM python:3.11-slim AS deno-fetcher
+FROM python:3.14-slim AS deno-fetcher
 
 ARG TARGETARCH
 ARG DENO_VERSION=2.9.5
@@ -30,7 +30,7 @@ RUN set -eux; \
     deno --version
 
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ARG APP_UID=10001
 ARG APP_GID=10001
